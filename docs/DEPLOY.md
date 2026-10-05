@@ -237,7 +237,12 @@ exten => 9000,1,NoOp(Entering ARI Stasis app)
 (`9000` is the extension the DialForge Node app actually controls via ARI -
 this is what the agent panel's WebRTC softphone ultimately uses.)
 
-Edit `/etc/asterisk/http.conf`, confirm/add under `[general]`:
+Edit `/etc/asterisk/http.conf` - **edit the existing `[general]` section in
+place, don't paste a second `[general]` below it.** `make samples` already
+created one (with `bindaddr=127.0.0.1`), and Asterisk only reads the *first*
+`[general]` in this file - a second one is silently ignored, leaving the HTTP
+server disabled. Remove/comment the stock `bindaddr=127.0.0.1` line, so the
+file ends up with exactly one `[general]` containing:
 ```ini
 [general]
 enabled=yes
@@ -251,6 +256,14 @@ tlsprivatekey=/etc/asterisk/keys/dialforge.key
 ```
 (The cert files don't exist yet - section 6 creates them. Asterisk will fail
 to start TLS until then; that's expected at this point.)
+
+After section 6 (once the cert exists), verify it actually took effect:
+```
+sudo asterisk -rx "http show status"
+```
+It must say `Server Enabled and Bound to 0.0.0.0:8088` **and**
+`HTTPS Server Enabled and Bound to 0.0.0.0:8089`, and list `/static/...`
+under Enabled URIs. `Server Disabled` means a duplicate `[general]` (above).
 
 **The AWS NAT fix** (section 0's gotcha) - edit `/etc/asterisk/rtp.conf`,
 find/add the `[ice_host_candidates]` section:
@@ -344,15 +357,42 @@ sudo asterisk -rx "core show version"   # confirm it came back up with TLS enabl
 ```
 
 **Test the Phase-0 milestone before going any further**: Asterisk ships a
-static file server (enabled via `enablestatic=yes` above) - get a minimal
-JsSIP test page (ask if you don't have one handy; the original project's
-lives at `ari-hello-world`'s predecessor, a simple two-tab register-and-call
-page) onto `/var/lib/asterisk/static-http/`, then open
-`https://your-new-hostname.example.com:8089/static/test.html` in two browser
-tabs, register as `1001` and `1002`, and confirm a call connects with audio
-both ways. **Don't move on to the app layer until this works** - it's much
+static file server (enabled via `enablestatic=yes` above). The test page is
+`phase0/test.html` in this repo - a two-tab register-and-call JsSIP page with
+no credentials inside (you type them into the page at test time). Copy it up
+(from your PC, Git Bash):
+```
+scp -i <your-key>.pem phase0/test.html ubuntu@<YOUR ELASTIC IP>:/tmp/
+```
+then on the server:
+```
+sudo mv /tmp/test.html /var/lib/asterisk/static-http/
+sudo chown asterisk:asterisk /var/lib/asterisk/static-http/test.html
+```
+Open `https://your-new-hostname.example.com:8089/static/test.html` in two
+browser windows (Chrome normal + Incognito works well on one PC; headphones
+avoid echo). Fill in the hostname, extension (`1001` / `1002`), SIP password
+from `pjsip.conf`, TURN IP/user/password from `turnserver.conf`, and
+**leave "Force TURN relay only" unticked for the first test**. Register both,
+call from one, click **Answer** in the other within 20s (`Dial()` timeout),
+and confirm audio both ways. Check `sudo asterisk -rx "pjsip show contacts"`
+lists both. **Don't move on to the app layer until this works** - it's much
 easier to debug WebRTC/NAT/TURN issues in isolation than mixed in with the
 Node app.
+
+Once the direct test passes, repeat with **"Force TURN relay only" ticked**
+in both windows - this proves coturn works from a browser, which real users
+on strict corporate/mobile networks will depend on.
+
+Phase-0 troubleshooting (all hit for real on the DialForge_Testing rebuild):
+
+| Symptom | Cause / fix |
+|---|---|
+| Page won't load, `http show status` says `Server Disabled` | Duplicate `[general]` in `http.conf` (section 4) |
+| Browser console: `ERR_NAME_NOT_RESOLVED` for the hostname | Local DNS cached "doesn't exist" from before the DDNS record was created - `ipconfig /flushdns` + Chrome `chrome://net-internals/#dns` → Clear host cache |
+| Clicking Call does nothing for 20-40s, or callee rings but never answers | Browser slow at ICE gathering (VPN/VirtualBox/Hyper-V adapters on Windows). `test.html` already works around this by sending after the first usable candidate or 3s - make sure the server has the current version (hard-refresh with Ctrl+Shift+R) |
+| Call "connects" but no audio; SIP trace (`pjsip set logger on`) shows `c=IN IP4 0.0.0.0` / `m=audio 9` with no `a=candidate` lines, and Asterisk logs "placed on hold" | Browser produced zero ICE candidates - almost always "Force TURN relay only" ticked while the browser's TURN login fails (wrong TURN user/password typed). Untick it, or fix the credentials; `chrome://webrtc-internals` → `icecandidateerror` shows the code (`401` = bad credentials, `701` = TURN unreachable) |
+| `Unable to find a codec translation path (ulaw/opus)` warnings | Harmless as long as both legs negotiate `ulaw` (they do with the endpoint config above) |
 
 ---
 
