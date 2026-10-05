@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>DialForge — Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/jssip@3/dist/jssip.min.js"></script>
+<style>
+  :root {
+    --primary: #0d9488;
+    --primary-light: #14b8a6;
+    --primary-dark: #0f766e;
+    --ink: #0f2027;
+    --bg: #eef2f6;
+    --card: #ffffff;
+    --border: #e7edf3;
+    --text: #0f172a;
+    --muted: #6b7a90;
+    --available: #16a34a;
+    --break: #d97706;
+    --acw: #ea580c;
+    --handle: #7c3aed;
+    --shadow: 0 1px 2px rgba(15,23,42,0.04), 0 4px 16px rgba(15,23,42,0.06);
+    --shadow-lg: 0 8px 30px rgba(15,23,42,0.12);
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Inter', 'Segoe UI', sans-serif; margin: 0; background: var(--bg); color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  svg { display: block; }
+
+  #topbar {
+    background: linear-gradient(120deg, var(--ink) 0%, var(--primary-dark) 100%);
+    color: white; display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px; box-shadow: var(--shadow-lg);
+  }
+  #topbar .logo { display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 800; letter-spacing: 0.3px; }
+  #topbar .logo .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--primary-light); box-shadow: 0 0 12px var(--primary-light); }
+  #topbar .right { display: flex; align-items: center; gap: 18px; }
+
+  #timer { font-variant-numeric: tabular-nums; font-size: 14px; opacity: 0.85; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+
+  #statusPill {
+    padding: 8px 16px 8px 12px; border-radius: 24px; font-weight: 600; font-size: 13px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.15); color: white; display: flex; align-items: center; gap: 8px;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  #statusPill:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
+  #statusPill .dotwrap { width: 9px; height: 9px; border-radius: 50%; background: white; position: relative; }
+  #statusPill .dotwrap.pulse::after {
+    content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid white;
+    opacity: 0.6; animation: pulse 1.6s ease-out infinite;
+  }
+  @keyframes pulse { 0% { transform: scale(0.6); opacity: 0.7; } 100% { transform: scale(1.8); opacity: 0; } }
+
+  #statusMenu {
+    position: absolute; right: 0; background: white; color: var(--text); border-radius: 10px;
+    box-shadow: var(--shadow-lg); margin-top: 8px; display: none; z-index: 10; min-width: 190px;
+    overflow: hidden; border: 1px solid var(--border);
+  }
+  #statusMenu div { padding: 11px 16px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 10px; transition: background 0.1s; }
+  #statusMenu div:hover { background: var(--bg); }
+
+  button { cursor: pointer; font-family: inherit; }
+  #logoutBtn {
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); color: white;
+    padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px;
+    transition: background 0.15s;
+  }
+  #logoutBtn:hover { background: rgba(255,255,255,0.16); }
+
+  #whoami { font-size: 13px; opacity: 0.9; font-weight: 500; }
+
+  #layout { display: flex; gap: 20px; padding: 22px; max-width: 1400px; margin: 0 auto; }
+  #main { flex: 1; min-width: 0; }
+  #sidepanel {
+    width: 340px; background: var(--card); border-radius: 14px; border: 1px solid var(--border);
+    padding: 16px; height: fit-content; box-shadow: var(--shadow); position: sticky; top: 22px;
+  }
+
+  .tiles { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+  .tile {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 16px 18px; flex: 1; min-width: 155px; box-shadow: var(--shadow);
+    display: flex; align-items: center; gap: 14px; transition: transform 0.15s ease;
+  }
+  .tile:hover { transform: translateY(-2px); }
+  .tile .icon {
+    width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .tile .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; }
+  .tile .value { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile.login .icon { background: #dcfce7; } .tile.login .value { color: var(--available); }
+  .tile.talk .icon { background: #ccfbf1; } .tile.talk .value { color: var(--primary); }
+  .tile.break .icon { background: #fef3c7; } .tile.break .value { color: var(--break); }
+  .tile.handle .icon { background: #ede9fe; } .tile.handle .value { color: var(--handle); }
+  .tile.acw .icon { background: #ffedd5; } .tile.acw .value { color: var(--acw); }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 20px; box-shadow: var(--shadow); }
+  .card h3 { margin: 0 0 14px 0; font-size: 15px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+
+  input, select {
+    padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; margin-right: 8px;
+    font-family: inherit; font-size: 13px; background: #fbfcfe; transition: border-color 0.15s;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--primary-light); }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--primary-light), var(--primary-dark)); color: white; border: none;
+    padding: 9px 18px; border-radius: 8px; font-weight: 600; font-size: 13px; box-shadow: 0 2px 8px rgba(13,148,136,0.3);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-call {
+    background: linear-gradient(135deg, #22c55e, #16a34a); color: white; border: none; padding: 7px 14px;
+    border-radius: 7px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px;
+    box-shadow: 0 2px 6px rgba(22,163,74,0.3);
+  }
+
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 10px 8px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 700; text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.4px; }
+  tbody tr { transition: background 0.1s; }
+  tbody tr:hover { background: #f8fafc; }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .tab { padding: 6px 13px; border-radius: 7px; font-size: 12.5px; background: var(--bg); color: var(--muted); font-weight: 600; transition: all 0.15s; }
+  .tab.active { background: var(--primary); color: white; box-shadow: 0 2px 6px rgba(13,148,136,0.35); }
+
+  #callLog { max-height: 420px; overflow-y: auto; padding-right: 4px; }
+  .log-entry { padding: 11px 4px; border-bottom: 1px solid var(--border); font-size: 13px; display: flex; gap: 10px; }
+  .log-entry .call-icon { width: 30px; height: 30px; border-radius: 50%; background: #f1f5f9; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .log-entry .num { font-weight: 700; }
+  .log-entry .meta { color: var(--muted); font-size: 11.5px; display: flex; justify-content: space-between; margin-top: 2px; }
+  .disp-ended { color: var(--available); font-weight: 600; }
+  .disp-none { color: #cbd5e1; font-weight: 600; }
+
+  #status { font-size: 13px; margin-top: 10px; min-height: 18px; font-weight: 500; }
+
+  #connectOverlay {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
+    background: linear-gradient(160deg, var(--ink) 0%, var(--primary-dark) 130%);
+  }
+  #connectCard {
+    background: var(--card); border-radius: 16px; padding: 32px 30px; width: 100%; max-width: 380px;
+    box-shadow: var(--shadow-lg);
+  }
+  #connectCard h2 { margin: 0 0 4px; font-size: 19px; font-weight: 800; }
+  #connectCard .sub { font-size: 13px; color: var(--muted); margin-bottom: 22px; }
+  #connectCard label { display: block; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); margin: 14px 0 6px; }
+  #connectCard input, #connectCard select { width: 100%; margin-right: 0; box-sizing: border-box; }
+  #connectCard .btn-primary { width: 100%; justify-content: center; margin-top: 22px; padding: 11px; font-size: 14px; }
+  #connStatus { font-size: 13px; margin-top: 12px; min-height: 18px; font-weight: 500; text-align: center; }
+
+  #dialpadCard { margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  #dialDisplay {
+    width: 100%; box-sizing: border-box; text-align: center; font-size: 18px; font-weight: 700;
+    letter-spacing: 1px; padding: 10px; margin-bottom: 10px; font-variant-numeric: tabular-nums;
+  }
+  .dialgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+  .dialkey {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 0;
+    font-size: 17px; font-weight: 700; color: var(--text); cursor: pointer; transition: background 0.1s;
+    font-family: inherit;
+  }
+  .dialkey:hover { background: #e2e8f0; }
+  .dialrow-actions { display: flex; gap: 8px; }
+  .dialrow-actions .btn-call { flex: 1; justify-content: center; padding: 10px 0; font-size: 13px; }
+  .btn-backspace {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px;
+    color: var(--muted); cursor: pointer; font-family: inherit; font-weight: 600;
+  }
+  .btn-backspace:hover { background: #e2e8f0; }
+
+  #incomingCallPopup {
+    display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.55); z-index: 100;
+    align-items: center; justify-content: center; backdrop-filter: blur(2px);
+  }
+  #incomingCallCard {
+    background: var(--card); border-radius: 20px; padding: 34px 30px; width: 100%; max-width: 320px;
+    text-align: center; box-shadow: var(--shadow-lg); animation: popIn 0.2s ease-out;
+  }
+  @keyframes popIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .incoming-icon {
+    width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, var(--primary-light), var(--primary-dark));
+    display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; animation: pulse 1.4s ease-out infinite;
+    box-shadow: 0 0 0 rgba(13,148,136,0.5);
+  }
+  .incoming-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
+  #incomingNumber { font-size: 22px; font-weight: 800; margin: 6px 0 26px; font-variant-numeric: tabular-nums; }
+  .incoming-actions { display: flex; justify-content: center; gap: 26px; }
+  .incoming-btn {
+    width: 56px; height: 56px; border-radius: 50%; border: none; display: flex; align-items: center;
+    justify-content: center; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.25); transition: transform 0.1s;
+  }
+  .incoming-btn:hover { transform: translateY(-2px); }
+  .incoming-btn.accept { background: linear-gradient(135deg, #22c55e, #16a34a); }
+  .incoming-btn.reject { background: linear-gradient(135deg, #ef4444, #b91c1c); }
+
+  #queuePopup, #dispositionPopup {
+    display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.55); z-index: 100;
+    align-items: center; justify-content: center; backdrop-filter: blur(2px);
+  }
+  .popup-card {
+    background: var(--card); border-radius: 18px; padding: 28px 26px; width: 100%; max-width: 340px;
+    box-shadow: var(--shadow-lg); animation: popIn 0.2s ease-out;
+  }
+  .popup-card h3 { margin: 0 0 4px; font-size: 17px; font-weight: 800; }
+  .popup-card .sub { font-size: 12.5px; color: var(--muted); margin-bottom: 16px; }
+  .popup-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+  .queue-option {
+    display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+    cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 700; color: var(--text);
+    transition: background 0.1s;
+  }
+  .queue-option:hover { background: #e2e8f0; }
+  .queue-campaign { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+
+  #hangupBtn {
+    background: linear-gradient(135deg, #ef4444, #b91c1c); color: white; border: none;
+    padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex;
+    align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(185,28,28,0.4);
+  }
+</style>
+</head>
+<body>
+
+<div id="connectOverlay">
+  <div id="connectCard">
+    <h2>Connect Your Line</h2>
+    <div class="sub">Choose the extension for this shift</div>
+
+    <label>Extension</label>
+    <input id="connExtension" placeholder="e.g. 1001">
+
+    <button class="btn-primary" onclick="connectExtension()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+      Connect
+    </button>
+    <div id="connStatus"></div>
+  </div>
+</div>
+
+<audio id="remoteAudio" autoplay></audio>
+
+<div id="incomingCallPopup">
+  <div id="incomingCallCard">
+    <div class="incoming-icon">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+    </div>
+    <div class="incoming-label">Incoming Call</div>
+    <div id="incomingNumber">—</div>
+    <div class="incoming-actions">
+      <button id="rejectCallBtn" class="incoming-btn reject">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4"><path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11z"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+      </button>
+      <button id="acceptCallBtn" class="incoming-btn accept">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="queuePopup">
+  <div class="popup-card">
+    <h3>Select a Queue</h3>
+    <div class="sub">Pick which queue you're working before going Available</div>
+    <div id="queuePopupList" class="popup-list"></div>
+  </div>
+</div>
+
+<div id="dispositionPopup">
+  <div class="popup-card">
+    <h3>Call Outcome</h3>
+    <div class="sub">What happened on that call?</div>
+    <div id="dispositionList" class="popup-list"></div>
+  </div>
+</div>
+
+<div id="topbar" style="display:none">
+  <div class="logo"><span class="dot"></span> DialForge</div>
+  <div class="right">
+    <div id="timer">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      <span id="timerText">00:00:00</span>
+    </div>
+    <button id="hangupBtn" onclick="hangupCall()" style="display:none;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4"><path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11z"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+      Hang up
+    </button>
+    <div style="position: relative;">
+      <button id="statusPill" style="background: rgba(100,116,139,0.9);" onclick="toggleStatusMenu()">
+        <span class="dotwrap" id="pillDot"></span>
+        <span id="pillText">Offline</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div id="statusMenu">
+        <div onclick="setStatus('available')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+          Available
+        </div>
+        <div onclick="setStatus('break', 'Meeting')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>
+          Break — Meeting
+        </div>
+        <div onclick="setStatus('break', 'Lunch')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2"><path d="M3 2v7a4 4 0 004 4h1a4 4 0 004-4V2M7 2v11M17 2v20M17 8h3a2 2 0 012 2v1a2 2 0 01-2 2h-3"/></svg>
+          Break — Lunch
+        </div>
+        <div onclick="setStatus('break', 'Tea Break')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2"><path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8zM6 1v3M10 1v3M14 1v3"/></svg>
+          Break — Tea Break
+        </div>
+      </div>
+    </div>
+    <div id="whoami"></div>
+    <button id="logoutBtn" onclick="doLogout()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+      Log out
+    </button>
+  </div>
+</div>
+
+<div id="layout" style="display:none">
+  <div id="main">
+    <div class="tiles">
+      <div class="tile login">
+        <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.2"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg></div>
+        <div><div class="label">Login Time</div><div class="value" id="tileLogin">00:00:00</div></div>
+      </div>
+      <div class="tile talk">
+        <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg></div>
+        <div><div class="label">Talk Time</div><div class="value" id="tileTalk">00:00:00</div></div>
+      </div>
+      <div class="tile break">
+        <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2.2"><path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/></svg></div>
+        <div><div class="label">Break Time</div><div class="value" id="tileBreak">00:00:00</div></div>
+      </div>
+      <div class="tile handle">
+        <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div>
+        <div><div class="label">Handle Time</div><div class="value" id="tileHandle">00:00:00</div></div>
+      </div>
+      <div class="tile acw">
+        <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2.2"><path d="M14 3v4a1 1 0 001 1h4M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2zM9 17h6M9 13h6"/></svg></div>
+        <div><div class="label">ACW Time</div><div class="value" id="tileAcw">00:00:00</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M12.5 7a4 4 0 11-8 0 4 4 0 018 0zM20 8v6M23 11h-6"/></svg> Add Lead</h3>
+      <input id="leadName" placeholder="Name (optional)">
+      <input id="leadPhone" placeholder="Phone / extension">
+      <button class="btn-primary" onclick="addLead()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+        Add Lead
+      </button>
+      <div id="status"></div>
+    </div>
+
+    <div class="card">
+      <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg> Leads</h3>
+      <table id="leadsTable">
+        <thead><tr><th>Name</th><th>Phone</th><th>Status</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="sidepanel">
+    <div id="dialpadCard">
+      <input id="dialDisplay" placeholder="Enter number">
+      <div class="dialgrid">
+        <button class="dialkey" onclick="dialDigit('1')">1</button>
+        <button class="dialkey" onclick="dialDigit('2')">2</button>
+        <button class="dialkey" onclick="dialDigit('3')">3</button>
+        <button class="dialkey" onclick="dialDigit('4')">4</button>
+        <button class="dialkey" onclick="dialDigit('5')">5</button>
+        <button class="dialkey" onclick="dialDigit('6')">6</button>
+        <button class="dialkey" onclick="dialDigit('7')">7</button>
+        <button class="dialkey" onclick="dialDigit('8')">8</button>
+        <button class="dialkey" onclick="dialDigit('9')">9</button>
+        <button class="dialkey" onclick="dialDigit('*')">*</button>
+        <button class="dialkey" onclick="dialDigit('0')">0</button>
+        <button class="dialkey" onclick="dialDigit('#')">#</button>
+      </div>
+      <div class="dialrow-actions">
+        <button class="btn-backspace" onclick="dialBackspace()">⌫</button>
+        <button class="btn-call" onclick="dialCall()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.3"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+          Call
+        </button>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" data-filter="all" onclick="filterCalls('all', this)">All</div>
+      <div class="tab" data-filter="ended" onclick="filterCalls('ended', this)">Completed</div>
+      <div class="tab" data-filter="none" onclick="filterCalls('none', this)">No Answer</div>
+    </div>
+    <div id="callLog"></div>
+  </div>
+</div>
+
+<script>
+let me = null;
+let statsPollHandle = null;
+let allCalls = [];
+let currentFilter = 'all';
+let ua = null;
+let jssipSession = null;
+let expectingOwnCallLeg = false;
+let activeLeadId = null;
+let currentQueueId = null;
+let currentQueueName = null;
+
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'turn:3.7.241.104:3478', username: 'dialforge', credential: 'DialForge_Turn_Pass!' },
+  { urls: 'turns:dialforge.ddnsfree.com:443?transport=tcp', username: 'dialforge', credential: 'DialForge_Turn_Pass!' },
+];
+
+const LEAD_STATUS_LABELS = {
+  new: 'New',
+  interested: 'Interested',
+  not_interested: 'Not Interested',
+  callback: 'Callback',
+  no_answer: 'No Answer',
+  do_not_call: 'Do Not Call',
+};
+
+const PHONE_ICON = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2.3"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>`;
+
+async function checkAuth() {
+  const res = await fetch('/auth/me');
+  if (!res.ok) { window.location.href = '/login.html'; return; }
+  me = await res.json();
+  if (me.role !== 'agent') { window.location.href = '/login.html'; return; }
+  document.getElementById('whoami').textContent = `${me.username} · ext ${me.extensionName}`;
+  if (me.extensionName) document.getElementById('connExtension').value = me.extensionName;
+  loadLeads();
+  loadCalls();
+  loadStats();
+  statsPollHandle = setInterval(loadStats, 5000);
+
+  // Remember the last extension chosen and auto-reconnect on reload - a
+  // full page refresh always wipes the live WebRTC/SIP registration (true
+  // for any softphone), but there's no reason to also make the human
+  // retype/re-click every time.
+  const savedExt = localStorage.getItem('dialforge_extension');
+  if (savedExt) document.getElementById('connExtension').value = savedExt;
+  if (savedExt) {
+    setConnStatus('Reconnecting...');
+    connectExtension();
+  }
+}
+
+async function connectExtension() {
+  const ext = document.getElementById('connExtension').value.trim();
+  if (!ext) { setConnStatus('Extension is required', true); return; }
+  setConnStatus('Connecting...');
+
+  const res = await fetch(`/agent/extension-credentials/${encodeURIComponent(ext)}`);
+  if (!res.ok) { setConnStatus('Unknown extension', true); return; }
+  const { sipPassword } = await res.json();
+
+  const socket = new JsSIP.WebSocketInterface('wss://dialforge.ddnsfree.com:8089/ws');
+  ua = new JsSIP.UA({
+    sockets: [socket],
+    uri: `sip:${ext}@dialforge.ddnsfree.com`,
+    password: sipPassword,
+    pcConfig: { iceServers: ICE_SERVERS },
+  });
+
+  ua.on('registered', () => {
+    setConnStatus('Registered as ' + ext);
+    document.getElementById('connectOverlay').style.display = 'none';
+    document.getElementById('topbar').style.display = 'flex';
+    document.getElementById('layout').style.display = 'flex';
+    // The backend just committed this as our session's real extension
+    // (see /agent/extension-credentials) - reflect that here too, since
+    // it can differ from the extension our login account was assigned.
+    me.extensionName = ext;
+    document.getElementById('whoami').textContent = `${me.username} · ext ${ext}`;
+    localStorage.setItem('dialforge_extension', ext);
+  });
+  ua.on('registrationFailed', (e) => setConnStatus('Registration failed: ' + e.cause, true));
+
+  ua.on('newRTCSession', (data) => {
+    jssipSession = data.session;
+    document.getElementById('hangupBtn').style.display = 'inline-flex';
+    jssipSession.on('ended', () => { document.getElementById('hangupBtn').style.display = 'none'; jssipSession = null; });
+    jssipSession.on('failed', () => { document.getElementById('hangupBtn').style.display = 'none'; jssipSession = null; });
+
+    function attachAudio(pc) {
+      if (!pc) return;
+      pc.addEventListener('track', (e) => {
+        document.getElementById('remoteAudio').srcObject = e.streams[0];
+      });
+    }
+    jssipSession.on('peerconnection', (pcData) => attachAudio(pcData.peerconnection));
+    if (jssipSession.connection) attachAudio(jssipSession.connection);
+
+    if (data.originator === 'remote') {
+      if (expectingOwnCallLeg) {
+        // This ring is our own click2call agent leg, not an unsolicited
+        // call - the agent already chose to place the call, so answer
+        // it immediately rather than showing them a popup for their own action.
+        expectingOwnCallLeg = false;
+        jssipSession.answer({ mediaConstraints: { audio: true, video: false } });
+        // Once this outbound call ends, prompt for the real outcome - the
+        // actual "preview dialing" workflow, not a predictive auto-dialer.
+        jssipSession.on('ended', () => {
+          if (activeLeadId) { showDispositionPopup(activeLeadId); activeLeadId = null; }
+        });
+      } else {
+        // A genuine inbound call - whether it auto-answers or shows a real
+        // Accept/Reject popup is set per-campaign by the admin.
+        fetch('/agent/call-policy').then((r) => r.json()).then(({ autoAnswer }) => {
+          if (autoAnswer) {
+            jssipSession.answer({ mediaConstraints: { audio: true, video: false } });
+          } else {
+            showIncomingCallPopup(jssipSession);
+          }
+        });
+      }
+    }
+  });
+
+  ua.start();
+}
+
+function dialDigit(d) {
+  const el = document.getElementById('dialDisplay');
+  el.value += d;
+}
+
+function dialBackspace() {
+  const el = document.getElementById('dialDisplay');
+  el.value = el.value.slice(0, -1);
+}
+
+function dialCall() {
+  const number = document.getElementById('dialDisplay').value.trim();
+  if (!number) return;
+  callLead(null, number);
+  document.getElementById('dialDisplay').value = '';
+}
+
+function showIncomingCallPopup(session) {
+  const number = (session.remote_identity && session.remote_identity.uri && session.remote_identity.uri.user) || 'Unknown number';
+  document.getElementById('incomingNumber').textContent = number;
+  document.getElementById('incomingCallPopup').style.display = 'flex';
+
+  function closePopup() {
+    document.getElementById('incomingCallPopup').style.display = 'none';
+  }
+
+  session.on('ended', closePopup);
+  session.on('failed', closePopup);
+
+  document.getElementById('acceptCallBtn').onclick = () => {
+    session.answer({ mediaConstraints: { audio: true, video: false } });
+    closePopup();
+  };
+  document.getElementById('rejectCallBtn').onclick = () => {
+    session.terminate();
+    closePopup();
+  };
+}
+
+function hangupCall() {
+  if (jssipSession) jssipSession.terminate();
+  document.getElementById('hangupBtn').style.display = 'none';
+}
+
+function setConnStatus(msg, isError) {
+  const el = document.getElementById('connStatus');
+  el.textContent = msg;
+  el.style.color = isError ? '#dc2626' : '#16a34a';
+}
+
+async function doLogout() {
+  clearInterval(statsPollHandle);
+  if (jssipSession) jssipSession.terminate();
+  if (ua) ua.stop();
+  currentQueueId = null;
+  currentQueueName = null;
+  localStorage.removeItem('dialforge_extension');
+  await fetch('/auth/logout', { method: 'POST' });
+  window.location.href = '/login.html';
+}
+
+function toggleStatusMenu() {
+  const menu = document.getElementById('statusMenu');
+  menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+}
+
+async function setStatus(status, reason) {
+  document.getElementById('statusMenu').style.display = 'none';
+  if (status === 'available' && !currentQueueId) {
+    // First time going Available this session - must pick a queue first.
+    // Once chosen, it's remembered for the rest of the session so later
+    // Available clicks (e.g. coming back from a break) don't re-ask.
+    openQueuePopup();
+    return;
+  }
+  await postStatus(status, reason);
+}
+
+async function postStatus(status, reason) {
+  await fetch('/agent/status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, reason, queueId: currentQueueId }),
+  });
+  renderStatusPill(status, reason, currentQueueName);
+  loadStats();
+}
+
+// The single source of truth for how the pill looks, used both for an
+// immediate optimistic update (the agent just clicked something) and for
+// the periodic sync from the server's real status (below) - without the
+// latter, a server-initiated change (the automatic ACW transition after
+// a call ends) would never reach the browser at all, and the pill would
+// keep showing "Available" while the agent is actually paused in the
+// real queue - confusing and, worse, invisible to the agent.
+function renderStatusPill(status, reason, queueName) {
+  const pill = document.getElementById('statusPill');
+  const dot = document.getElementById('pillDot');
+  const textEl = document.getElementById('pillText');
+  if (status === 'available') {
+    textEl.textContent = queueName ? `Available - ${queueName}` : 'Available';
+    pill.style.background = 'rgba(22,163,74,0.9)';
+    dot.classList.add('pulse');
+  } else if (status === 'break') {
+    textEl.textContent = reason || 'Break';
+    pill.style.background = 'rgba(217,119,6,0.9)';
+    dot.classList.remove('pulse');
+  } else if (status === 'acw') {
+    textEl.textContent = 'ACW - Wrapping Up';
+    pill.style.background = 'rgba(234,88,12,0.9)';
+    dot.classList.remove('pulse');
+  } else {
+    textEl.textContent = 'Offline';
+    pill.style.background = 'rgba(100,116,139,0.9)';
+    dot.classList.remove('pulse');
+  }
+}
+
+async function openQueuePopup() {
+  const res = await fetch('/queues');
+  const queues = await res.json();
+  const list = document.getElementById('queuePopupList');
+  list.innerHTML = '';
+  if (queues.length === 0) {
+    list.innerHTML = '<div style="color: var(--muted); text-align:center; padding: 12px; font-size: 13px;">No active queues configured yet - ask your admin to create one.</div>';
+  }
+  for (const q of queues) {
+    const btn = document.createElement('button');
+    btn.className = 'queue-option';
+    btn.innerHTML = `<span>${q.name}</span><span class="queue-campaign">${q.campaign_name}</span>`;
+    btn.onclick = () => selectQueue(q.id, q.name);
+    list.appendChild(btn);
+  }
+  document.getElementById('queuePopup').style.display = 'flex';
+}
+
+async function selectQueue(queueId, queueName) {
+  currentQueueId = queueId;
+  currentQueueName = queueName;
+  document.getElementById('queuePopup').style.display = 'none';
+  await postStatus('available', null);
+}
+
+function showDispositionPopup(leadId) {
+  const list = document.getElementById('dispositionList');
+  list.innerHTML = '';
+  for (const [value, label] of Object.entries(LEAD_STATUS_LABELS)) {
+    const btn = document.createElement('button');
+    btn.className = 'queue-option';
+    btn.innerHTML = `<span>${label}</span>`;
+    btn.onclick = () => submitDisposition(leadId, value);
+    list.appendChild(btn);
+  }
+  document.getElementById('dispositionPopup').style.display = 'flex';
+}
+
+async function submitDisposition(leadId, status) {
+  await fetch(`/leads/${leadId}/disposition`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  document.getElementById('dispositionPopup').style.display = 'none';
+  loadLeads();
+}
+
+function fmtDuration(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return [h, m, s].map((n) => String(n).padStart(2, '0')).join(':');
+}
+
+async function loadStats() {
+  const res = await fetch('/agent/stats');
+  if (!res.ok) return;
+  const stats = await res.json();
+  document.getElementById('tileLogin').textContent = fmtDuration(stats.loginSeconds);
+  document.getElementById('tileTalk').textContent = fmtDuration(stats.talkSeconds);
+  document.getElementById('tileBreak').textContent = fmtDuration(stats.breakSeconds);
+  document.getElementById('tileHandle').textContent = fmtDuration(stats.handleSeconds);
+  document.getElementById('tileAcw').textContent = fmtDuration(stats.acwSeconds);
+  document.getElementById('timerText').textContent = fmtDuration(stats.loginSeconds);
+  if (stats.currentStatus) {
+    currentQueueName = stats.currentQueueName || currentQueueName;
+    renderStatusPill(stats.currentStatus, stats.currentReason, stats.currentQueueName);
+  }
+}
+
+async function loadLeads() {
+  const res = await fetch('/leads');
+  const leads = await res.json();
+  const tbody = document.querySelector('#leadsTable tbody');
+  tbody.innerHTML = '';
+  for (const lead of leads) {
+    const tr = document.createElement('tr');
+    const isDnc = lead.status === 'do_not_call';
+    const callBtn = isDnc
+      ? `<span style="color: var(--muted); font-size:12px; font-weight:600;">Do Not Call</span>`
+      : `<button class="btn-call" onclick="callLead(${lead.id}, '${lead.phone}')">${PHONE_ICON} Call</button>`;
+    tr.innerHTML = `
+      <td>${lead.name || '—'}</td>
+      <td>${lead.phone}</td>
+      <td>${LEAD_STATUS_LABELS[lead.status] || lead.status}</td>
+      <td>${callBtn}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+async function addLead() {
+  const name = document.getElementById('leadName').value;
+  const phone = document.getElementById('leadPhone').value;
+  if (!phone) { setStatusMsg('Phone is required', true); return; }
+  const res = await fetch('/leads', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, phone }),
+  });
+  if (res.ok) {
+    setStatusMsg('Lead added.');
+    document.getElementById('leadName').value = '';
+    document.getElementById('leadPhone').value = '';
+    loadLeads();
+  } else {
+    setStatusMsg('Failed to add lead.', true);
+  }
+}
+
+async function callLead(leadId, phone) {
+  setStatusMsg(`Calling ${phone}...`);
+  // The next inbound ring on our own extension is going to be OUR call
+  // reaching us back (click2call's agent leg) - auto-answer that one,
+  // as opposed to a genuine unsolicited customer call ringing in.
+  expectingOwnCallLeg = true;
+  activeLeadId = leadId || null;
+  const res = await fetch('/calls/click2call', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ toNumber: phone, leadId }),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    setStatusMsg(`Call started (id ${data.callId}) — check your softphone.`);
+  } else {
+    setStatusMsg('Call failed: ' + (data.error || 'unknown error'), true);
+  }
+  setTimeout(() => { loadCalls(); loadStats(); }, 2000);
+}
+
+async function loadCalls() {
+  const res = await fetch('/calls');
+  allCalls = await res.json();
+  renderCallLog();
+}
+
+function filterCalls(filter, el) {
+  currentFilter = filter;
+  document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+  el.classList.add('active');
+  renderCallLog();
+}
+
+function renderCallLog() {
+  const container = document.getElementById('callLog');
+  container.innerHTML = '';
+  const filtered = allCalls.filter((c) => {
+    if (currentFilter === 'all') return true;
+    if (currentFilter === 'ended') return c.disposition === 'ended';
+    if (currentFilter === 'none') return !c.disposition;
+    return true;
+  });
+  for (const c of filtered) {
+    const div = document.createElement('div');
+    div.className = 'log-entry';
+    const dispClass = c.disposition === 'ended' ? 'disp-ended' : 'disp-none';
+    div.innerHTML = `
+      <div class="call-icon">${PHONE_ICON}</div>
+      <div style="flex:1">
+        <div class="num">${c.to_number}</div>
+        <div class="meta">
+          <span>${new Date(c.start_time).toLocaleString()}</span>
+          <span class="${dispClass}">${c.disposition || 'no answer'}</span>
+        </div>
+      </div>
+    `;
+    container.appendChild(div);
+  }
+  if (filtered.length === 0) {
+    container.innerHTML = '<div style="color: var(--muted); font-size: 13px; padding: 16px 0; text-align:center;">No calls yet</div>';
+  }
+}
+
+function setStatusMsg(msg, isError) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.style.color = isError ? '#dc2626' : '#16a34a';
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#statusPill') && !e.target.closest('#statusMenu')) {
+    document.getElementById('statusMenu').style.display = 'none';
+  }
+});
+
+checkAuth();
+</script>
+</body>
+</html>

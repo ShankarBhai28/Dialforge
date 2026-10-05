@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>DialForge Login</title>
+<style>
+  body { font-family: sans-serif; max-width: 350px; margin: 100px auto; padding: 0 15px; }
+  input { width: 100%; padding: 8px; margin: 6px 0; box-sizing: border-box; }
+  button { width: 100%; padding: 8px; margin-top: 10px; }
+  #error { color: #c00; font-size: 13px; min-height: 18px; }
+</style>
+</head>
+<body>
+<h2>DialForge Login</h2>
+<input id="username" placeholder="Username">
+<input id="password" type="password" placeholder="Password">
+<button onclick="doLogin()">Log in</button>
+<div id="error"></div>
+
+<script>
+async function doLogin() {
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+  const res = await fetch('/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    document.getElementById('error').textContent = data.error || 'Login failed';
+    return;
+  }
+  window.location.href = data.user.role === 'admin' ? '/admin.html' : '/agent.html';
+}
+
+document.getElementById('password').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') doLogin();
+});
+</script>
+</body>
+</html>

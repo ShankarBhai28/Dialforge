@@ -1,0 +1,1472 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>DialForge — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --primary: #0d9488;
+    --primary-light: #14b8a6;
+    --primary-dark: #0f766e;
+    --ink: #0f2027;
+    --bg: #eef2f6;
+    --card: #ffffff;
+    --border: #e7edf3;
+    --text: #0f172a;
+    --muted: #6b7a90;
+    --available: #16a34a;
+    --break: #d97706;
+    --acw: #ea580c;
+    --handle: #7c3aed;
+    --offline: #94a3b8;
+    --shadow: 0 1px 2px rgba(15,23,42,0.04), 0 4px 16px rgba(15,23,42,0.06);
+    --shadow-lg: 0 8px 30px rgba(15,23,42,0.12);
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Inter', 'Segoe UI', sans-serif; margin: 0; background: var(--bg); color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  svg { display: block; }
+
+  #shell { display: flex; min-height: 100vh; }
+
+  #sidebar {
+    width: 232px; flex-shrink: 0; background: linear-gradient(165deg, var(--ink) 0%, var(--primary-dark) 130%);
+    color: white; display: flex; flex-direction: column; padding: 20px 14px; position: sticky; top: 0; height: 100vh;
+  }
+  #sidebar .logo { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 800; padding: 6px 10px 24px; }
+  #sidebar .logo .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--primary-light); box-shadow: 0 0 12px var(--primary-light); }
+  .navitem {
+    display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 9px; font-size: 13.5px;
+    font-weight: 600; color: rgba(255,255,255,0.72); cursor: pointer; transition: background 0.15s, color 0.15s; margin-bottom: 3px;
+  }
+  .navitem:hover { background: rgba(255,255,255,0.06); color: white; }
+  .navitem.active { background: rgba(255,255,255,0.14); color: white; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1); }
+  .navitem svg { flex-shrink: 0; }
+  #sidebar .spacer { flex: 1; }
+  #sidebar .footer { padding: 12px 10px; border-top: 1px solid rgba(255,255,255,0.12); }
+  #whoami { font-size: 12.5px; opacity: 0.85; font-weight: 500; margin-bottom: 10px; }
+  #logoutBtn {
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); color: white; width: 100%;
+    padding: 9px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; display: flex; align-items: center;
+    justify-content: center; gap: 7px; transition: background 0.15s; cursor: pointer; font-family: inherit;
+  }
+  #logoutBtn:hover { background: rgba(255,255,255,0.16); }
+
+  #content { flex: 1; min-width: 0; padding: 26px 32px; max-width: 1300px; }
+  .pagehead { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px; }
+  .pagehead h1 { font-size: 21px; font-weight: 800; margin: 0; }
+  .pagehead .sub { font-size: 13px; color: var(--muted); margin-top: 3px; }
+  .refresh-btn {
+    background: white; border: 1px solid var(--border); color: var(--muted); padding: 7px 13px; border-radius: 8px;
+    font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    font-family: inherit; box-shadow: var(--shadow); transition: color 0.15s, border-color 0.15s;
+  }
+  .refresh-btn:hover { color: var(--primary); border-color: var(--primary-light); }
+
+  .section { display: none; }
+  .section.active { display: block; }
+
+  .tiles { display: flex; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
+  .tile {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 16px 18px; flex: 1; min-width: 190px; box-shadow: var(--shadow);
+    display: flex; align-items: center; gap: 14px; transition: transform 0.15s ease;
+  }
+  .tile:hover { transform: translateY(-2px); }
+  .tile .icon { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .tile .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; }
+  .tile .value { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile.agents .icon { background: #dbeafe; } .tile.agents .value { color: #2563eb; }
+  .tile.avail .icon { background: #dcfce7; } .tile.avail .value { color: var(--available); }
+  .tile.calls .icon { background: #ccfbf1; } .tile.calls .value { color: var(--primary); }
+  .tile.handle .icon { background: #ede9fe; } .tile.handle .value { color: var(--handle); }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 20px; box-shadow: var(--shadow); }
+  .card h3 { margin: 0 0 14px 0; font-size: 15px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+
+  input, select {
+    padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; margin-right: 8px;
+    font-family: inherit; font-size: 13px; background: #fbfcfe; transition: border-color 0.15s;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--primary-light); }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--primary-light), var(--primary-dark)); color: white; border: none;
+    padding: 9px 18px; border-radius: 8px; font-weight: 600; font-size: 13px; box-shadow: 0 2px 8px rgba(13,148,136,0.3);
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-family: inherit;
+  }
+
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 10px 8px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 700; text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.4px; }
+  tbody tr { transition: background 0.1s; }
+  tbody tr:hover { background: #f8fafc; }
+
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+  .badge .bdot { width: 7px; height: 7px; border-radius: 50%; }
+  .badge.available { background: #dcfce7; color: #15803d; } .badge.available .bdot { background: var(--available); }
+  .badge.break { background: #fef3c7; color: #b45309; } .badge.break .bdot { background: var(--break); }
+  .badge.acw { background: #ffedd5; color: #c2410c; } .badge.acw .bdot { background: var(--acw); }
+  .badge.offline { background: #f1f5f9; color: #64748b; } .badge.offline .bdot { background: var(--offline); }
+
+  .role-pill { padding: 3px 9px; border-radius: 12px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; }
+  .role-pill.admin { background: #ede9fe; color: #6d28d9; }
+  .role-pill.agent { background: #dbeafe; color: #1d4ed8; }
+
+  #status { font-size: 13px; margin-top: 10px; min-height: 18px; font-weight: 500; }
+  .muted-cell { color: var(--offline); }
+
+  .row-actions { display: flex; gap: 6px; }
+  .btn-icon {
+    background: white; border: 1px solid var(--border); color: var(--muted); padding: 5px 10px; border-radius: 6px;
+    font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; transition: color 0.15s, border-color 0.15s;
+  }
+  .btn-icon:hover { color: var(--primary); border-color: var(--primary-light); }
+  .btn-icon.danger:hover { color: #dc2626; border-color: #fca5a5; }
+
+  .report-tabs { display: flex; gap: 6px; margin-bottom: 18px; }
+  .report-tab {
+    padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer;
+    background: var(--card); color: var(--muted); border: 1px solid var(--border); transition: all 0.15s;
+  }
+  .report-tab.active { background: var(--primary); color: white; border-color: var(--primary); }
+  .report-panel { display: none; }
+  .report-panel.active { display: block; }
+  .filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .filter-row label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+
+  .hour-bar-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 12px; }
+  .hour-label { width: 54px; color: var(--muted); font-weight: 600; flex-shrink: 0; }
+  .hour-bar-track { flex: 1; background: var(--bg); border-radius: 5px; height: 18px; overflow: hidden; display: flex; }
+  .hour-bar-answered { background: var(--available); height: 100%; }
+  .hour-bar-missed { background: #fca5a5; height: 100%; }
+  .hour-count { width: 110px; text-align: right; color: var(--muted); font-weight: 600; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<div id="shell">
+  <div id="sidebar">
+    <div class="logo"><span class="dot"></span> DialForge</div>
+
+    <div class="navitem active" data-section="dashboard" onclick="showSection('dashboard', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+      Dashboard
+    </div>
+    <div class="navitem" data-section="live" onclick="showSection('live', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 010 20M12 2a10 10 0 000 20"/></svg>
+      Live Agents
+    </div>
+    <div class="navitem" data-section="users" onclick="showSection('users', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+      Users
+    </div>
+    <div class="navitem" data-section="calllog" onclick="showSection('calllog', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+      Call Log
+    </div>
+    <div class="navitem" data-section="queues" onclick="showSection('queues', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      Queues
+    </div>
+    <div class="navitem" data-section="campaigns" onclick="showSection('campaigns', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 3h18v4H3zM3 10h12v4H3zM3 17h7v4H3z"/></svg>
+      Campaigns
+    </div>
+    <div class="navitem" data-section="leads" onclick="showSection('leads', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM16 11h6M19 8v6"/></svg>
+      Leads
+    </div>
+    <div class="navitem" data-section="numbers" onclick="showSection('numbers', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+      DID Numbers
+    </div>
+    <div class="navitem" data-section="reports" onclick="showSection('reports', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 3v18h18M7 14l4-4 3 3 5-6"/></svg>
+      Reports
+    </div>
+
+    <div class="spacer"></div>
+    <div class="footer">
+      <div id="whoami"></div>
+      <button id="logoutBtn" onclick="doLogout()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        Log out
+      </button>
+    </div>
+  </div>
+
+  <div id="content">
+
+    <div class="section active" id="section-dashboard">
+      <div class="pagehead">
+        <div><h1>Dashboard</h1><div class="sub">Overview across all agents, today</div></div>
+        <button class="refresh-btn" onclick="loadDashboard()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+      <div class="tiles">
+        <div class="tile agents">
+          <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></div>
+          <div><div class="label">Total Agents</div><div class="value" id="dashTotalAgents">—</div></div>
+        </div>
+        <div class="tile avail">
+          <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></div>
+          <div><div class="label">Available Now</div><div class="value" id="dashAvailable">—</div></div>
+        </div>
+        <div class="tile calls">
+          <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg></div>
+          <div><div class="label">Calls Today</div><div class="value" id="dashCallsToday">—</div></div>
+        </div>
+        <div class="tile handle">
+          <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div>
+          <div><div class="label">Avg Handle Time</div><div class="value" id="dashAvgHandle">—</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 010 20M12 2a10 10 0 000 20"/></svg> Live snapshot</h3>
+        <div style="font-size: 13px; color: var(--muted);">Auto-refreshes every 10 seconds. Switch to <b>Live Agents</b> for per-agent detail.</div>
+      </div>
+    </div>
+
+    <div class="section" id="section-live">
+      <div class="pagehead">
+        <div><h1>Live Agents</h1><div class="sub">Real-time status and active calls</div></div>
+        <button class="refresh-btn" onclick="loadLiveAgents()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <table id="liveTable" style="margin: 0;">
+          <thead><tr><th style="padding: 14px 12px 14px 18px;">Agent</th><th>Extension</th><th>Status</th><th>Queue</th><th>Since</th><th>Active Call</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section" id="section-users">
+      <div class="pagehead">
+        <div><h1>Users</h1><div class="sub">Create and manage agent / admin accounts</div></div>
+      </div>
+      <div class="card">
+        <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M12.5 7a4 4 0 11-8 0 4 4 0 018 0zM20 8v6M23 11h-6"/></svg> Create User Account</h3>
+        <input id="newUsername" placeholder="Username">
+        <input id="newPassword" type="password" placeholder="Password">
+        <select id="newRole" onchange="toggleExtensionField()">
+          <option value="agent">agent</option>
+          <option value="admin">admin</option>
+        </select>
+        <select id="newExtension"></select>
+        <button class="btn-primary" onclick="createUser()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+          Create
+        </button>
+        <div id="status"></div>
+      </div>
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <h3 style="padding: 18px 18px 0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg> All Users</h3>
+        <table id="usersTable" style="margin: 10px 0 0;">
+          <thead><tr><th style="padding-left: 18px;">Username</th><th>Role</th><th>Extension</th><th>Created</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section" id="section-calllog">
+      <div class="pagehead">
+        <div><h1>Call Log</h1><div class="sub">All calls across every agent</div></div>
+        <button class="refresh-btn" onclick="loadCalls()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <table id="callsTable" style="margin: 0;">
+          <thead><tr><th style="padding: 14px 12px 14px 18px;">From</th><th>To</th><th>Disposition</th><th>Start</th><th>Answer</th><th>End</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section" id="section-queues">
+      <div class="pagehead">
+        <div><h1>Queues</h1><div class="sub">Reusable ring-groups — a campaign references one, plus its own CLI and ring behavior</div></div>
+        <button class="refresh-btn" onclick="loadQueues()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+
+      <div class="card">
+        <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 010 20M12 2a10 10 0 000 20"/></svg> Create Queue</h3>
+        <input id="newQueueName" placeholder="Queue name">
+        <select id="newQueueStrategy">
+          <option value="ringall">Ring All</option>
+          <option value="random">Random</option>
+          <option value="leastrecent">Least Recent</option>
+          <option value="fewestcalls">Fewest Calls</option>
+        </select>
+        <input id="newQueueTimeout" type="number" value="30" style="width: 80px;" title="Wait timeout (seconds)">
+        <select id="newQueueAnnounce" title="Announce position/wait to caller">
+          <option value="no">Announce: No</option>
+          <option value="yes">Announce: Yes</option>
+        </select>
+        <input id="newQueueRetry" type="number" value="1" style="width: 60px;" title="Retry (seconds)">
+        <select id="newQueueTimeoutRestart" title="Reset timeout on retry">
+          <option value="yes">Timeout Restart: Yes</option>
+          <option value="no">Timeout Restart: No</option>
+        </select>
+        <button class="btn-primary" id="queueSubmitBtn" onclick="createQueue()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+          Create Queue
+        </button>
+        <button class="refresh-btn" id="queueCancelBtn" onclick="cancelQueueEdit()" style="display:none;">Cancel</button>
+        <div id="queueStatus"></div>
+      </div>
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <h3 style="padding: 18px 18px 0;">Queues</h3>
+        <table id="queuesTable" style="margin: 10px 0 0;">
+          <thead><tr><th style="padding-left:18px;">Name</th><th>Ringing Strategy</th><th>Wait Timeout</th><th>Announce</th><th>Retry</th><th>Timeout Restart</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section" id="section-campaigns">
+      <div class="pagehead">
+        <div><h1>Campaigns</h1><div class="sub">A campaign references a queue, plus its outbound CLI and auto-answer behavior</div></div>
+      </div>
+
+      <div class="card">
+        <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M3 3h18v4H3zM3 10h12v4H3zM3 17h7v4H3z"/></svg> Create Campaign</h3>
+        <input id="newCampaignName" placeholder="Campaign name">
+        <select id="newCampaignQueue"></select>
+        <input id="newCampaignCallerId" placeholder="Outbound Caller ID (DID)">
+        <select id="newCampaignStatus">
+          <option value="active">Status: Active</option>
+          <option value="paused">Status: Paused</option>
+        </select>
+        <label style="display:inline-flex; align-items:center; gap:6px; font-size:13px; margin-left:4px;">
+          <input type="checkbox" id="newCampaignAutoAnswer" style="width:auto; margin:0;"> Auto Answer
+        </label>
+        <button class="btn-primary" id="campaignSubmitBtn" onclick="createCampaign()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+          Create Campaign
+        </button>
+        <button class="refresh-btn" id="campaignCancelBtn" onclick="cancelCampaignEdit()" style="display:none;">Cancel</button>
+        <div id="campaignStatus"></div>
+      </div>
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <h3 style="padding: 18px 18px 0;">Campaigns</h3>
+        <table id="campaignsTable" style="margin: 10px 0 0;">
+          <thead><tr><th style="padding-left:18px;">Name</th><th>Queue</th><th>Outbound Caller ID</th><th>Auto Answer</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <div class="section" id="section-numbers">
+      <div class="pagehead">
+        <div><h1>DID Numbers</h1><div class="sub">Which campaign an inbound number actually routes to — a real call only reaches the right queue if its dialed number is mapped here</div></div>
+        <button class="refresh-btn" onclick="loadDids()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+
+      <div class="card">
+        <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg> Add DID</h3>
+        <input id="newDidNumber" placeholder="e.g. 8065098690">
+        <select id="newDidCampaign"></select>
+        <button class="btn-primary" id="didSubmitBtn" onclick="createDid()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+          Save
+        </button>
+        <button class="refresh-btn" id="didCancelBtn" onclick="cancelDidEdit()" style="display:none;">Cancel</button>
+        <div id="didStatus"></div>
+      </div>
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <h3 style="padding: 18px 18px 0;">Numbers</h3>
+        <table id="didsTable" style="margin: 10px 0 0;">
+          <thead><tr><th style="padding-left:18px;">Number</th><th>Campaign</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section" id="section-leads">
+      <div class="pagehead">
+        <div><h1>Leads</h1><div class="sub">Import, browse, and track leads across every campaign</div></div>
+        <button class="refresh-btn" onclick="loadLeadsAdmin()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+
+      <div class="card">
+        <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M3 3h18v4H3zM3 10h12v4H3zM3 17h7v4H3z"/></svg> Create List</h3>
+        <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 12px;">A list is a named batch of leads within a campaign (e.g. "October cold list") - a CSV import always lands in one of these, not loose into the campaign.</div>
+        <input id="newListName" placeholder="List name">
+        <select id="newListCampaign"></select>
+        <button class="btn-primary" id="listSubmitBtn" onclick="createList()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+          Create List
+        </button>
+        <button class="refresh-btn" id="listCancelBtn" onclick="cancelListEdit()" style="display:none;">Cancel</button>
+        <div id="listStatus"></div>
+      </div>
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <h3 style="padding: 18px 18px 0;">Lists</h3>
+        <table id="listsTable" style="margin: 10px 0 0;">
+          <thead><tr><th style="padding-left:18px;">Name</th><th>Campaign</th><th>Leads</th><th>Created</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg> Import Leads</h3>
+        <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 12px;">CSV needs a <code>phone</code> column (and optionally <code>name</code>). Rows already in the list's campaign, or duplicated within the file, are skipped automatically.</div>
+        <select id="importList"></select>
+        <input type="file" id="importFile" accept=".csv" style="padding: 7px;">
+        <button class="btn-primary" onclick="importLeadsCsv()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+          Import
+        </button>
+        <button class="refresh-btn" onclick="window.open('/admin/leads/csv-template', '_blank')">Download Template</button>
+        <div id="importStatus"></div>
+      </div>
+
+      <div class="card" id="editLeadCard" style="display:none;">
+        <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit Lead</h3>
+        <input id="editLeadName" placeholder="Name">
+        <input id="editLeadPhone" placeholder="Phone">
+        <select id="editLeadCampaign"></select>
+        <select id="editLeadList" onchange="syncLeadCampaignFromList()"></select>
+        <select id="editLeadStatus"></select>
+        <button class="btn-primary" onclick="saveLeadEdit()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>
+          Save Changes
+        </button>
+        <button class="refresh-btn" onclick="cancelLeadEdit()">Cancel</button>
+        <div id="editLeadStatusMsg"></div>
+      </div>
+
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <h3 style="padding: 18px 18px 0;">All Leads</h3>
+        <table id="leadsAdminTable" style="margin: 10px 0 0;">
+          <thead><tr><th style="padding-left:18px;">Name</th><th>Phone</th><th>Campaign</th><th>List</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section" id="section-reports">
+      <div class="pagehead">
+        <div><h1>Reports</h1><div class="sub">Campaign, agent, call, and hourly performance</div></div>
+      </div>
+
+      <div class="report-tabs">
+        <div class="report-tab active" data-report="campaign" onclick="showReportTab('campaign', this)">Campaign</div>
+        <div class="report-tab" data-report="agent" onclick="showReportTab('agent', this)">Agent</div>
+        <div class="report-tab" data-report="call" onclick="showReportTab('call', this)">Call</div>
+        <div class="report-tab" data-report="hourly" onclick="showReportTab('hourly', this)">Hourly</div>
+      </div>
+
+      <div class="report-panel active" id="report-campaign">
+        <div class="card">
+          <div class="filter-row">
+            <label>From</label><input type="date" id="campaignFrom">
+            <label>To</label><input type="date" id="campaignTo">
+            <button class="refresh-btn" onclick="loadCampaignReport()">Apply</button>
+            <button class="refresh-btn" onclick="exportCampaignReport()">Export CSV</button>
+          </div>
+          <table id="campaignReportTable">
+            <thead><tr><th style="padding-left:18px;">Campaign</th><th>Leads</th><th>Calls</th><th>Answered</th><th>Not Answered</th><th>Abandoned</th><th>Answer Rate</th><th>Avg Talk</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="report-panel" id="report-agent">
+        <div class="card">
+          <div class="filter-row">
+            <label>From</label><input type="date" id="agentFrom">
+            <label>To</label><input type="date" id="agentTo">
+            <button class="refresh-btn" onclick="loadAgentReport()">Apply</button>
+            <button class="refresh-btn" onclick="exportAgentReport()">Export CSV</button>
+          </div>
+          <table id="agentReportTable">
+            <thead><tr><th style="padding-left:18px;">Agent</th><th>Login Time</th><th>Calls</th><th>Answered</th><th>Talk Time</th><th>Avg Talk</th><th>Callbacks</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="report-panel" id="report-call">
+        <div class="card">
+          <div class="filter-row">
+            <label>From</label><input type="date" id="callFrom">
+            <label>To</label><input type="date" id="callTo">
+            <select id="callCampaignFilter"><option value="">All Campaigns</option></select>
+            <select id="callDispositionFilter">
+              <option value="">All Dispositions</option>
+              <option value="ended">Ended</option>
+              <option value="abandoned">Abandoned</option>
+            </select>
+            <button class="refresh-btn" onclick="loadCallReport()">Apply</button>
+            <button class="refresh-btn" onclick="exportCallReport()">Export CSV</button>
+          </div>
+          <table id="callReportTable">
+            <thead><tr><th style="padding-left:18px;">Direction</th><th>From</th><th>To</th><th>Campaign</th><th>Disposition</th><th>Start</th><th>Answer</th><th>End</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="report-panel" id="report-hourly">
+        <div class="card">
+          <div class="filter-row">
+            <label>Date</label><input type="date" id="hourlyDate">
+            <button class="refresh-btn" onclick="loadHourlyReport()">Apply</button>
+            <button class="refresh-btn" onclick="exportHourlyReport()">Export CSV</button>
+          </div>
+          <div id="hourlyChart"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+let liveAgentsPoll = null;
+let dashboardPoll = null;
+let reportsInitialized = false;
+
+async function checkAuth() {
+  const res = await fetch('/auth/me');
+  if (!res.ok) { window.location.href = '/login.html'; return; }
+  const me = await res.json();
+  if (me.role !== 'admin') { window.location.href = '/login.html'; return; }
+  document.getElementById('whoami').textContent = me.username;
+  loadExtensions();
+  loadUsers();
+  loadCalls();
+  loadDashboard();
+  loadCampaigns();
+  dashboardPoll = setInterval(loadDashboard, 10000);
+}
+
+async function doLogout() {
+  clearInterval(dashboardPoll);
+  clearInterval(liveAgentsPoll);
+  await fetch('/auth/logout', { method: 'POST' });
+  window.location.href = '/login.html';
+}
+
+function showSection(name, el) {
+  document.querySelectorAll('.section').forEach((s) => s.classList.remove('active'));
+  document.querySelectorAll('.navitem').forEach((n) => n.classList.remove('active'));
+  document.getElementById('section-' + name).classList.add('active');
+  el.classList.add('active');
+
+  clearInterval(liveAgentsPoll);
+  if (name === 'live') {
+    loadLiveAgents();
+    liveAgentsPoll = setInterval(loadLiveAgents, 5000);
+  }
+  if (name === 'reports' && !reportsInitialized) {
+    initReports();
+  }
+  if (name === 'leads') {
+    loadLists();
+    loadLeadsAdmin();
+  }
+  if (name === 'queues') {
+    loadQueues();
+  }
+  if (name === 'numbers') {
+    loadDids();
+  }
+}
+
+function fmtDuration(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return [h, m, s].map((n) => String(n).padStart(2, '0')).join(':');
+}
+
+async function loadDashboard() {
+  const res = await fetch('/admin/dashboard');
+  if (!res.ok) return;
+  const d = await res.json();
+  document.getElementById('dashTotalAgents').textContent = d.totalAgents;
+  document.getElementById('dashAvailable').textContent = d.availableNow;
+  document.getElementById('dashCallsToday').textContent = d.callsToday;
+  document.getElementById('dashAvgHandle').textContent = fmtDuration(d.avgHandleSeconds);
+}
+
+async function loadLiveAgents() {
+  const res = await fetch('/admin/live-agents');
+  if (!res.ok) return;
+  const agents = await res.json();
+  const tbody = document.querySelector('#liveTable tbody');
+  tbody.innerHTML = '';
+  for (const a of agents) {
+    const tr = document.createElement('tr');
+    let badge, since;
+    if (!a.status) {
+      badge = `<span class="badge offline"><span class="bdot"></span>Offline</span>`;
+      since = '<span class="muted-cell">—</span>';
+    } else if (a.status === 'available') {
+      badge = `<span class="badge available"><span class="bdot"></span>Available</span>`;
+    } else if (a.status === 'break') {
+      badge = `<span class="badge break"><span class="bdot"></span>Break${a.reason ? ' — ' + a.reason : ''}</span>`;
+    } else if (a.status === 'acw') {
+      badge = `<span class="badge acw"><span class="bdot"></span>ACW</span>`;
+    } else {
+      badge = `<span class="badge offline"><span class="bdot"></span>${a.status}</span>`;
+    }
+    if (a.started_at) {
+      since = new Date(a.started_at).toLocaleTimeString();
+    }
+    tr.innerHTML = `
+      <td style="padding-left: 18px; font-weight: 600;">${a.username}</td>
+      <td>${a.extension_name || '<span class="muted-cell">—</span>'}</td>
+      <td>${badge}</td>
+      <td>${a.queue_name || '<span class="muted-cell">—</span>'}</td>
+      <td>${since || '<span class="muted-cell">—</span>'}</td>
+      <td>${a.active_call_number ? a.active_call_number : '<span class="muted-cell">—</span>'}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (agents.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--muted); padding: 20px;">No agents found</td></tr>';
+  }
+}
+
+function toggleExtensionField() {
+  const role = document.getElementById('newRole').value;
+  document.getElementById('newExtension').style.display = role === 'agent' ? 'inline' : 'none';
+}
+
+async function loadExtensions() {
+  const res = await fetch('/admin/extensions');
+  const extensions = await res.json();
+  const select = document.getElementById('newExtension');
+  select.innerHTML = extensions.map((e) => `<option value="${e.id}">${e.name} (${e.label || ''})</option>`).join('');
+}
+
+async function loadUsers() {
+  const res = await fetch('/admin/users');
+  const users = await res.json();
+  const tbody = document.querySelector('#usersTable tbody');
+  tbody.innerHTML = '';
+  for (const u of users) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding-left: 18px; font-weight: 600;">${u.username}</td>
+      <td><span class="role-pill ${u.role}">${u.role}</span></td>
+      <td>${u.extension_name || '<span class="muted-cell">—</span>'}</td>
+      <td>${fmt(u.created_at)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+async function createUser() {
+  const username = document.getElementById('newUsername').value;
+  const password = document.getElementById('newPassword').value;
+  const role = document.getElementById('newRole').value;
+  const extensionId = document.getElementById('newExtension').value;
+  if (!username || !password) { setStatus('Username and password required', true); return; }
+
+  const res = await fetch('/admin/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password, role, extensionId: role === 'agent' ? extensionId : null }),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    setStatus(`Created ${role} account: ${username}`);
+    document.getElementById('newUsername').value = '';
+    document.getElementById('newPassword').value = '';
+    loadUsers();
+  } else {
+    setStatus('Failed: ' + (data.error || 'unknown error'), true);
+  }
+}
+
+async function loadCalls() {
+  const res = await fetch('/calls');
+  const calls = await res.json();
+  const tbody = document.querySelector('#callsTable tbody');
+  tbody.innerHTML = '';
+  for (const c of calls) {
+    const tr = document.createElement('tr');
+    const dispClass = c.disposition === 'ended' ? 'style="color:#15803d; font-weight:600;"' : 'style="color:#94a3b8; font-weight:600;"';
+    tr.innerHTML = `
+      <td style="padding-left: 18px; font-weight: 600;">${c.from_extension}</td>
+      <td>${c.to_number}</td>
+      <td ${dispClass}>${c.disposition || 'no answer'}</td>
+      <td>${fmt(c.start_time)}</td>
+      <td>${fmt(c.answer_time)}</td>
+      <td>${fmt(c.end_time)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (calls.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--muted); padding: 20px;">No calls yet</td></tr>';
+  }
+}
+
+function fmt(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleTimeString();
+}
+
+function setStatus(msg, isError) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.style.color = isError ? '#dc2626' : '#16a34a';
+}
+
+let campaignsCache = [];
+let editingCampaignId = null;
+
+async function loadCampaigns() {
+  await loadQueues();
+  const res = await fetch('/admin/campaigns');
+  const campaigns = await res.json();
+  campaignsCache = campaigns;
+  const tbody = document.querySelector('#campaignsTable tbody');
+  tbody.innerHTML = '';
+  for (const c of campaigns) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding-left: 18px; font-weight: 600;">${c.name}</td>
+      <td>${c.queue_name || '<span class="muted-cell">—</span>'}</td>
+      <td>${c.outbound_caller_id || '<span class="muted-cell">—</span>'}</td>
+      <td>${c.auto_answer ? 'Yes' : 'No'}</td>
+      <td><span class="role-pill ${c.status === 'active' ? 'agent' : 'admin'}">${c.status}</span></td>
+      <td class="row-actions">
+        <button class="btn-icon" onclick="editCampaign(${c.id})">Edit</button>
+        <button class="btn-icon danger" onclick="deleteCampaign(${c.id}, '${c.name.replace(/'/g, "\\'")}')">Delete</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (campaigns.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--muted); padding: 20px;">No campaigns yet - create one above.</td></tr>';
+  }
+
+  const didSelect = document.getElementById('newDidCampaign');
+  didSelect.innerHTML = '<option value="">No campaign</option>' + campaigns.map((c) => `<option value="${c.id}">${c.name}</option>`).join('');
+
+  const listCampaignSelect = document.getElementById('newListCampaign');
+  listCampaignSelect.innerHTML = campaigns.length
+    ? campaigns.map((c) => `<option value="${c.id}">${c.name}</option>`).join('')
+    : '<option value="">No campaigns yet</option>';
+
+  await loadDids();
+  await loadLists();
+  await loadLeadsAdmin();
+}
+
+function editCampaign(id) {
+  const c = campaignsCache.find((x) => x.id === id);
+  if (!c) return;
+  editingCampaignId = id;
+  document.getElementById('newCampaignName').value = c.name;
+  document.getElementById('newCampaignQueue').value = c.queue_id || '';
+  document.getElementById('newCampaignCallerId').value = c.outbound_caller_id || '';
+  document.getElementById('newCampaignStatus').value = c.status;
+  document.getElementById('newCampaignAutoAnswer').checked = !!c.auto_answer;
+  document.getElementById('campaignSubmitBtn').textContent = 'Save Changes';
+  document.getElementById('campaignCancelBtn').style.display = 'inline-flex';
+  document.getElementById('campaignStatus').textContent = '';
+}
+
+function cancelCampaignEdit() {
+  editingCampaignId = null;
+  document.getElementById('newCampaignName').value = '';
+  document.getElementById('newCampaignQueue').value = '';
+  document.getElementById('newCampaignCallerId').value = '';
+  document.getElementById('newCampaignStatus').value = 'active';
+  document.getElementById('newCampaignAutoAnswer').checked = false;
+  document.getElementById('campaignSubmitBtn').textContent = 'Create Campaign';
+  document.getElementById('campaignCancelBtn').style.display = 'none';
+  document.getElementById('campaignStatus').textContent = '';
+}
+
+async function deleteCampaign(id, name) {
+  if (!confirm(`Delete campaign "${name}"?`)) return;
+  const res = await fetch(`/admin/campaigns/${id}`, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    loadCampaigns();
+  } else {
+    alert(data.error || 'Delete failed');
+  }
+}
+
+async function importLeadsCsv() {
+  const listId = document.getElementById('importList').value;
+  const fileInput = document.getElementById('importFile');
+  const el = document.getElementById('importStatus');
+  if (!listId) { el.textContent = 'Create a list first.'; el.style.color = '#dc2626'; return; }
+  if (!fileInput.files[0]) { el.textContent = 'Choose a CSV file first.'; el.style.color = '#dc2626'; return; }
+
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  formData.append('listId', listId);
+
+  el.textContent = 'Importing...';
+  el.style.color = '#6b7a90';
+  const res = await fetch('/admin/leads/import', { method: 'POST', body: formData });
+  const data = await res.json();
+  if (res.ok) {
+    el.textContent = `Imported ${data.imported} of ${data.total} (${data.duplicates} duplicate, ${data.invalid} invalid).`;
+    el.style.color = '#16a34a';
+    fileInput.value = '';
+    loadLists();
+    loadLeadsAdmin();
+  } else {
+    el.textContent = 'Import failed: ' + (data.error || 'unknown error');
+    el.style.color = '#dc2626';
+  }
+}
+
+let listsCache = [];
+let editingListId = null;
+
+async function loadLists() {
+  const res = await fetch('/admin/lists');
+  const lists = await res.json();
+  listsCache = lists;
+  const tbody = document.querySelector('#listsTable tbody');
+  tbody.innerHTML = '';
+  for (const l of lists) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding-left: 18px; font-weight: 600;">${l.name}</td>
+      <td>${l.campaign_name || '<span class="muted-cell">—</span>'}</td>
+      <td>${l.lead_count}</td>
+      <td>${fmt(l.created_at)}</td>
+      <td class="row-actions">
+        <button class="btn-icon" onclick="editList(${l.id})">Edit</button>
+        <button class="btn-icon danger" onclick="deleteList(${l.id}, '${l.name.replace(/'/g, "\\'")}')">Delete</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (lists.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--muted); padding: 20px;">No lists yet - create one above.</td></tr>';
+  }
+
+  const importSelect = document.getElementById('importList');
+  importSelect.innerHTML = lists.length
+    ? lists.map((l) => `<option value="${l.id}">${l.name} (${l.campaign_name || 'no campaign'})</option>`).join('')
+    : '<option value="">No lists yet</option>';
+}
+
+function editList(id) {
+  const l = listsCache.find((x) => x.id === id);
+  if (!l) return;
+  editingListId = id;
+  document.getElementById('newListName').value = l.name;
+  document.getElementById('newListCampaign').value = l.campaign_id;
+  document.getElementById('listSubmitBtn').textContent = 'Save Changes';
+  document.getElementById('listCancelBtn').style.display = 'inline-flex';
+  document.getElementById('listStatus').textContent = '';
+}
+
+function cancelListEdit() {
+  editingListId = null;
+  document.getElementById('newListName').value = '';
+  document.getElementById('listSubmitBtn').textContent = 'Create List';
+  document.getElementById('listCancelBtn').style.display = 'none';
+  document.getElementById('listStatus').textContent = '';
+}
+
+async function createList() {
+  const name = document.getElementById('newListName').value.trim();
+  const campaignId = document.getElementById('newListCampaign').value || null;
+  const el = document.getElementById('listStatus');
+  if (!name) { el.textContent = 'List name is required'; el.style.color = '#dc2626'; return; }
+  if (!campaignId) { el.textContent = 'Create a campaign first'; el.style.color = '#dc2626'; return; }
+
+  if (editingListId) {
+    const res = await fetch(`/admin/lists/${editingListId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, campaignId }),
+    });
+    if (res.ok) {
+      cancelListEdit();
+      loadLists();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      el.textContent = data.error || 'Failed to save list';
+      el.style.color = '#dc2626';
+    }
+    return;
+  }
+
+  const res = await fetch('/admin/lists', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, campaignId }),
+  });
+  if (res.ok) {
+    el.textContent = `Created list: ${name}`;
+    el.style.color = '#16a34a';
+    document.getElementById('newListName').value = '';
+    loadLists();
+  } else {
+    el.textContent = 'Failed to create list';
+    el.style.color = '#dc2626';
+  }
+}
+
+async function deleteList(id, name) {
+  if (!confirm(`Delete list "${name}"?`)) return;
+  const res = await fetch(`/admin/lists/${id}`, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    loadLists();
+  } else {
+    alert(data.error || 'Delete failed');
+  }
+}
+
+const LEAD_STATUS_LABELS = {
+  new: 'New',
+  interested: 'Interested',
+  not_interested: 'Not Interested',
+  callback: 'Callback',
+  no_answer: 'No Answer',
+  do_not_call: 'Do Not Call',
+};
+
+let leadsCache = [];
+let editingLeadId = null;
+
+async function loadLeadsAdmin() {
+  const res = await fetch('/leads');
+  const leads = await res.json();
+  leadsCache = leads;
+  const tbody = document.querySelector('#leadsAdminTable tbody');
+  tbody.innerHTML = '';
+  for (const l of leads) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding-left: 18px; font-weight: 600;">${l.name || '<span class="muted-cell">—</span>'}</td>
+      <td>${l.phone}</td>
+      <td>${l.campaign_name || '<span class="muted-cell">Unassigned</span>'}</td>
+      <td>${l.list_name || '<span class="muted-cell">—</span>'}</td>
+      <td>${LEAD_STATUS_LABELS[l.status] || l.status}</td>
+      <td>${fmt(l.created_at)}</td>
+      <td class="row-actions">
+        <button class="btn-icon" onclick="editLead(${l.id})">Edit</button>
+        <button class="btn-icon danger" onclick="deleteLead(${l.id}, '${(l.phone || '').replace(/'/g, "\\'")}')">Delete</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (leads.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--muted); padding: 20px;">No leads yet.</td></tr>';
+  }
+}
+
+function editLead(id) {
+  const l = leadsCache.find((x) => x.id === id);
+  if (!l) return;
+  editingLeadId = id;
+  document.getElementById('editLeadName').value = l.name || '';
+  document.getElementById('editLeadPhone').value = l.phone;
+  document.getElementById('editLeadCampaign').innerHTML =
+    '<option value="">Unassigned</option>' + campaignsCache.map((c) => `<option value="${c.id}">${c.name}</option>`).join('');
+  document.getElementById('editLeadCampaign').value = l.campaign_id || '';
+  document.getElementById('editLeadList').innerHTML =
+    '<option value="">No list</option>' + listsCache.map((ls) => `<option value="${ls.id}" data-campaign="${ls.campaign_id}">${ls.name} (${ls.campaign_name || 'no campaign'})</option>`).join('');
+  document.getElementById('editLeadList').value = l.list_id || '';
+  document.getElementById('editLeadStatus').innerHTML = Object.entries(LEAD_STATUS_LABELS)
+    .map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+  document.getElementById('editLeadStatus').value = l.status;
+  document.getElementById('editLeadStatusMsg').textContent = '';
+  document.getElementById('editLeadCard').style.display = 'block';
+}
+
+function syncLeadCampaignFromList() {
+  const listSelect = document.getElementById('editLeadList');
+  const chosen = listSelect.options[listSelect.selectedIndex];
+  const campaignId = chosen ? chosen.getAttribute('data-campaign') : null;
+  if (campaignId) {
+    document.getElementById('editLeadCampaign').value = campaignId;
+  }
+}
+
+function cancelLeadEdit() {
+  editingLeadId = null;
+  document.getElementById('editLeadCard').style.display = 'none';
+}
+
+async function saveLeadEdit() {
+  const name = document.getElementById('editLeadName').value.trim();
+  const phone = document.getElementById('editLeadPhone').value.trim();
+  const campaignId = document.getElementById('editLeadCampaign').value || null;
+  const listId = document.getElementById('editLeadList').value || null;
+  const status = document.getElementById('editLeadStatus').value;
+  const el = document.getElementById('editLeadStatusMsg');
+  const res = await fetch(`/admin/leads/${editingLeadId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, phone, campaignId, listId, status }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    cancelLeadEdit();
+    loadLeadsAdmin();
+  } else {
+    el.textContent = data.error || 'Save failed';
+    el.style.color = '#dc2626';
+  }
+}
+
+async function deleteLead(id, phone) {
+  if (!confirm(`Delete lead "${phone}"?`)) return;
+  const res = await fetch(`/admin/leads/${id}`, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    loadLeadsAdmin();
+  } else {
+    alert(data.error || 'Delete failed');
+  }
+}
+
+let didsCache = [];
+let editingDidId = null;
+
+async function loadDids() {
+  const res = await fetch('/admin/dids');
+  const dids = await res.json();
+  didsCache = dids;
+  const tbody = document.querySelector('#didsTable tbody');
+  tbody.innerHTML = '';
+  for (const d of dids) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding-left: 18px; font-weight: 600;">${d.number}</td>
+      <td>${d.campaign_name || '<span class="muted-cell">Unassigned</span>'}</td>
+      <td class="row-actions">
+        <button class="btn-icon" onclick="editDid(${d.id})">Edit</button>
+        <button class="btn-icon danger" onclick="deleteDid(${d.id}, '${d.number}')">Delete</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (dids.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color: var(--muted); padding: 20px;">No DIDs yet - add one above.</td></tr>';
+  }
+}
+
+function editDid(id) {
+  const d = didsCache.find((x) => x.id === id);
+  if (!d) return;
+  editingDidId = id;
+  document.getElementById('newDidNumber').value = d.number;
+  document.getElementById('newDidNumber').disabled = true;
+  document.getElementById('newDidCampaign').value = d.campaign_id || '';
+  document.getElementById('didSubmitBtn').textContent = 'Save Changes';
+  document.getElementById('didCancelBtn').style.display = 'inline-flex';
+  document.getElementById('didStatus').textContent = '';
+}
+
+function cancelDidEdit() {
+  editingDidId = null;
+  document.getElementById('newDidNumber').value = '';
+  document.getElementById('newDidNumber').disabled = false;
+  document.getElementById('didSubmitBtn').textContent = 'Save';
+  document.getElementById('didCancelBtn').style.display = 'none';
+  document.getElementById('didStatus').textContent = '';
+}
+
+async function deleteDid(id, number) {
+  if (!confirm(`Delete DID "${number}"?`)) return;
+  const res = await fetch(`/admin/dids/${id}`, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    loadDids();
+  } else {
+    alert(data.error || 'Delete failed');
+  }
+}
+
+async function createDid() {
+  const campaignId = document.getElementById('newDidCampaign').value || null;
+  const el = document.getElementById('didStatus');
+
+  if (editingDidId) {
+    const res = await fetch(`/admin/dids/${editingDidId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignId }),
+    });
+    if (res.ok) {
+      cancelDidEdit();
+      loadDids();
+    } else {
+      el.textContent = 'Failed to save DID';
+      el.style.color = '#dc2626';
+    }
+    return;
+  }
+
+  const number = document.getElementById('newDidNumber').value.trim();
+  if (!number) { el.textContent = 'Number is required'; el.style.color = '#dc2626'; return; }
+  const res = await fetch('/admin/dids', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ number, campaignId }),
+  });
+  if (res.ok) {
+    el.textContent = `Saved DID: ${number}`;
+    el.style.color = '#16a34a';
+    document.getElementById('newDidNumber').value = '';
+    loadDids();
+  } else {
+    el.textContent = 'Failed to save DID';
+    el.style.color = '#dc2626';
+  }
+}
+
+let queuesCache = [];
+let editingQueueId = null;
+
+async function loadQueues() {
+  const res = await fetch('/admin/queues');
+  const queues = await res.json();
+  queuesCache = queues;
+  const tbody = document.querySelector('#queuesTable tbody');
+  tbody.innerHTML = '';
+  for (const q of queues) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding-left: 18px; font-weight: 600;">${q.name}</td>
+      <td>${q.ring_strategy}</td>
+      <td>${q.wait_timeout}s</td>
+      <td>${q.announce}</td>
+      <td>${q.retry}</td>
+      <td>${q.timeout_restart}</td>
+      <td class="row-actions">
+        <button class="btn-icon" onclick="editQueue(${q.id})">Edit</button>
+        <button class="btn-icon danger" onclick="deleteQueue(${q.id}, '${q.name.replace(/'/g, "\\'")}')">Delete</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (queues.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--muted); padding: 20px;">No queues yet - create one above.</td></tr>';
+  }
+  const select = document.getElementById('newCampaignQueue');
+  select.innerHTML = '<option value="">No queue</option>' + queues.map((q) => `<option value="${q.id}">${q.name}</option>`).join('');
+}
+
+function editQueue(id) {
+  const q = queuesCache.find((x) => x.id === id);
+  if (!q) return;
+  editingQueueId = id;
+  document.getElementById('newQueueName').value = q.name;
+  document.getElementById('newQueueName').disabled = true;
+  document.getElementById('newQueueStrategy').value = q.ring_strategy;
+  document.getElementById('newQueueTimeout').value = q.wait_timeout;
+  document.getElementById('newQueueAnnounce').value = q.announce;
+  document.getElementById('newQueueRetry').value = q.retry;
+  document.getElementById('newQueueTimeoutRestart').value = q.timeout_restart;
+  document.getElementById('queueSubmitBtn').textContent = 'Save Changes';
+  document.getElementById('queueCancelBtn').style.display = 'inline-flex';
+  document.getElementById('queueStatus').textContent = '';
+}
+
+function cancelQueueEdit() {
+  editingQueueId = null;
+  document.getElementById('newQueueName').value = '';
+  document.getElementById('newQueueName').disabled = false;
+  document.getElementById('queueSubmitBtn').textContent = 'Create Queue';
+  document.getElementById('queueCancelBtn').style.display = 'none';
+  document.getElementById('queueStatus').textContent = '';
+}
+
+async function deleteQueue(id, name) {
+  if (!confirm(`Delete queue "${name}"? This also removes it from Asterisk.`)) return;
+  const res = await fetch(`/admin/queues/${id}`, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    loadQueues();
+  } else {
+    alert(data.error || 'Delete failed');
+  }
+}
+
+async function createQueue() {
+  const ringStrategy = document.getElementById('newQueueStrategy').value;
+  const waitTimeout = Number(document.getElementById('newQueueTimeout').value) || 30;
+  const announce = document.getElementById('newQueueAnnounce').value;
+  const retry = Number(document.getElementById('newQueueRetry').value) || 1;
+  const timeoutRestart = document.getElementById('newQueueTimeoutRestart').value;
+  const el = document.getElementById('queueStatus');
+
+  if (editingQueueId) {
+    const res = await fetch(`/admin/queues/${editingQueueId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ringStrategy, waitTimeout, announce, retry, timeoutRestart }),
+    });
+    if (res.ok) {
+      cancelQueueEdit();
+      loadQueues();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      el.textContent = data.error || 'Failed to save queue';
+      el.style.color = '#dc2626';
+    }
+    return;
+  }
+
+  const name = document.getElementById('newQueueName').value.trim();
+  if (!name) { el.textContent = 'Queue name is required'; el.style.color = '#dc2626'; return; }
+  const res = await fetch('/admin/queues', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, ringStrategy, waitTimeout, announce, retry, timeoutRestart }),
+  });
+  if (res.ok) {
+    el.textContent = `Created queue: ${name}`;
+    el.style.color = '#16a34a';
+    document.getElementById('newQueueName').value = '';
+    loadQueues();
+  } else {
+    el.textContent = 'Failed to create queue';
+    el.style.color = '#dc2626';
+  }
+}
+
+async function createCampaign() {
+  const name = document.getElementById('newCampaignName').value.trim();
+  const queueId = document.getElementById('newCampaignQueue').value || null;
+  const outboundCallerId = document.getElementById('newCampaignCallerId').value.trim() || null;
+  const autoAnswer = document.getElementById('newCampaignAutoAnswer').checked;
+  const status = document.getElementById('newCampaignStatus').value;
+  const el = document.getElementById('campaignStatus');
+  if (!name) { el.textContent = 'Campaign name is required'; el.style.color = '#dc2626'; return; }
+
+  if (editingCampaignId) {
+    const res = await fetch(`/admin/campaigns/${editingCampaignId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, queueId, outboundCallerId, autoAnswer, status }),
+    });
+    if (res.ok) {
+      cancelCampaignEdit();
+      loadCampaigns();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      el.textContent = data.error || 'Failed to save campaign';
+      el.style.color = '#dc2626';
+    }
+    return;
+  }
+
+  const res = await fetch('/admin/campaigns', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, queueId, outboundCallerId, autoAnswer, status }),
+  });
+  if (res.ok) {
+    el.textContent = `Created campaign: ${name}`;
+    el.style.color = '#16a34a';
+    document.getElementById('newCampaignName').value = '';
+    document.getElementById('newCampaignCallerId').value = '';
+    document.getElementById('newCampaignAutoAnswer').checked = false;
+    document.getElementById('newCampaignStatus').value = 'active';
+    loadCampaigns();
+  } else {
+    el.textContent = 'Failed to create campaign';
+    el.style.color = '#dc2626';
+  }
+}
+
+function showReportTab(name, el) {
+  document.querySelectorAll('.report-panel').forEach((p) => p.classList.remove('active'));
+  document.querySelectorAll('.report-tab').forEach((t) => t.classList.remove('active'));
+  document.getElementById('report-' + name).classList.add('active');
+  el.classList.add('active');
+}
+
+function initReports() {
+  reportsInitialized = true;
+  const today = new Date().toISOString().slice(0, 10);
+  for (const id of ['campaignFrom', 'campaignTo', 'agentFrom', 'agentTo', 'callFrom', 'callTo', 'hourlyDate']) {
+    document.getElementById(id).value = today;
+  }
+  // Reuse the campaign list already loaded for the Campaigns section's
+  // dropdowns, rather than fetching it a third time.
+  fetch('/admin/campaigns').then((r) => r.json()).then((campaigns) => {
+    const sel = document.getElementById('callCampaignFilter');
+    sel.innerHTML = '<option value="">All Campaigns</option>' +
+      campaigns.map((c) => `<option value="${c.id}">${c.name}</option>`).join('');
+  });
+  loadCampaignReport();
+  loadAgentReport();
+  loadCallReport();
+  loadHourlyReport();
+}
+
+function fmtHM(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
+async function loadCampaignReport() {
+  const from = document.getElementById('campaignFrom').value;
+  const to = document.getElementById('campaignTo').value;
+  const res = await fetch(`/admin/reports/campaigns?from=${from}&to=${to}`);
+  const rows = await res.json();
+  const tbody = document.querySelector('#campaignReportTable tbody');
+  tbody.innerHTML = '';
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding-left: 18px; font-weight: 600;">${r.campaign_name}</td>
+      <td>${r.total_leads}</td>
+      <td>${r.total_calls}</td>
+      <td>${r.answered}</td>
+      <td>${r.not_answered}</td>
+      <td>${r.abandoned}</td>
+      <td>${r.answer_rate}%</td>
+      <td>${fmtHM(r.avg_talk_seconds)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color: var(--muted); padding: 20px;">No campaigns yet.</td></tr>';
+  }
+}
+
+function exportCampaignReport() {
+  const from = document.getElementById('campaignFrom').value;
+  const to = document.getElementById('campaignTo').value;
+  window.open(`/admin/reports/campaigns?from=${from}&to=${to}&format=csv`, '_blank');
+}
+
+async function loadAgentReport() {
+  const from = document.getElementById('agentFrom').value;
+  const to = document.getElementById('agentTo').value;
+  const res = await fetch(`/admin/reports/agents?from=${from}&to=${to}`);
+  const rows = await res.json();
+  const tbody = document.querySelector('#agentReportTable tbody');
+  tbody.innerHTML = '';
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding-left: 18px; font-weight: 600;">${r.username}</td>
+      <td>${fmtHM(r.login_seconds)}</td>
+      <td>${r.total_calls}</td>
+      <td>${r.answered_calls}</td>
+      <td>${fmtHM(r.talk_seconds)}</td>
+      <td>${r.avg_talk_seconds}s</td>
+      <td>${r.callbacks_set}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--muted); padding: 20px;">No agents yet.</td></tr>';
+  }
+}
+
+function exportAgentReport() {
+  const from = document.getElementById('agentFrom').value;
+  const to = document.getElementById('agentTo').value;
+  window.open(`/admin/reports/agents?from=${from}&to=${to}&format=csv`, '_blank');
+}
+
+function callReportParams() {
+  const params = new URLSearchParams({
+    from: document.getElementById('callFrom').value,
+    to: document.getElementById('callTo').value,
+  });
+  const campaignId = document.getElementById('callCampaignFilter').value;
+  const disposition = document.getElementById('callDispositionFilter').value;
+  if (campaignId) params.set('campaignId', campaignId);
+  if (disposition) params.set('disposition', disposition);
+  return params;
+}
+
+async function loadCallReport() {
+  const res = await fetch(`/admin/reports/calls?${callReportParams()}`);
+  const rows = await res.json();
+  const tbody = document.querySelector('#callReportTable tbody');
+  tbody.innerHTML = '';
+  for (const c of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding-left: 18px;">${c.direction}</td>
+      <td>${c.from_extension || '<span class="muted-cell">—</span>'}</td>
+      <td>${c.to_number}</td>
+      <td>${c.campaign_name || '<span class="muted-cell">—</span>'}</td>
+      <td>${c.disposition || '<span class="muted-cell">—</span>'}</td>
+      <td>${fmt(c.start_time)}</td>
+      <td>${fmt(c.answer_time)}</td>
+      <td>${fmt(c.end_time)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color: var(--muted); padding: 20px;">No calls match these filters.</td></tr>';
+  }
+}
+
+function exportCallReport() {
+  window.open(`/admin/reports/calls?${callReportParams()}&format=csv`, '_blank');
+}
+
+async function loadHourlyReport() {
+  const date = document.getElementById('hourlyDate').value;
+  const res = await fetch(`/admin/reports/hourly?date=${date}`);
+  const rows = await res.json();
+  const maxCalls = Math.max(1, ...rows.map((r) => r.total_calls));
+  const container = document.getElementById('hourlyChart');
+  container.innerHTML = rows.map((r) => {
+    const answeredPct = (r.answered / maxCalls) * 100;
+    const missedPct = ((r.total_calls - r.answered) / maxCalls) * 100;
+    return `
+      <div class="hour-bar-row">
+        <div class="hour-label">${String(r.hour).padStart(2, '0')}:00</div>
+        <div class="hour-bar-track">
+          <div class="hour-bar-answered" style="width:${answeredPct}%"></div>
+          <div class="hour-bar-missed" style="width:${missedPct}%"></div>
+        </div>
+        <div class="hour-count">${r.total_calls} calls · ${r.answer_rate}%</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function exportHourlyReport() {
+  const date = document.getElementById('hourlyDate').value;
+  window.open(`/admin/reports/hourly?date=${date}&format=csv`, '_blank');
+}
+
+checkAuth();
+</script>
+</body>
+</html>

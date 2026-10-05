@@ -1,0 +1,10 @@
+{
+  "name": "dialforge-bot-service",
+  "version": "1.0.0",
+  "description": "DialForge Phase 5 - audio plumbing hello-world (ARI externalMedia -> UDP)",
+  "main": "index.js",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.0"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "dialforge-backend",
+  "version": "1.0.0",
+  "description": "DialForge Phase 3 - backend API, MySQL, click-to-call via ARI",
+  "main": "server.js",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-session": "^1.18.0",
+    "multer": "^2.4.0",
+    "mysql2": "^3.11.0",
+    "ws": "^8.18.0"
+  }
+}
