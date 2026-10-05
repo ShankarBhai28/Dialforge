@@ -699,6 +699,35 @@ Created a list, imported a CSV into it, confirmed the lead count and `list_name`
 
 ---
 
+## Phase 15 — GitHub + secrets rotation + fresh-server deploy guide (COMPLETE ✅ 2026-10-05)
+
+The user wanted the project on GitHub so it could be pulled onto a new server, with an eye toward other developers eventually contributing. Before any of that, every hardcoded secret in the codebase had to actually become a secret, not a string sitting in committed source.
+
+### Found four real hardcoded secrets, rotated all of them live
+`backend/db.js` (MySQL password), `backend/ari.js` (ARI password), `backend/ami.js` (AMI password), `backend/server.js` (session secret) - plus the three demo account passwords in `backend/seed-users.js`. All four services' passwords were changed on the live server (MySQL `ALTER USER`, `ari.conf`/`manager.conf` edited + reloaded, `users` table password hashes updated directly) and the app rewritten to read every one of them from `process.env`, loaded via `dotenv` and a startup guard that refuses to boot with any required var missing - a fresh deploy that forgot `.env` fails loudly immediately, not with a confusing error the first time something tries to use `undefined` as a password. `backend/.env.example` (and matching ones for `bot-service`/`ari-hello-world`) document every variable without real values.
+
+Verified each rotation actually took effect before moving on: health check, admin login with the new password, an AMI-backed queue edit (proves AMI auth), and the ARI websocket reconnect log line - all checked directly, not assumed.
+
+### A real bug surfaced for free while reading the logs
+While confirming the restart was clean, the server log showed a repeated unhandled rejection: deleting Queue 1 failed on `agent_status_log.queue_id`'s foreign key, a reference the Phase 13 delete-safety check never accounted for (it only checked `campaigns.queue_id`). Fixed the same way as every other delete-safety check this project uses - an explicit pre-check with a specific count in the error message - rather than leaving it to surface as a raw DB error. Verified directly: the same delete attempt that used to crash with an unhandled rejection now returns a clean `409` naming how many historical records are attached.
+
+### Squashed 30 commits into one, by explicit choice
+The credentials file (`Credentials-Dialforge/login creds.txt`) turned out to already be committed to git history from earlier in the project, despite a standing instruction to leave it uncommitted going forward - that instruction protected it from *new* commits, but didn't retroactively scrub what was already there. Asked directly how to handle this rather than assuming: the user chose to rotate secrets *and* squash history into a single clean commit, rather than keep 30 commits of now-dead-but-still-visible secrets around. Kept a `pre-squash-backup` branch locally (never pushed) as a safety net before rewriting. Before committing, scanned the entire staged diff for every old and new secret string directly (not just the files touched) - caught two more real exposures this way: the actual old demo-account passwords still sitting in `STATUS.md`'s "How to Access Everything" table, and a stale `DialForge_ARI_Pass!`/`DialForge_DB_Pass!` reference inside `RUNBOOK.md`'s own historical narrative (describing *how* a password was set, which doesn't need to show the literal value to stay useful). Redacted both before finalizing the commit.
+
+Also deleted `backend/schema-mysql.sql`, a stale 66-line partial schema from early Phase 3 - fully superseded by a fresh, complete `mysqldump` (`backend/schema.sql`), which is now the single authoritative schema baseline, regenerated whenever the schema changes rather than hand-maintained.
+
+Pushed to a new private GitHub repo (`ShankarBhai28/Dialforge`) - verified directly afterward by listing the pushed tree and grepping it for every rotated secret string, confirming none were present.
+
+### `docs/DEPLOY.md` - from checklist to a fully standalone walkthrough
+First pass covered the mechanics assuming familiarity with the project's own history (reasonable for "redeploy the thing you built"). Then the user asked to actually try this on a second, brand-new AWS server, entirely on their own, consulting only this one document - a materially different bar. Rewrote it as a complete, literal, copy-paste-ready walkthrough: every `pjsip.conf`/`extensions.conf`/`http.conf`/`rtp.conf`/`queues.conf`/`ari.conf`/`manager.conf` snippet, both systemd units, the coturn config, and the Let's Encrypt renewal hooks - pulled directly from the live server's actual current config (sanitized of real secrets, not retyped from memory), not just referenced from RUNBOOK's narrative.
+
+Scoped deliberately with the user's input: a separate test server (the original stays untouched), skipping the real PSTN trunk entirely for this pass, since that depends on the trunk provider (nxtra) allowlisting a new IP - a conversation with them, not something any document can resolve. Everything else (Asterisk, WebRTC, TURN, the full app) is covered end-to-end; the trunk is Appendix B, to be added once the provider's side is sorted.
+
+### One more inconsistency fixed along the way
+While pulling the live server's actual renewal-hook scripts as source material for the new document, found that `node-cert-copy.sh` still used a manual `pkill`/`nohup` restart dance predating the `dialforge-backend` systemd service - a leftover from before that service existed, never updated afterward. Rewrote it to `systemctl restart dialforge-backend` instead, syntax-checked (`bash -n`) rather than triggering a real renewal to verify it, since testing a real cert renewal risks the live HTTPS cert for no reason.
+
+---
+
 ## How I'll keep this doc going
 
 I'll update this file after each meaningful step (not after every single command) — so it stays a fast, high-signal reference of *what exists and why*, not a full transcript. If you ever want the full command-by-command detail for something, ask and I'll pull it from the session.
