@@ -339,7 +339,7 @@ Our Asterisk build can **decode/pass-through opus but cannot *encode* it** (the 
 
 ## Frontend v2 — Agent panel redesign (COMPLETE ✅ 2026-09-25)
 
-Goal: real login/role system (agent vs admin) plus a genuinely polished agent panel — inspired by a competitor's UI (Doocti, screenshots the user provided) for the *feature/UX pattern* (status toggle with break reasons, Login/Talk/Break/Handle/ACW time tiles, a live call-log side panel), but with our own distinct visual identity — never copying their logo, colors, or exact layout. These are standard contact-center UX patterns, not anyone's proprietary invention.
+Goal: real login/role system (agent vs admin) plus a genuinely polished agent panel — inspired by a competitor's UI (screenshots the user provided, kept private, not named here) for the *feature/UX pattern* (status toggle with break reasons, Login/Talk/Break/Handle/ACW time tiles, a live call-log side panel), but with our own distinct visual identity — never copying their logo, colors, or exact layout. These are standard contact-center UX patterns, not anyone's proprietary invention.
 
 ### 1. Real authentication
 - New `users` table: username, bcrypt password hash, role (`admin`/`agent`), linked `extension_id` (agents only).
@@ -504,14 +504,14 @@ Agent panel now registers its own JsSIP softphone in-page ("Connect Your Line"),
 ### 6. Campaigns and queues - a real system, not a cosmetic dropdown
 New `campaigns` and `queues` tables (`migration-campaigns-queues.sql`), `queue_id` added to `agent_status_log` so we know which queue an agent worked during any given Available stretch. Admin panel gained a full Campaigns section (create campaign → add queues under it). Agent panel: login no longer auto-sets Available (it used to - removed, since going Available now requires picking a queue first); clicking Available opens a queue-selection popup pulling the live list from the admin-managed queues, remembered for the rest of the session so later Break→Available cycles don't re-prompt.
 
-Reviewed the Doocti reference screenshots specifically for their Queue Management screen (Configurations → Queues: Queue Name / Ringing Strategy / WaitTimeOut) and Active Agents live view (has a Queue column) - adopted **Ringing Strategy** (`ringall`/`random`/`leastrecent`/`fewestcalls`) and **Wait Timeout** as real fields on our `queues` table and Admin UI (`migration-queue-ring-strategy.sql`), and added a Queue column to our own Live Agents table. Deliberately did **not** copy their Campaign fields (Industry/Domain/Buffer Level/Dial Ratio) - those are predictive-dialer-specific settings with no corresponding logic in DialForge yet, and adding fields that do nothing isn't a real feature.
+Reviewed the reference screenshots specifically for their Queue Management screen (Configurations → Queues: Queue Name / Ringing Strategy / WaitTimeOut) and Active Agents live view (has a Queue column) - adopted **Ringing Strategy** (`ringall`/`random`/`leastrecent`/`fewestcalls`) and **Wait Timeout** as real fields on our `queues` table and Admin UI (`migration-queue-ring-strategy.sql`), and added a Queue column to our own Live Agents table. Deliberately did **not** copy their Campaign fields (Industry/Domain/Buffer Level/Dial Ratio) - those are predictive-dialer-specific settings with no corresponding logic in DialForge yet, and adding fields that do nothing isn't a real feature.
 
 **Scoped out for now, flagged to revisit**: inbound routing still picks *any* available agent globally - it doesn't yet route a specific incoming DID to a specific queue/campaign (that needs a DID→campaign mapping we haven't designed), and ring-strategy/wait-timeout are stored but not yet wired into actual multi-agent ring behavior (today's routing only ever considers one agent at a time, not a true ring group).
 
 ### 6b. Restructured to match how the reference product actually models this, plus real Auto Answer wiring
-After the initial build, the user shared more detailed reference screenshots (Doocti's actual "Update Campaign" and "Update Queue" modals, not just the list views seen before). These revealed the real relationship is the *opposite* of what was first built: **Queue is a standalone, reusable entity** (its own Ring Strategy/Wait Timeout/Announce/Retry/Timeout Restart config, managed independently), and a **Campaign references one queue** via a dropdown, plus has its own Outbound Caller ID and Auto Answer setting. The original build had queues nested *under* campaigns (`campaign_id` FK on `queues`) - backwards. Migrated (`migration-queue-campaign-restructure.sql`): dropped that FK, added `queue_id`/`outbound_caller_id`/`auto_answer` to `campaigns` instead, and `announce`/`retry`/`timeout_restart` to `queues`.
+After the initial build, the user shared more detailed reference screenshots (the reference product's actual "Update Campaign" and "Update Queue" modals, not just the list views seen before). These revealed the real relationship is the *opposite* of what was first built: **Queue is a standalone, reusable entity** (its own Ring Strategy/Wait Timeout/Announce/Retry/Timeout Restart config, managed independently), and a **Campaign references one queue** via a dropdown, plus has its own Outbound Caller ID and Auto Answer setting. The original build had queues nested *under* campaigns (`campaign_id` FK on `queues`) - backwards. Migrated (`migration-queue-campaign-restructure.sql`): dropped that FK, added `queue_id`/`outbound_caller_id`/`auto_answer` to `campaigns` instead, and `announce`/`retry`/`timeout_restart` to `queues`.
 
-Deliberately did **not** copy the rest of Doocti's Campaign fields (Industry, Domain, Template, Did Rotate Strategy, Primary List, Process, Dial Status/Dispo Status, Script, On Demand Recording, Call Masking, DNC check, Auto Dispo, Timezone, Dial Prefix, Wrap Time) - all predictive-dialer/CRM/compliance features with zero corresponding logic in DialForge today. Adding them as inert dropdowns would look like progress without being real.
+Deliberately did **not** copy the rest of the reference product's Campaign fields (Industry, Domain, Template, Did Rotate Strategy, Primary List, Process, Dial Status/Dispo Status, Script, On Demand Recording, Call Masking, DNC check, Auto Dispo, Timezone, Dial Prefix, Wrap Time) - all predictive-dialer/CRM/compliance features with zero corresponding logic in DialForge today. Adding them as inert dropdowns would look like progress without being real.
 
 **Auto Answer actually wired in, not just stored**: added `campaign_id`/`auto_answer` columns to `calls` too. When routing an inbound call, the answering agent's *current queue* determines which campaign it belongs to (the campaign that references that queue) - this also resolves the campaign's `auto_answer` flag, stamped onto the call row. New endpoint `GET /agent/call-policy` lets the browser check this the moment a real inbound call starts ringing; the agent panel's `newRTCSession` handler now calls it before deciding whether to auto-answer silently or show the Accept/Reject popup (previously the popup showed unconditionally for any non-click2call ring). This is the first case where the queue-agent selected actually changes real call behavior, not just displays a name.
 
@@ -603,7 +603,7 @@ Six outcomes: New, Interested, Not Interested, Callback, No Answer, Do Not Call 
 **Do Not Call is enforced, not decorative**: `click2call` checks the lead's status before ever originating a call and refuses with a 403 if it's marked `do_not_call`. Verified directly: disposed a test lead as `do_not_call`, then attempted to call it - got `{"error":"this lead is marked Do Not Call"}` instead of a call. UI also disables the Call button and shows the status inline for such leads, so an agent isn't even tempted to try.
 
 ### 4. Admin-side visibility, built as the next vertical slice (not a speculative admin-first pass)
-Deliberate methodology note, since the user asked directly whether "build admin comprehensively, then come back to agent" was the right approach: no - every admin feature in this project has only been real because agent-side usage existed first to report on. Building admin broadly ahead of actual agent behavior risks the same thing already avoided earlier (copying Doocti fields with no logic behind them) - screens that look complete but don't reflect anything real. The right move is one vertical slice at a time: this lead/campaign visibility piece *is* the correct next admin addition, specifically because leads and dispositions now genuinely exist from the Phase 10 work above.
+Deliberate methodology note, since the user asked directly whether "build admin comprehensively, then come back to agent" was the right approach: no - every admin feature in this project has only been real because agent-side usage existed first to report on. Building admin broadly ahead of actual agent behavior risks the same thing already avoided earlier (copying reference-product fields with no logic behind them) - screens that look complete but don't reflect anything real. The right move is one vertical slice at a time: this lead/campaign visibility piece *is* the correct next admin addition, specifically because leads and dispositions now genuinely exist from the Phase 10 work above.
 
 Admin's `GET /leads` now joins campaign name directly (`LEFT JOIN campaigns` - `NULL` for the handful of pre-campaign-scoping legacy leads, which is the accurate representation, not a bug). New "Leads" card in the admin Campaigns section shows every lead with its campaign and disposition. Verified via curl: campaign-scoped leads correctly show their campaign name; legacy leads correctly show `null`.
 
@@ -725,6 +725,46 @@ Scoped deliberately with the user's input: a separate test server (the original 
 
 ### One more inconsistency fixed along the way
 While pulling the live server's actual renewal-hook scripts as source material for the new document, found that `node-cert-copy.sh` still used a manual `pkill`/`nohup` restart dance predating the `dialforge-backend` systemd service - a leftover from before that service existed, never updated afterward. Rewrote it to `systemctl restart dialforge-backend` instead, syntax-checked (`bash -n`) rather than triggering a real renewal to verify it, since testing a real cert renewal risks the live HTTPS cert for no reason.
+
+---
+
+## DialForge_Testing — solo rebuild from DEPLOY.md, Phase 0 (COMPLETE ✅ 2026-10-05)
+
+A second, brand-new server built by the user **solo, following only `docs/DEPLOY.md`** - the real test of whether that document stands on its own. The original `dialforge-dev` server is untouched.
+
+### Server
+- **Provider**: AWS `ap-south-1` (Mumbai), Ubuntu 24.04.5 LTS, 3.7G RAM, 29G disk
+- **Public IP**: `65.1.59.100` (private `172.31.15.186`, hostname `ip-172-31-15-186`)
+- **Domain**: `dialforgetest.ddnsfree.com` (Dynu free DDNS), Let's Encrypt cert valid until 2027-01-03
+- **Login**: `ssh -i DialForge_Testing.pem ubuntu@65.1.59.100` - same rule as before: the `.pem` is the only way in, keep a backup copy
+- **Installed**: Asterisk 22.11.0, coturn, certbot (DEPLOY.md sections 0-6)
+
+### Result
+Extensions `1001` ↔ `1002` call each other over WebRTC (WSS signaling + DTLS-SRTP media) with two-way audio, using `phase0/test.html` served from Asterisk's own static file server at `https://dialforgetest.ddnsfree.com:8089/static/test.html`. Verified from the server side too: CDR shows `ANSWERED`, ICE completed on both legs, and Asterisk's strict-RTP switched to the browser's real public address on both legs.
+
+### Four real problems hit, in order
+1. **Asterisk's HTTP server was silently disabled.** `http.conf` ended up with two `[general]` sections - the stock one from `make samples` (with `bindaddr=127.0.0.1`, no `enabled=yes`) and DEPLOY.md's block pasted below it. Asterisk only reads the first, so `http show status` said `Server Disabled` and nothing listened on 8089. A useful tell: connecting to 8089 got *connection refused* (not a timeout) - meaning the security group let the packet through and the server itself rejected it, which pointed at Asterisk, not AWS. Fixed by merging into one section. *DEPLOY.md's wording ("confirm/add under `[general]`") caused this - now corrected.*
+2. **`ERR_NAME_NOT_RESOLVED` in the browser** even though the hostname resolved fine via Google/Cloudflare DNS. A local/ISP DNS cache had remembered "doesn't exist" from before the DDNS record was created. Fix: flush DNS (`ipconfig /flushdns`, Chrome's host cache).
+3. **Calls took 20-40s to go out, and the callee "rang but never answered".** SIP trace showed Asterisk ringing the callee browser (`180 Ringing`), then nothing until `Dial()`'s 20s timeout cancelled it. Cause: JsSIP holds the INVITE / 200 OK until the browser finishes gathering *every* ICE candidate, and on a Windows PC with extra adapters (a VirtualBox host-only adapter, `192.168.56.1`, was present) that takes longer than the ring timeout. Fixed in `test.html`: send the SDP as soon as a usable (`srflx`/`relay`) candidate exists, or after 3s - JsSIP's `icecandidate` event exposes a `ready()` callback for exactly this.
+4. **Call connected, but no audio, and Asterisk logged "placed on hold".** The SIP trace showed both browsers' SDP with `c=IN IP4 0.0.0.0`, `m=audio 9`, and **zero** `a=candidate` lines - the browsers had no address to offer at all, and Asterisk treats `0.0.0.0` as hold. Cause: the test page's "Force TURN relay only" checkbox was ticked, so the browser may *only* use TURN relay candidates - and its TURN login was failing, so it ended up with nothing. Unticking it fixed the call immediately (host + srflx candidates appeared, ICE completed).
+
+*Lesson worth keeping: when debugging WebRTC, read the SDP in the SIP trace (`pjsip set logger on`). The `c=` line and `a=candidate` lines tell you in seconds whether the browser is offering a usable address - that split "signaling problem" from "media problem" faster than anything in the browser UI.*
+
+### Still open
+- **TURN from a browser is not yet verified.** coturn itself is fine - tested on the server with `turnutils_uclient` using the credentials in `turnserver.conf`: allocation succeeded, 0% loss. So problem #4's TURN failure is almost certainly a mistyped TURN user/password on the page. Retest relay-only with the credentials copied exactly; if it still fails, `chrome://webrtc-internals` → `icecandidateerror` gives the code (`401` bad credentials, `701` unreachable). Matters for real users behind strict networks, not for this PC.
+- Harmless log noise, cleanup later: `Error sending STUN request: Invalid argument` (Asterisk trying its IPv6 link-local candidate) and `Unable to find a codec translation path (ulaw/opus)` (both legs negotiate ulaw anyway).
+- `pjsip.conf` `local_net=172.31.15.186` is a single host; the conventional value is the VPC range (`172.31.0.0/16`). Not causing problems for WSS, worth tidying.
+
+### Security notes
+- The GitHub repo `ShankarBhai28/Dialforge` is **publicly visible** (checked 2026-10-05: the repo page loads without login), despite Phase 15 describing it as private. Worth deciding deliberately: make it private in GitHub → Settings, or keep it public knowing everything in it is world-readable.
+- `backend/public/agent.html` still has the **old server's** TURN password hardcoded. Confirmed the new server's coturn password is different, so this server isn't exposed by it - but don't carry `agent.html` over to this server as-is in section 7+; the TURN credentials should come from the backend/config, and it still points at the old hostname.
+- `ufw` is inactive on this server - the AWS security group is the only firewall. Same posture as the original server; fine as long as the security group stays tight.
+
+### Cost status
+One EC2 instance plus its public IP, same as the original server - this is a **second** running instance, so if your free-tier hours are shared across both, running two instances 24/7 can exceed the 750 free hours/month. Check **AWS Console → Billing → Free Tier**, and stop whichever server you're not using.
+
+### Next
+DEPLOY.md section 7 (Node.js) onwards.
 
 ---
 
