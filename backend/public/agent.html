@@ -238,6 +238,47 @@
     padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex;
     align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(185,28,28,0.4);
   }
+
+  /* --- In-call panel: docked bottom-right whenever a call is up, so the
+     agent always sees the call is live and keeps the form usable. --- */
+  #inCallPanel {
+    display: none; position: fixed; right: 20px; bottom: 20px; z-index: 90; width: 300px;
+    background: var(--card); border-radius: 16px; box-shadow: var(--shadow-lg); overflow: hidden;
+    border: 1px solid var(--border); animation: popIn 0.2s ease-out;
+  }
+  #inCallPanel .ic-head {
+    display: flex; align-items: center; justify-content: space-between; padding: 10px 14px;
+    color: white; background: #64748b; font-size: 12px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase;
+  }
+  #inCallPanel.live .ic-head { background: linear-gradient(135deg, #16a34a, #15803d); }
+  #inCallPanel.hold .ic-head { background: linear-gradient(135deg, #f59e0b, #d97706); }
+  #inCallPanel .ic-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: white; margin-right: 7px; }
+  #inCallPanel.live .ic-dot { animation: icBlink 1.2s ease-in-out infinite; }
+  @keyframes icBlink { 50% { opacity: 0.25; } }
+  #inCallPanel .ic-timer { font-variant-numeric: tabular-nums; font-size: 14px; letter-spacing: 0; }
+  #inCallPanel .ic-body { padding: 14px 16px 6px; }
+  #inCallPanel .ic-name { font-size: 16px; font-weight: 800; }
+  #inCallPanel .ic-number { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  #inCallPanel .ic-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  #inCallPanel .ic-warn { display: none; margin-top: 8px; font-size: 12px; font-weight: 700; color: #b91c1c; background: #fef2f2; border-radius: 8px; padding: 6px 8px; }
+  #inCallPanel .ic-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 10px 14px 14px; }
+  #inCallPanel .ic-btn {
+    display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 0 7px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer;
+    font-family: inherit; font-size: 11px; font-weight: 700;
+  }
+  #inCallPanel .ic-btn:hover { background: #e2e8f0; }
+  #inCallPanel .ic-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  #inCallPanel .ic-btn.on { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
+  #inCallPanel .ic-btn.end { background: linear-gradient(135deg, #ef4444, #b91c1c); color: white; border: none; }
+  #inCallPanel .ic-keypad { display: none; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 0 14px 14px; }
+  #inCallPanel .ic-keypad button {
+    padding: 9px 0; border-radius: 8px; border: 1px solid var(--border); background: white;
+    font-family: inherit; font-size: 15px; font-weight: 700; cursor: pointer;
+  }
+  #inCallPanel .ic-keypad button:hover { background: #e2e8f0; }
+  #inCallPanel .ic-dtmf { grid-column: 1 / -1; font-size: 12px; color: var(--muted); min-height: 14px; text-align: center; }
+  @media (max-width: 600px) { #inCallPanel { left: 12px; right: 12px; width: auto; bottom: 12px; } }
 </style>
 </head>
 <body>
@@ -259,6 +300,44 @@
 </div>
 
 <audio id="remoteAudio" autoplay></audio>
+
+<div id="inCallPanel" aria-live="polite">
+  <div class="ic-head">
+    <span><span class="ic-dot"></span><span id="icState">Connecting</span></span>
+    <span class="ic-timer" id="icTimer">00:00</span>
+  </div>
+  <div class="ic-body">
+    <div class="ic-name" id="icName"></div>
+    <div class="ic-number" id="icNumber">—</div>
+    <div class="ic-sub" id="icSub"></div>
+    <div class="ic-warn" id="icMutedWarn">You are muted - the customer can't hear you</div>
+  </div>
+  <div class="ic-actions">
+    <button class="ic-btn" id="icMuteBtn" onclick="inCallToggleMute()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
+      <span id="icMuteLabel">Mute</span>
+    </button>
+    <button class="ic-btn" id="icHoldBtn" onclick="inCallToggleHold()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+      <span id="icHoldLabel">Hold</span>
+    </button>
+    <button class="ic-btn" id="icKeypadBtn" onclick="inCallToggleKeypad()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="19" cy="19" r="2"/></svg>
+      Keypad
+    </button>
+    <button class="ic-btn end" onclick="hangupCall()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11z"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+      Hang up
+    </button>
+  </div>
+  <div class="ic-keypad" id="icKeypad">
+    <button onclick="inCallDtmf('1')">1</button><button onclick="inCallDtmf('2')">2</button><button onclick="inCallDtmf('3')">3</button>
+    <button onclick="inCallDtmf('4')">4</button><button onclick="inCallDtmf('5')">5</button><button onclick="inCallDtmf('6')">6</button>
+    <button onclick="inCallDtmf('7')">7</button><button onclick="inCallDtmf('8')">8</button><button onclick="inCallDtmf('9')">9</button>
+    <button onclick="inCallDtmf('*')">*</button><button onclick="inCallDtmf('0')">0</button><button onclick="inCallDtmf('#')">#</button>
+    <div class="ic-dtmf" id="icDtmfSent"></div>
+  </div>
+</div>
 
 <div id="incomingCallPopup">
   <div id="incomingCallCard">
@@ -551,6 +630,7 @@ async function connectExtension() {
 
   ua.on('newRTCSession', (data) => {
     jssipSession = data.session;
+    inCallAttach(jssipSession);
     document.getElementById('hangupBtn').style.display = 'inline-flex';
     jssipSession.on('ended', () => { document.getElementById('hangupBtn').style.display = 'none'; jssipSession = null; });
     jssipSession.on('failed', () => { document.getElementById('hangupBtn').style.display = 'none'; jssipSession = null; });
@@ -918,6 +998,7 @@ async function callLead(leadId, phone) {
   const lead = leadsById.get(leadId);
   setFormContext(leadId || null, null, lead && lead.name ? `${lead.name} (${phone})` : `Lead ${phone}`);
   prefillAgentForm(lead ? lead.custom_data : null);
+  setInCallInfo({ number: phone, name: lead && lead.name ? lead.name : '', kind: 'Outbound call' });
   const res = await fetch('/calls/click2call', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -926,13 +1007,160 @@ async function callLead(leadId, phone) {
   const data = await res.json();
   if (res.ok) {
     formCallId = data.callId;
+    setInCallInfo({ callId: data.callId });
     setStatusMsg(`Call started (id ${data.callId}) — check your softphone.`);
   } else {
     setStatusMsg('Call failed: ' + (data.error || 'unknown error'), true);
+    inCall.pending = null;
     activeLeadId = null;
     expectingOwnCallLeg = false;
   }
   setTimeout(() => { loadCalls(); loadStats(); }, 2000);
+}
+
+// --- In-call panel ---
+// Shown for every call on the softphone once it's answered: who it is,
+// whether it's live / on hold, a running timer, and the controls. Mute,
+// hold and keypad act on the WebRTC session itself (hold makes Asterisk
+// play music to the customer). The tab title also shows the live call so
+// the agent notices it from another tab.
+const inCall = { session: null, info: null, pending: null, answeredAt: null, ringingCustomer: false, tick: null, pollCallId: null };
+const PAGE_TITLE = document.title;
+
+// Called before a call exists (click-to-call: we know the lead first) or
+// during one (dialer screen pop learns the lead a moment after answer).
+function setInCallInfo(info) {
+  if (inCall.session) {
+    inCall.info = { ...inCall.info, ...info };
+    if (info.callId && inCall.answeredAt && !inCall.pollCallId) watchClick2CallAnswer(info.callId);
+    renderInCall();
+  } else {
+    inCall.pending = { ...(inCall.pending || {}), ...info };
+  }
+}
+
+function remoteNumberOf(session) {
+  const id = session.remote_identity;
+  return (id && ((id.uri && id.uri.user) || id.display_name)) || 'Unknown number';
+}
+
+function inCallAttach(session) {
+  inCall.session = session;
+  inCall.info = inCall.pending || { number: remoteNumberOf(session), name: '', kind: 'Incoming call' };
+  inCall.pending = null;
+  inCall.answeredAt = null;
+  inCall.ringingCustomer = false;
+  const started = () => {
+    if (inCall.session !== session || inCall.answeredAt) return;
+    inCall.answeredAt = Date.now();
+    document.getElementById('inCallPanel').style.display = 'block';
+    clearInterval(inCall.tick);
+    inCall.tick = setInterval(renderInCall, 1000);
+    if (inCall.info.callId) watchClick2CallAnswer(inCall.info.callId);
+    renderInCall();
+  };
+  session.on('accepted', started);
+  session.on('confirmed', started);
+  ['hold', 'unhold', 'muted', 'unmuted'].forEach((ev) => session.on(ev, renderInCall));
+  const ended = () => { if (inCall.session === session) inCallDetach(); };
+  session.on('ended', ended);
+  session.on('failed', ended);
+}
+
+function inCallDetach() {
+  clearInterval(inCall.tick);
+  inCall.session = null;
+  inCall.info = null;
+  inCall.pollCallId = null;
+  document.getElementById('inCallPanel').style.display = 'none';
+  document.getElementById('icKeypad').style.display = 'none';
+  document.getElementById('icDtmfSent').textContent = '';
+  document.title = PAGE_TITLE;
+}
+
+// Click-to-call: the agent's own leg answers at once, then the customer
+// rings - show "Ringing customer" until the server says they picked up.
+async function watchClick2CallAnswer(callId) {
+  inCall.ringingCustomer = true;
+  inCall.pollCallId = callId;
+  while (inCall.session && inCall.pollCallId === callId) {
+    const res = await fetch(`/agent/call-state/${callId}`).catch(() => null);
+    const st = res && res.ok ? await res.json() : null;
+    if (!st || st.answered || st.ended) {
+      if (inCall.pollCallId !== callId) return;
+      inCall.ringingCustomer = false;
+      if (st && st.answered) inCall.answeredAt = Date.now();  // talk time starts when the customer answers
+      renderInCall();
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+function fmtCallDuration(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+function renderInCall() {
+  const s = inCall.session;
+  if (!s || !inCall.info) return;
+  const panel = document.getElementById('inCallPanel');
+  const onHold = s.isOnHold().local;
+  const muted = s.isMuted().audio;
+  const state = inCall.ringingCustomer ? 'ringing' : (onHold ? 'hold' : 'live');
+  panel.className = state === 'ringing' ? '' : state;
+  document.getElementById('icState').textContent =
+    state === 'ringing' ? 'Ringing customer…' : (onHold ? 'On hold' : 'Live call');
+  const elapsed = inCall.answeredAt ? fmtCallDuration(Date.now() - inCall.answeredAt) : '00:00';
+  document.getElementById('icTimer').textContent = elapsed;
+  document.getElementById('icName').textContent = inCall.info.name || '';
+  document.getElementById('icNumber').textContent = inCall.info.number || '—';
+  document.getElementById('icSub').textContent = [inCall.info.kind, currentQueueName].filter(Boolean).join(' · ');
+  document.getElementById('icMuteLabel').textContent = muted ? 'Unmute' : 'Mute';
+  document.getElementById('icMuteBtn').classList.toggle('on', muted);
+  document.getElementById('icHoldLabel').textContent = onHold ? 'Resume' : 'Hold';
+  document.getElementById('icHoldBtn').classList.toggle('on', onHold);
+  document.getElementById('icMutedWarn').style.display = muted ? 'block' : 'none';
+  document.title = state === 'live' ? `● LIVE ${elapsed} - ${PAGE_TITLE}` : state === 'hold' ? `⏸ HOLD ${elapsed} - ${PAGE_TITLE}` : `Ringing… - ${PAGE_TITLE}`;
+}
+
+function inCallToggleMute() {
+  const s = inCall.session;
+  if (!s) return;
+  if (s.isMuted().audio) s.unmute({ audio: true }); else s.mute({ audio: true });
+  renderInCall();
+}
+
+function inCallToggleHold() {
+  const s = inCall.session;
+  if (!s) return;
+  const btn = document.getElementById('icHoldBtn');
+  btn.disabled = true;  // a hold is a SIP re-INVITE - don't send two at once
+  const done = () => { btn.disabled = false; renderInCall(); };
+  const ok = s.isOnHold().local ? s.unhold({}, done) : s.hold({}, done);
+  if (!ok) done();  // JsSIP refused (e.g. another renegotiation in progress)
+  setTimeout(() => { btn.disabled = false; }, 5000);
+}
+
+function inCallToggleKeypad() {
+  const kp = document.getElementById('icKeypad');
+  kp.style.display = kp.style.display === 'grid' ? 'none' : 'grid';
+}
+
+// Keypad tones go to the other side (IVR menus, extensions).
+function inCallDtmf(digit) {
+  if (!inCall.session) return;
+  try {
+    inCall.session.sendDTMF(digit);
+    const el = document.getElementById('icDtmfSent');
+    el.textContent = ('Sent: ' + (el.textContent.replace('Sent: ', '') + digit)).slice(-30);
+  } catch (err) {
+    console.error('DTMF failed', err);
+  }
 }
 
 // --- Dialer calls (D7): screen pop + automatic wrap-up ---
@@ -950,6 +1178,7 @@ async function screenPopDialerCall() {
       leadsById.set(call.lead_id, { ...call, id: call.lead_id });
       setFormContext(call.lead_id, call.call_id, call.name ? `${call.name} (${call.phone})` : `Lead ${call.phone}`);
       prefillAgentForm(call.custom_data);
+      setInCallInfo({ number: call.phone, name: call.name || '', kind: 'Dialer call' });
       setStatusMsg(`Dialer call: ${call.name || ''} ${call.phone} · attempts ${call.attempts}${call.list_name ? ' · list ' + call.list_name : ''}`);
       return;
     }
