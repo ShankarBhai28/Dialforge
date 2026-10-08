@@ -60,6 +60,7 @@ async function acquireSingleInstanceLock() {
 // Agents Available in the campaign's queue AND not already on a call.
 // (Our status stays "available" during a call - ACW only starts when it
 // ends - so an open calls row on their extension is what marks them busy.)
+// Being consulted on someone else's transfer (transfer_ext) counts as busy too.
 async function countIdleAgents(queueId) {
   if (!queueId) return 0;
   const [[row]] = await pool.query(
@@ -68,7 +69,7 @@ async function countIdleAgents(queueId) {
      WHERE asl.ended_at IS NULL AND asl.status = 'available' AND asl.queue_id = ?
        AND NOT EXISTS (
          SELECT 1 FROM calls c
-         WHERE c.from_extension = asl.extension_name AND c.end_time IS NULL
+         WHERE (c.from_extension = asl.extension_name OR c.transfer_ext = asl.extension_name) AND c.end_time IS NULL
            AND c.start_time > NOW() - INTERVAL 3 HOUR
        )`,
     [queueId]

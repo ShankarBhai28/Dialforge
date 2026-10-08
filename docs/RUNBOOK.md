@@ -1071,6 +1071,30 @@ Backup `~/backups/pre-d9-20261008-094721/` (DB dump + the 4 files). Rollback: co
 ### Verified
 - 9 unit tests of the recycle logic (defaults, tries used up, rule off, overrides, result grouping); admin UI exercised in jsdom with no JS errors; summary SQL run on the real list; both services healthy.
 
+## Agent in-call panel + transfer / conference (2026-10-08, dialforge-dev)
+### What the agent sees
+- Docked **in-call panel** on every answered call: name + real customer number, LIVE / ON HOLD / "Ringing customer" state, timer, tab title `● LIVE 02:15`, **Mute** (with warning), **Hold** (Asterisk plays MOH), **Keypad** (DTMF), **Transfer**, **Conference**, **Hang up**.
+- **Transfer**: *Blind* (customer goes straight to the target, agent freed at once - goes to ACW + outcome popup) or *Warm* (customer on hold music while the agent talks to the target, then **Complete transfer**, **Merge (3-way)** or **Cancel**). **Conference**: target joins the live call; agent can **Drop** any party or **Leave conference**.
+- Targets: **another agent** (logged-in list, busy ones disabled), **a queue** (blind = customer waits in that queue for real; warm/conference = a free agent from it), **any number** (via the trunk with the campaign's caller ID, or an internal extension).
+- Receiving agent gets the lead's screen pop while being consulted ("Transfer offered by a colleague"); once completed the call is theirs (outcome popup, ACW, can transfer again).
+
+### How it works
+- `call-control.js` (new): calls run in ARI bridges of `dialforge-app`. Click-to-call already is; dialer/inbound calls (bridged by `Queue()`) are taken over on the first transfer/conference: **AMI Redirect** of both legs to `[df-control]` (`/etc/asterisk/extensions-control.conf`, `#include`d from extensions.conf) -> Stasis -> re-bridged (short audio gap). Warm hold = ARI holding bridge + MOH; ringback = `tone:ring;tonezone=in` played on the bridge; extra parties originated as `dfx-<callId>-<n>`.
+- Rules: agent hangs up during warm transfer = completes it (or blind if still ringing); blind target doesn't answer -> customer back to the campaign's queue; customer hangs up -> everyone dropped, all agents on it to ACW; last party left alone -> ended.
+- DB (`migration-call-control.sql`): `calls.agent_channel` (from AMI AgentConnect `DestChannel`), `calls.transfer_ext` (agent being consulted - screen pop + counted busy by the dialer). Inbound calls now store `channel_name`.
+- API: `GET /agent/transfer-targets`, `GET /agent/call/control`, `POST /agent/call/{transfer,complete,merge,cancel,drop,leave}`, `GET /agent/call-state/:callId`; `/agent/active-call` now also returns transferred calls (`owner` flag).
+- AMI AgentComplete / QueueCallerAbandon ignore calls taken over (breaking the Queue bridge isn't a call end).
+
+### Limits
+- State is in memory: a backend restart during a transfer/conference leaves the parties talking, but one side hanging up no longer drops the others (they hang up themselves).
+- Agent Hold during a conference holds all other parties.
+
+### Deploy / rollback
+Backups `~/backups/pre-incall-20261008-100801/` and `~/backups/pre-xfer-20261008-103839/` (DB dump, code files, extensions.conf). Rollback: restore `server.js ari.js ami.js dialer-engine.js public/agent.html` (+ delete `call-control.js`), restore extensions.conf, `asterisk -rx "dialplan reload"`, restart both services. New columns can stay.
+
+### Verified
+- 11 offline flow tests of call-control with a fake ARI/AMI (warm+complete, consult hang-up, merge+leave, conference add/drop, blind to agent/number/queue, no-answer fallback, warm-to-queue agent pick, agent hang-up mid-consult, click-to-call, guards); agent panel exercised in jsdom; dialplan context loaded; services healthy. **Not yet tested with real calls.**
+
 ---
 
 ## How I'll keep this doc going

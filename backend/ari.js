@@ -52,12 +52,37 @@ function hangup(channelId) {
   return ariRequest('DELETE', `/channels/${channelId}`);
 }
 
-async function createBridge() {
-  return ariRequest('POST', '/bridges?type=mixing');
+// type 'mixing' (normal talking bridge) or 'holding' (participants hear
+// music on hold - used to park a customer during a warm transfer).
+async function createBridge(type = 'mixing') {
+  return ariRequest('POST', `/bridges?type=${type}`);
 }
 
 function addChannelToBridge(bridgeId, channelId) {
   return ariRequest('POST', `/bridges/${bridgeId}/addChannel?channel=${channelId}`);
+}
+
+function removeChannelFromBridge(bridgeId, channelId) {
+  return ariRequest('POST', `/bridges/${bridgeId}/removeChannel?channel=${channelId}`);
+}
+
+function startBridgeMoh(bridgeId) {
+  return ariRequest('POST', `/bridges/${bridgeId}/moh?mohClass=default`);
+}
+
+function stopBridgeMoh(bridgeId) {
+  return ariRequest('DELETE', `/bridges/${bridgeId}/moh`);
+}
+
+// media e.g. 'tone:ring;tonezone=in' (ringback while a transfer target rings).
+function playOnBridge(bridgeId, media, playbackId) {
+  const params = new URLSearchParams({ media });
+  if (playbackId) params.set('playbackId', playbackId);
+  return ariRequest('POST', `/bridges/${bridgeId}/play?${params.toString()}`);
+}
+
+function stopPlayback(playbackId) {
+  return ariRequest('DELETE', `/playbacks/${playbackId}`);
 }
 
 function destroyBridge(bridgeId) {
@@ -121,6 +146,11 @@ module.exports = {
   hangup,
   createBridge,
   addChannelToBridge,
+  removeChannelFromBridge,
+  startBridgeMoh,
+  stopBridgeMoh,
+  playOnBridge,
+  stopPlayback,
   destroyBridge,
   isEndpointOnline,
   setChannelVar,

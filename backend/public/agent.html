@@ -261,7 +261,33 @@
   #inCallPanel .ic-number { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
   #inCallPanel .ic-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
   #inCallPanel .ic-warn { display: none; margin-top: 8px; font-size: 12px; font-weight: 700; color: #b91c1c; background: #fef2f2; border-radius: 8px; padding: 6px 8px; }
-  #inCallPanel .ic-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 10px 14px 14px; }
+  #inCallPanel .ic-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px 14px 14px; }
+  #inCallPanel .ic-section { border-top: 1px solid var(--border); padding: 12px 14px; font-size: 13px; }
+  #inCallPanel .ic-section h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+  #inCallPanel .ic-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  #inCallPanel .ic-tabs button {
+    flex: 1; padding: 6px 0; border-radius: 8px; border: 1px solid var(--border); background: white;
+    font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer; color: var(--text);
+  }
+  #inCallPanel .ic-tabs button.sel { background: var(--primary-dark, #0f766e); border-color: transparent; color: white; }
+  #inCallPanel .ic-list { max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+  #inCallPanel .ic-list label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: var(--bg); cursor: pointer; }
+  #inCallPanel .ic-list label.off { opacity: 0.5; cursor: not-allowed; }
+  #inCallPanel .ic-list input { width: auto; margin: 0; }
+  #inCallPanel .ic-list .meta { margin-left: auto; font-size: 11px; color: var(--muted); }
+  #inCallPanel .ic-input { width: 100%; box-sizing: border-box; margin: 0 0 8px; }
+  #inCallPanel .ic-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  #inCallPanel .ic-row button {
+    flex: 1; padding: 8px 6px; border-radius: 8px; border: 1px solid var(--border); background: white;
+    font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
+  }
+  #inCallPanel .ic-row button.go { background: linear-gradient(135deg, #0d9488, #0f766e); color: white; border: none; }
+  #inCallPanel .ic-row button.danger { color: #b91c1c; }
+  #inCallPanel .ic-party { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+  #inCallPanel .ic-party .tag { font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: #dcfce7; color: #166534; }
+  #inCallPanel .ic-party .tag.ring { background: #e2e8f0; color: #334155; }
+  #inCallPanel .ic-party button { margin-left: auto; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border); background: white; font-family: inherit; font-size: 11px; font-weight: 700; color: #b91c1c; cursor: pointer; }
+  #inCallPanel .ic-msg { font-size: 12px; margin-top: 6px; min-height: 14px; }
   #inCallPanel .ic-btn {
     display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 0 7px; border-radius: 10px;
     border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer;
@@ -325,6 +351,14 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="19" cy="19" r="2"/></svg>
       Keypad
     </button>
+    <button class="ic-btn" id="icXferBtn" onclick="openXfer('transfer')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 014-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 01-4 4H3"/></svg>
+      Transfer
+    </button>
+    <button class="ic-btn" id="icConfBtn" onclick="openXfer('conference')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM20 8v6M23 11h-6"/></svg>
+      Conference
+    </button>
     <button class="ic-btn end" onclick="hangupCall()">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11z"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
       Hang up
@@ -336,6 +370,31 @@
     <button onclick="inCallDtmf('7')">7</button><button onclick="inCallDtmf('8')">8</button><button onclick="inCallDtmf('9')">9</button>
     <button onclick="inCallDtmf('*')">*</button><button onclick="inCallDtmf('0')">0</button><button onclick="inCallDtmf('#')">#</button>
     <div class="ic-dtmf" id="icDtmfSent"></div>
+  </div>
+  <div class="ic-section" id="icXfer" style="display:none;">
+    <h4 id="icXferTitle">Transfer</h4>
+    <div class="ic-tabs" id="icModeTabs">
+      <button data-mode="blind" onclick="setXferMode('blind')" title="Customer goes straight to them; you're free right away">Blind</button>
+      <button data-mode="warm" onclick="setXferMode('warm')" title="Customer on hold while you talk to them first">Warm</button>
+    </div>
+    <div class="ic-tabs" id="icTargetTabs">
+      <button data-t="agent" onclick="setXferTarget('agent')">Agent</button>
+      <button data-t="queue" onclick="setXferTarget('queue')">Queue</button>
+      <button data-t="number" onclick="setXferTarget('number')">Number</button>
+    </div>
+    <div class="ic-list" id="icTargetList"></div>
+    <input class="ic-input" id="icNumberInput" placeholder="Phone number or extension" style="display:none;" inputmode="tel">
+    <div class="ic-row">
+      <button class="go" id="icXferGo" onclick="startXfer()">Transfer</button>
+      <button onclick="closeXfer()">Close</button>
+    </div>
+    <div class="ic-msg" id="icXferMsg"></div>
+  </div>
+  <div class="ic-section" id="icControl" style="display:none;">
+    <h4 id="icControlTitle"></h4>
+    <div id="icParties"></div>
+    <div class="ic-row" id="icControlActions"></div>
+    <div class="ic-msg" id="icControlMsg"></div>
   </div>
 </div>
 
@@ -1056,6 +1115,8 @@ function inCallAttach(session) {
     document.getElementById('inCallPanel').style.display = 'block';
     clearInterval(inCall.tick);
     inCall.tick = setInterval(renderInCall, 1000);
+    clearInterval(xfer.poll);
+    xfer.poll = setInterval(refreshCallControl, 1500);
     if (inCall.info.callId) watchClick2CallAnswer(inCall.info.callId);
     renderInCall();
   };
@@ -1069,6 +1130,10 @@ function inCallAttach(session) {
 
 function inCallDetach() {
   clearInterval(inCall.tick);
+  clearInterval(xfer.poll);
+  xfer.poll = null;
+  closeXfer();
+  document.getElementById('icControl').style.display = 'none';
   inCall.session = null;
   inCall.info = null;
   inCall.pollCallId = null;
@@ -1097,6 +1162,139 @@ async function watchClick2CallAnswer(callId) {
   }
 }
 
+
+// --- Transfer / conference ---
+// Blind: customer goes straight to the target, the agent is free at once.
+// Warm: customer hears hold music while the agent talks to the target,
+//   then Complete (hand over), Merge (3-way) or Cancel (back to customer).
+// Conference: the target joins the live call.
+// Targets: another agent, a queue (blind = the customer waits in that
+// queue; warm/conference = a free agent from it) or any number.
+const xfer = { kind: 'transfer', mode: 'blind', target: 'agent', targets: null, poll: null, busy: false };
+
+async function openXfer(kind) {
+  xfer.kind = kind;
+  document.getElementById('icXfer').style.display = 'block';
+  document.getElementById('icXferTitle').textContent = kind === 'conference' ? 'Add to conference' : 'Transfer call';
+  document.getElementById('icModeTabs').style.display = kind === 'conference' ? 'none' : 'flex';
+  document.getElementById('icXferMsg').textContent = 'Loading…';
+  setXferMode(xfer.mode);
+  const res = await fetch('/agent/transfer-targets');
+  xfer.targets = res.ok ? await res.json() : { agents: [], queues: [] };
+  document.getElementById('icXferMsg').textContent = '';
+  setXferTarget(xfer.target);
+}
+
+function closeXfer() {
+  document.getElementById('icXfer').style.display = 'none';
+  document.getElementById('icXferMsg').textContent = '';
+}
+
+function setXferMode(mode) {
+  xfer.mode = mode;
+  document.querySelectorAll('#icModeTabs button').forEach((b) => b.classList.toggle('sel', b.dataset.mode === mode));
+  document.getElementById('icXferGo').textContent = xfer.kind === 'conference' ? 'Add' : (mode === 'warm' ? 'Call first' : 'Transfer');
+  if (xfer.targets) setXferTarget(xfer.target);
+}
+
+function setXferTarget(t) {
+  xfer.target = t;
+  document.querySelectorAll('#icTargetTabs button').forEach((b) => b.classList.toggle('sel', b.dataset.t === t));
+  const list = document.getElementById('icTargetList');
+  const numberInput = document.getElementById('icNumberInput');
+  numberInput.style.display = t === 'number' ? 'block' : 'none';
+  list.style.display = t === 'number' ? 'none' : 'flex';
+  if (t === 'number') { numberInput.focus(); return; }
+  const tg = xfer.targets || { agents: [], queues: [] };
+  const blindQueue = xfer.kind === 'transfer' && xfer.mode === 'blind';
+  const rows = t === 'agent'
+    ? tg.agents.map((a) => ({
+      value: a.userId, text: `${a.username} (ext ${a.ext})`, meta: a.status, off: a.status === 'on a call',
+    }))
+    : tg.queues.map((q) => ({
+      value: q.id, text: q.name, meta: `${q.freeAgents} free`, off: !blindQueue && q.freeAgents === 0,
+    }));
+  list.innerHTML = rows.length
+    ? rows.map((r) => `<label class="${r.off ? 'off' : ''}"><input type="radio" name="icTarget" value="${r.value}" ${r.off ? 'disabled' : ''}>
+        <span>${escapeHtml(r.text)}</span><span class="meta">${escapeHtml(r.meta)}</span></label>`).join('')
+    : `<div style="color: var(--muted); font-size: 12px;">${t === 'agent' ? 'No other agents logged in.' : 'No active queues.'}</div>`;
+}
+
+async function startXfer() {
+  if (xfer.busy) return;
+  const msg = document.getElementById('icXferMsg');
+  let target;
+  if (xfer.target === 'number') {
+    target = document.getElementById('icNumberInput').value.trim();
+    if (!target) { msg.textContent = 'Enter a number'; msg.style.color = '#dc2626'; return; }
+  } else {
+    const picked = document.querySelector('#icTargetList input[name=icTarget]:checked');
+    if (!picked) { msg.textContent = `Pick ${xfer.target === 'agent' ? 'an agent' : 'a queue'}`; msg.style.color = '#dc2626'; return; }
+    target = picked.value;
+  }
+  const mode = xfer.kind === 'conference' ? 'conference' : xfer.mode;
+  xfer.busy = true;
+  msg.textContent = 'Working…';
+  msg.style.color = 'var(--muted)';
+  const res = await fetch('/agent/call/transfer', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, targetType: xfer.target, target }),
+  }).catch(() => null);
+  xfer.busy = false;
+  const data = res ? await res.json().catch(() => ({})) : {};
+  if (!res || !res.ok) { msg.textContent = data.error || 'Failed'; msg.style.color = '#dc2626'; return; }
+  closeXfer();
+  if (mode === 'blind') setStatusMsg(`Transferred to ${data.to}`);
+  refreshCallControl();
+}
+
+async function callControlAction(path, body) {
+  const msg = document.getElementById('icControlMsg');
+  msg.textContent = '';
+  const res = await fetch(`/agent/call/${path}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+  }).catch(() => null);
+  const data = res ? await res.json().catch(() => ({})) : {};
+  if (!res || !res.ok) { msg.textContent = data.error || 'Failed'; msg.style.color = '#dc2626'; }
+  refreshCallControl();
+}
+
+// Polled while a call is up: shows consult / conference status and the
+// buttons that fit it.
+async function refreshCallControl() {
+  if (!inCall.session) return;
+  const res = await fetch('/agent/call/control').catch(() => null);
+  const v = res && res.ok ? await res.json() : null;
+  const box = document.getElementById('icControl');
+  if (!v || !v.controlled || !v.parties.length) {
+    box.style.display = 'none';
+    xfer.customerOnHold = false;
+    return;
+  }
+  xfer.customerOnHold = v.customerOnHold;
+  const consult = v.parties.find((p) => p.role === 'warm');
+  const members = v.parties.filter((p) => p.role !== 'warm');
+  box.style.display = 'block';
+  document.getElementById('icControlTitle').textContent = consult
+    ? (consult.state === 'up' ? `Talking to ${consult.label} · customer on hold` : `Calling ${consult.label}… · customer on hold`)
+    : 'Conference';
+  document.getElementById('icParties').innerHTML = members.map((p) => `
+    <div class="ic-party"><span class="tag ${p.state === 'up' ? '' : 'ring'}">${p.state === 'up' ? 'In call' : 'Ringing'}</span>
+      <span>${escapeHtml(p.label)}</span>
+      <button onclick="callControlAction('drop', { partyId: '${escapeHtml(p.id)}' })">${p.state === 'up' ? 'Drop' : 'Cancel'}</button></div>`).join('');
+  const actions = document.getElementById('icControlActions');
+  if (consult) {
+    actions.innerHTML = `
+      <button class="go" onclick="callControlAction('complete')">Complete transfer</button>
+      ${consult.state === 'up' ? `<button onclick="callControlAction('merge')">Merge (3-way)</button>` : ''}
+      <button class="danger" onclick="callControlAction('cancel')">Cancel</button>`;
+  } else if (members.some((p) => p.state === 'up')) {
+    actions.innerHTML = `<button onclick="callControlAction('leave')" title="You leave; the others keep talking">Leave conference</button>`;
+  } else {
+    actions.innerHTML = '';
+  }
+}
+
 function fmtCallDuration(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(s / 3600);
@@ -1114,7 +1312,7 @@ function renderInCall() {
   const state = inCall.ringingCustomer ? 'ringing' : (onHold ? 'hold' : 'live');
   panel.className = state === 'ringing' ? '' : state;
   document.getElementById('icState').textContent =
-    state === 'ringing' ? 'Ringing customer…' : (onHold ? 'On hold' : 'Live call');
+    state === 'ringing' ? 'Ringing customer…' : (onHold ? 'On hold' : (xfer.customerOnHold ? 'Live · customer on hold' : 'Live call'));
   const elapsed = inCall.answeredAt ? fmtCallDuration(Date.now() - inCall.answeredAt) : '00:00';
   document.getElementById('icTimer').textContent = elapsed;
   document.getElementById('icName').textContent = inCall.info.name || '';
@@ -1174,15 +1372,41 @@ async function screenPopDialerCall() {
     const res = await fetch('/agent/active-call');
     const call = res.ok ? await res.json() : null;
     if (call) {
-      activeLeadId = call.lead_id;
       leadsById.set(call.lead_id, { ...call, id: call.lead_id });
       setFormContext(call.lead_id, call.call_id, call.name ? `${call.name} (${call.phone})` : `Lead ${call.phone}`);
       prefillAgentForm(call.custom_data);
-      setInCallInfo({ number: call.phone, name: call.name || '', kind: 'Dialer call' });
+      if (!call.owner) {
+        // A colleague is consulting us / adding us before handing the call
+        // over: show who it is, but it's theirs until they complete it.
+        setInCallInfo({ number: call.phone, name: call.name || '', kind: 'Transfer offered by a colleague' });
+        setStatusMsg(`Transfer offered: ${call.name || ''} ${call.phone}`);
+        waitForTransferOwnership(call.call_id);
+        return;
+      }
+      activeLeadId = call.lead_id;
+      setInCallInfo({ number: call.phone, name: call.name || '', kind: call.from_dialer ? 'Dialer call' : 'Transferred call' });
       setStatusMsg(`Dialer call: ${call.name || ''} ${call.phone} · attempts ${call.attempts}${call.list_name ? ' · list ' + call.list_name : ''}`);
       return;
     }
     await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+// Once the colleague completes the transfer the call is ours: from then
+// on it gets our outcome popup.
+async function waitForTransferOwnership(callId) {
+  const session = inCall.session;
+  while (session && inCall.session === session) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const res = await fetch('/agent/active-call').catch(() => null);
+    const call = res && res.ok ? await res.json() : null;
+    if (!call || call.call_id !== callId) return;
+    if (call.owner) {
+      activeLeadId = call.lead_id;
+      setInCallInfo({ kind: 'Transferred call' });
+      setStatusMsg(`Transfer completed - ${call.name || call.phone} is now your call`);
+      return;
+    }
   }
 }
 

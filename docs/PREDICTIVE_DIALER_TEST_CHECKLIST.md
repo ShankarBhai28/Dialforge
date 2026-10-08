@@ -85,5 +85,17 @@ Needs volume to learn (≥ 20 finished calls in 15 min) — with 1-2 test lines 
 - [ ] Put one of those numbers on the DNC list → Recycle again → "skipped: 1 on DNC".
 - [ ] Set the No answer rule back to what you want.
 
+## In-call panel, transfer, conference
+Set up: two agents logged in and **Available** (e.g. agent04 on 1003 + agent1001 on 1001, two browsers), plus your mobile as the "customer". Refresh agent pages with **Ctrl+F5**.
+- [ ] Any call answered -> panel bottom-right: name/number, **LIVE** + timer; tab title shows `● LIVE`. Click-to-call shows "Ringing customer…" until you answer the mobile.
+- [ ] **Mute** -> red warning, customer can't hear you -> Unmute. **Hold** -> customer hears music, header amber -> Resume. **Keypad** -> tones heard on the phone.
+- [ ] **Warm transfer to agent**: Transfer -> Warm -> Agent -> agent1001 -> Call first -> customer hears music; agent1001 rings, sees "Transfer offered" + lead -> answer -> you two talk -> **Complete transfer** -> you're dropped (outcome popup, ACW); customer + agent1001 talk; agent1001 gets the outcome popup when it ends.
+- [ ] Warm again -> **Cancel** -> back to the customer. Warm -> **Merge (3-way)** -> all three hear each other -> **Leave conference** -> the other two continue.
+- [ ] **Blind transfer to agent** -> you're dropped at once; customer hears music until agent1001 answers.
+- [ ] **Blind transfer to queue** -> customer waits in that queue; an Available agent in it gets the call with screen pop.
+- [ ] **Conference / transfer to number** (a second phone you own) -> it rings with the campaign caller ID; **Drop** it from the conference.
+- [ ] Blind to a number and don't answer -> after ~30 s the customer goes back to the campaign's queue.
+- [ ] Customer hangs up during a conference -> everyone dropped, agents to ACW.
+
 ## After testing
 - [ ] Tell Claude what failed (step + what you saw) — fixes go in before the live trunk.

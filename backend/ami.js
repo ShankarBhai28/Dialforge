@@ -116,10 +116,23 @@ function queueReload() {
   return action('QueueReload', { Members: 'yes', Rules: 'yes', Parameters: 'yes' });
 }
 
+// Moves a channel - and optionally the one it's bridged to - to another
+// place in the dialplan. Used to take a call that native Queue() bridged
+// and bring both legs into our ARI app (transfer / conference).
+function redirect(channel, { context, exten, priority = 1 }, extra) {
+  const params = { Channel: channel, Context: context, Exten: exten, Priority: priority };
+  if (extra) {
+    Object.assign(params, {
+      ExtraChannel: extra.channel, ExtraContext: extra.context, ExtraExten: extra.exten, ExtraPriority: extra.priority || 1,
+    });
+  }
+  return action('Redirect', params);
+}
+
 function on(eventName, handler) {
   events.on(eventName, handler);
 }
 
 connect();
 
-module.exports = { queueAdd, queueRemove, queuePause, queueReload, on };
+module.exports = { queueAdd, queueRemove, queuePause, queueReload, redirect, on };

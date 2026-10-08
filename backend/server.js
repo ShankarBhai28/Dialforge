@@ -14,6 +14,7 @@ const {
 const pool = require('./db');
 const ari = require('./ari');
 const ami = require('./ami');
+const callControl = require('./call-control');
 
 // Fail loudly at startup, not with a confusing runtime error the first
 // time something tries to use a missing secret - a fresh deploy that
@@ -1239,16 +1240,42 @@ app.get('/admin/campaigns/:id/hopper', requireRole('admin'), async (req, res) =>
 app.get('/agent/active-call', requireAuth, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const [rows] = await pool.query(`
-    SELECT c.id AS call_id, c.lead_id, l.name, l.phone, l.alt_phone, l.status, l.attempts, l.custom_data, ls.name AS list_name
+    SELECT c.id AS call_id, c.lead_id, l.name, l.phone, l.alt_phone, l.status, l.attempts, l.custom_data, ls.name AS list_name,
+      (c.from_extension = ?) AS owner, (c.dial_attempt_id IS NOT NULL) AS from_dialer
     FROM calls c
     JOIN leads l ON l.id = c.lead_id
     LEFT JOIN lists ls ON ls.id = l.list_id
-    WHERE c.from_extension = ? AND c.end_time IS NULL AND c.dial_attempt_id IS NOT NULL
+    WHERE (c.from_extension = ? OR c.transfer_ext = ?) AND c.end_time IS NULL
       AND c.start_time > NOW() - INTERVAL 3 HOUR
     ORDER BY c.id DESC LIMIT 1
-  `, [req.session.user.extensionName]);
-  res.json(rows[0] || null);
+  `, [req.session.user.extensionName, req.session.user.extensionName, req.session.user.extensionName]);
+  const row = rows[0];
+  res.json(row ? { ...row, owner: !!Number(row.owner), from_dialer: !!Number(row.from_dialer) } : null);
 });
+
+// --- Agent: transfer / conference (see call-control.js) ---
+function callControlRoute(fn) {
+  return async (req, res) => {
+    if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
+    const ext = req.session.user.extensionName;
+    if (!ext) return res.status(409).json({ error: 'connect your extension first' });
+    try {
+      res.json(await fn(ext, req));
+    } catch (err) {
+      if (!err.status) console.error('[call control]', err);
+      res.status(err.status || 500).json({ error: err.status ? err.message : 'call control failed' });
+    }
+  };
+}
+
+app.get('/agent/transfer-targets', requireAuth, callControlRoute((ext) => callControl.transferTargets(ext)));
+app.get('/agent/call/control', requireAuth, callControlRoute(async (ext) => callControl.viewFor(ext)));
+app.post('/agent/call/transfer', requireAuth, callControlRoute((ext, req) => callControl.transfer(ext, req.body || {})));
+app.post('/agent/call/complete', requireAuth, callControlRoute((ext) => callControl.completeTransfer(ext)));
+app.post('/agent/call/merge', requireAuth, callControlRoute((ext) => callControl.merge(ext)));
+app.post('/agent/call/cancel', requireAuth, callControlRoute((ext) => callControl.cancelConsult(ext)));
+app.post('/agent/call/drop', requireAuth, callControlRoute((ext, req) => callControl.dropParty(ext, String((req.body || {}).partyId || ''))));
+app.post('/agent/call/leave', requireAuth, callControlRoute((ext) => callControl.leave(ext)));
 
 // In-call panel: has the customer on the agent's click-to-call answered
 // yet? (The agent's own leg answers first, so the browser can't tell.)
@@ -2385,8 +2412,15 @@ app.get('/admin/reports/hourly', requireRole('admin'), async (req, res) => {
 });
 
 // --- ARI event handling: drives the click-to-call flow above ---
+callControl.init({
+  pool, ari, ami, logEvent, setAgentStatus, findAgentIdByExtension, resolveDestination,
+  activeCalls, queueCallChannels, APP_NAME,
+});
+
 ari.connectEvents(APP_NAME, async (event) => {
   try {
+    // Transfer / conference channels and calls are handled there.
+    if (await callControl.onAriEvent(event)) return;
     if (event.type === 'StasisStart') {
       const [tag] = event.args;
 
@@ -2454,9 +2488,9 @@ ari.connectEvents(APP_NAME, async (event) => {
         // from_extension isn't known yet - Asterisk's queue engine decides
         // who answers, not us. AMI's AgentConnect event fills it in.
         const [insertResult] = await pool.query(
-          `INSERT INTO calls (tenant_id, direction, to_number, campaign_id, auto_answer)
-           VALUES (1, 'inbound', ?, ?, ?)`,
-          [callerNumber, campaign.id, campaign.auto_answer]
+          `INSERT INTO calls (tenant_id, direction, to_number, campaign_id, auto_answer, channel_name)
+           VALUES (1, 'inbound', ?, ?, ?, ?)`,
+          [callerNumber, campaign.id, campaign.auto_answer, event.channel.name]
         );
         const callId = insertResult.insertId;
         queueCallChannels.set(event.channel.name, callId);
@@ -2610,7 +2644,10 @@ ami.on('AgentConnect', async (fields) => {
     const extensionName = match ? match[1] : null;
     if (!extensionName) return;
     // Dialer calls already have answer_time (when the customer picked up).
-    await pool.query('UPDATE calls SET from_extension = ?, answer_time = COALESCE(answer_time, NOW()) WHERE id = ?', [extensionName, callId]);
+    await pool.query(
+      'UPDATE calls SET from_extension = ?, agent_channel = ?, answer_time = COALESCE(answer_time, NOW()) WHERE id = ?',
+      [extensionName, fields.DestChannel || null, callId]
+    );
     await logEvent(callId, 'agent_answered', { extensionName, interface: fields.Interface });
     if (attemptId) {
       await pool.query(
@@ -2629,6 +2666,9 @@ ami.on('AgentComplete', async (fields) => {
     if (!found) return;
     const { callId, attemptId } = found;
     queueCallChannels.delete(fields.Channel);
+    // Taking a call over for transfer/conference ends its Queue() bridge -
+    // that's not the call ending.
+    if (callControl.isControlled(callId)) return;
     if (attemptId) {
       await pool.query("UPDATE dial_attempts SET status = 'ended', ended_at = NOW() WHERE id = ?", [attemptId]);
     }
@@ -2656,6 +2696,7 @@ ami.on('QueueCallerAbandon', async (fields) => {
     if (!found) return;
     const { callId, attemptId } = found;
     queueCallChannels.delete(fields.Channel);
+    if (callControl.isControlled(callId)) return;
     await pool.query("UPDATE calls SET end_time = NOW(), disposition = 'abandoned' WHERE id = ?", [callId]);
     await logEvent(callId, 'abandoned', {});
     // Customer hung up while waiting for an agent.
