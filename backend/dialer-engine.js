@@ -99,9 +99,15 @@ async function hopperCounts(campaignId) {
   return { ready: get('ready'), locked: get('locked') };
 }
 
+// SQL condition: the lead has a dialer call still in progress. Its
+// next_call_at is only set when that call ends, so without this check the
+// lead looks dialable mid-call and could be dialed twice.
+const LEAD_HAS_OPEN_ATTEMPT = `EXISTS (SELECT 1 FROM dial_attempts da WHERE da.lead_id = l.id AND da.status <> 'ended')`;
+
 // Drop rows that stopped being dialable since they were queued: the lead
 // got a final disposition, was rescheduled, moved campaign, ran out of
-// attempts, its list was deactivated, or its number went on the DNC list.
+// attempts, its list was deactivated, its number went on the DNC list, or
+// it is on a dialer call right now.
 async function cleanHopper(c) {
   await pool.query(
     `UPDATE dial_hopper SET status = 'ready', locked_at = NULL, locked_by = NULL
@@ -116,6 +122,7 @@ async function cleanHopper(c) {
        l.is_final = 1 OR l.campaign_id IS NULL OR l.campaign_id <> h.campaign_id
        OR (l.next_call_at IS NOT NULL AND l.next_call_at > NOW())
        OR l.attempts >= ? OR (ls.id IS NOT NULL AND ls.is_active = 0)
+       OR ${LEAD_HAS_OPEN_ATTEMPT}
      )`,
     [c.id, c.max_attempts]
   );
@@ -148,6 +155,7 @@ async function fillHopper(c, idleAgents, counts) {
        AND (ls.id IS NULL OR ls.is_active = 1)
        AND l.status <> 'do_not_call'
        AND h.id IS NULL
+       AND NOT ${LEAD_HAS_OPEN_ATTEMPT}
      ORDER BY (cb.id IS NOT NULL) DESC, list_priority DESC, l.priority DESC, l.attempts ASC, l.id ASC
      LIMIT ?`,
     [c.id, c.max_attempts, need * 2]
@@ -365,6 +373,8 @@ async function claimLeadForDialing(c, ratio) {
     const [rows] = await conn.query(
       `SELECT h.id, h.lead_id, l.phone FROM dial_hopper h JOIN leads l ON l.id = h.lead_id
        WHERE h.campaign_id = ? AND h.status = 'ready' AND h.reserved_user_id IS NULL
+         AND l.is_final = 0 AND (l.next_call_at IS NULL OR l.next_call_at <= NOW())
+         AND NOT ${LEAD_HAS_OPEN_ATTEMPT}
        ORDER BY h.is_callback DESC, h.list_priority DESC, h.lead_priority DESC, h.attempts, h.lead_id
        LIMIT 1 FOR UPDATE SKIP LOCKED`,
       [c.id]
