@@ -1046,6 +1046,33 @@ Backup `~/backups/20261008-073418/`. Rollback: restore `server.js`, `dialer-engi
 
 ---
 
+## First real-number test + fixes (2026-10-08, dialforge-dev, trunk `dialforge-nxtra1`)
+5 dialer calls on real mobiles. Found:
+- **agent04 saw no queue**: not in any team, and Predictive_Test wasn't mapped to a team (Default Team still pointed at deleted campaign 3). Fixed via Teams UI; deleting a campaign now also removes its team mappings, recycle rules, dispositions and dialer status.
+- **Lead redialed immediately after "no answer"** (commit `d963b67`): the hopper refill re-queued a lead while its call was still ringing. Now a lead with a call in progress is never queued or dialed.
+- **AMD false positives**: 2 of 3 answered humans hung up as "machine" (long "hello…" → LONGGREETING; 2.5 s silence → INITIALSILENCE). Recommendation: keep AMD **off** for Indian mobiles unless tuned.
+
+## Predictive Dialer D9 — Recycling / redial (2026-10-08, dialforge-dev)
+### What it does
+- **Automatic (Campaigns → Recycle rules)**: per unsuccessful result — No answer, Busy, Answering machine, Network error (congestion/failed), Abandoned (incl. hung up waiting) — choose **Auto redial** on/off, **Redial after (min)** and **Max times**. Defaults: 60/3, 15/3, 120/2, 10/3, 2/3. Tries used up (or rule off) → lead set aside (`is_final=1`) until recycled by hand. Campaign **Max attempts** still caps the total. Lead status now shows what happened (`busy`, `machine`, `network_error`, `abandoned`, `no_answer`).
+- **Manual (Leads → Lists → Recycle)**: per list, a table by status (leads / dialable now / waiting for retry / done); tick statuses → **Recycle** → those leads are dialable immediately (optionally attempts reset to 0). Never recycles Do Not Call, DNC-list numbers, or a lead on a call. Each recycle is logged (`recycle_log`) and shown as "Recent" in the card.
+- Lists table has a **Dialable now** column; Dialer engine note hints "recycle a list" when it runs dry.
+- Agent outcomes (agent picks "No Answer") still use the Dispositions retry time.
+
+### What changed
+- DB (`migration-recycle.sql`): `campaign_recycle_rules`, `recycle_log`, `leads.recycled_at`, index `dial_attempts(lead_id, started_at)`.
+- `dialer-common.js`: `finishAttempt` applies the campaign's rule (`getRecycleRules`, defaults in `DEFAULT_RECYCLE_RULES`); tries counted since `recycled_at`.
+- `server.js`: `GET/PUT /admin/campaigns/:id/recycle-rules`, `GET/POST /admin/lists/:id/recycle`, `dialable_count` on `/admin/lists`, campaign delete cleanup.
+- `admin.html`: Recycle rules card, Recycle list card, Dialable column, list names HTML-escaped.
+
+### Deploy / rollback
+Backup `~/backups/pre-d9-20261008-094721/` (DB dump + the 4 files). Rollback: copy the 4 files back (`admin.html` → `public/`), restart `dialforge-backend` and `dialforge-dialer`; the new tables/column can stay.
+
+### Verified
+- 9 unit tests of the recycle logic (defaults, tries used up, rule off, overrides, result grouping); admin UI exercised in jsdom with no JS errors; summary SQL run on the real list; both services healthy.
+
+---
+
 ## How I'll keep this doc going
 
 I'll update this file after each meaningful step (not after every single command) — so it stays a fast, high-signal reference of *what exists and why*, not a full transcript. If you ever want the full command-by-command detail for something, ask and I'll pull it from the session.

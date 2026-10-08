@@ -333,7 +333,7 @@ async function processCampaign(c) {
   else added = await fillHopper(c, idle, await hopperCounts(c.id));
 
   const counts = await hopperCounts(c.id);
-  if (!note && counts.ready === 0) note = 'no dialable leads (check active lists, attempts used, retry/callback times)';
+  if (!note && counts.ready === 0) note = 'no dialable leads - check active lists and retry/callback times, or recycle a list (Leads -> Recycle)';
   if (!note && isAutoDial(c) && !ariReady) note = 'not connected to Asterisk (ARI) - cannot dial';
   if (added) log(`campaign ${c.id}: added ${added} lead(s) to hopper (ready=${counts.ready})`);
   const attempts = await attemptCounts(c.id);

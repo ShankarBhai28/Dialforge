@@ -29,12 +29,42 @@ function isWithinCallWindow(campaign) {
 // Used by the engine (unanswered calls: busy, no answer, ...) and the web
 // backend (answered calls: AMI tells it abandoned / machine), so a lead is
 // rescheduled the same way whichever process saw the outcome.
-const RETRY_LIKE_NO_ANSWER = ['no_answer', 'busy', 'congestion', 'failed', 'machine'];
-const CALL_BACK_SOON = ['abandoned', 'customer_hangup'];  // they answered - try again shortly
+// --- Recycling (D9) ---
+// Each unsuccessful result belongs to one recycle rule (per campaign, see
+// campaign_recycle_rules): redial after delay_min minutes, at most
+// max_tries times. The lead's status shows what last happened.
+const RECYCLE_RULE_FOR_RESULT = {
+  no_answer: 'no_answer', busy: 'busy', machine: 'machine',
+  congestion: 'congestion', failed: 'congestion',
+  abandoned: 'abandoned', customer_hangup: 'abandoned',
+};
+const RECYCLE_LEAD_STATUS = {
+  no_answer: 'no_answer', busy: 'busy', machine: 'machine', congestion: 'network_error', abandoned: 'abandoned',
+};
+const DEFAULT_RECYCLE_RULES = {
+  no_answer: { enabled: 1, delay_min: 60, max_tries: 3 },
+  busy: { enabled: 1, delay_min: 15, max_tries: 3 },
+  machine: { enabled: 1, delay_min: 120, max_tries: 2 },
+  congestion: { enabled: 1, delay_min: 10, max_tries: 3 },
+  abandoned: { enabled: 1, delay_min: 2, max_tries: 3 },  // they answered and got no agent - call back soon
+};
+
+// A campaign's rules, defaults filled in for any result it has no row for.
+async function getRecycleRules(pool, campaignId) {
+  const [rows] = await pool.query(
+    'SELECT result, enabled, delay_min, max_tries FROM campaign_recycle_rules WHERE campaign_id = ?', [campaignId]
+  );
+  const rules = {};
+  for (const key of Object.keys(DEFAULT_RECYCLE_RULES)) {
+    const r = rows.find((x) => x.result === key);
+    rules[key] = r ? { enabled: r.enabled, delay_min: r.delay_min, max_tries: r.max_tries } : { ...DEFAULT_RECYCLE_RULES[key] };
+  }
+  return rules;
+}
 
 // Records the final result once (first writer wins - several events can
-// report the same call ending) and reschedules the lead. Returns true if
-// this call recorded it.
+// report the same call ending) and reschedules the lead by the campaign's
+// recycle rule for that result. Returns true if this call recorded it.
 async function finishAttempt(pool, attemptId, result, hangupCause) {
   const [upd] = await pool.query(
     `UPDATE dial_attempts SET result = ?, hangup_cause = COALESCE(?, hangup_cause), status = 'ended', ended_at = NOW()
@@ -46,22 +76,36 @@ async function finishAttempt(pool, attemptId, result, hangupCause) {
   if (attempt.call_id) {
     await pool.query('UPDATE calls SET end_time = COALESCE(end_time, NOW()), disposition = ? WHERE id = ?', [result, attempt.call_id]);
   }
-  if (RETRY_LIKE_NO_ANSWER.includes(result)) {
-    // Same retry delay the campaign uses for the agent's "No Answer".
-    const [d] = await pool.query(
-      "SELECT retry_after_min FROM campaign_dispositions WHERE campaign_id = ? AND code = 'no_answer'", [attempt.campaign_id]
+  const ruleKey = RECYCLE_RULE_FOR_RESULT[result];
+  if (ruleKey) {
+    const rule = (await getRecycleRules(pool, attempt.campaign_id))[ruleKey];
+    const sameKind = Object.keys(RECYCLE_RULE_FOR_RESULT).filter((r) => RECYCLE_RULE_FOR_RESULT[r] === ruleKey);
+    const [[{ n }]] = await pool.query(
+      `SELECT COUNT(*) AS n FROM dial_attempts a JOIN leads l ON l.id = a.lead_id
+       WHERE a.lead_id = ? AND a.result IN (?) AND a.started_at >= COALESCE(l.recycled_at, '1000-01-01')`,
+      [attempt.lead_id, sameKind]
     );
-    const retryMin = (d[0] && d[0].retry_after_min) || 60;
-    await pool.query(
-      "UPDATE leads SET status = 'no_answer', next_call_at = NOW() + INTERVAL ? MINUTE WHERE id = ? AND is_final = 0",
-      [retryMin, attempt.lead_id]
-    );
-  } else if (CALL_BACK_SOON.includes(result)) {
-    await pool.query('UPDATE leads SET next_call_at = NOW() + INTERVAL 2 MINUTE WHERE id = ? AND is_final = 0', [attempt.lead_id]);
+    const status = RECYCLE_LEAD_STATUS[ruleKey];
+    if (rule.enabled && n < rule.max_tries) {
+      await pool.query(
+        'UPDATE leads SET status = ?, next_call_at = NOW() + INTERVAL ? MINUTE WHERE id = ? AND is_final = 0',
+        [status, rule.delay_min, attempt.lead_id]
+      );
+    } else {
+      // Rule off or tries used up: the dialer leaves it alone until an
+      // admin recycles the list (Leads -> Recycle).
+      await pool.query(
+        'UPDATE leads SET status = ?, is_final = 1, next_call_at = NULL WHERE id = ? AND is_final = 0',
+        [status, attempt.lead_id]
+      );
+    }
   } else if (result === 'invalid') {
     await pool.query("UPDATE leads SET status = 'invalid_number', is_final = 1 WHERE id = ?", [attempt.lead_id]);
   }
   return true;
 }
 
-module.exports = { normalizePhone, localTimeIn, isWithinCallWindow, finishAttempt };
+module.exports = {
+  normalizePhone, localTimeIn, isWithinCallWindow, finishAttempt,
+  DEFAULT_RECYCLE_RULES, RECYCLE_LEAD_STATUS, getRecycleRules,
+};

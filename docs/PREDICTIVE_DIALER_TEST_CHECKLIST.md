@@ -77,5 +77,13 @@ Needs volume to learn (≥ 20 finished calls in 15 min) — with 1-2 test lines 
 - [ ] Force abandons (agent to Break while lines ring, answer them) → abandon % rises → within ~30 s **adjust** drops; above 6% (2× target) the note says "holding at 1.0".
 - [ ] Dialer → **Stop**. Campaigns back to the mode you want.
 
+## D9 — Recycling / redial
+- [ ] Campaigns → **Recycle rules**: see 5 rows (No answer 60/3, Busy 15/3, Answering machine 120/2, Network error 10/3, Abandoned 2/3). Set **No answer → redial after 2 min, max 2** → Save. Try max 0 → clear error.
+- [ ] Dialer running, agent Available, a lead with your number → **don't answer** → after ~2 min it's dialed again (not immediately) → don't answer again → it's **not** dialed a 3rd time (tries used up).
+- [ ] Leads → Lists: **Dialable now** column. Click **Recycle** on the list → table by status; No Answer ticked, Interested unticked, Do Not Call can't be ticked.
+- [ ] Keep "Reset attempt count" ticked → **Recycle** → "N lead(s) recycled" → Dialable now goes up → a running campaign dials them within seconds. "Recent:" shows who recycled what.
+- [ ] Put one of those numbers on the DNC list → Recycle again → "skipped: 1 on DNC".
+- [ ] Set the No answer rule back to what you want.
+
 ## After testing
 - [ ] Tell Claude what failed (step + what you saw) — fixes go in before the live trunk.

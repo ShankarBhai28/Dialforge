@@ -590,6 +590,25 @@
         <div id="dispoStatus"></div>
       </div>
 
+      <div class="card" id="recycleRulesCard" style="display:none;">
+        <h3 id="recycleRulesTitle">Recycle rules</h3>
+        <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 10px;">
+          What the dialer does after a call that didn't reach an agent. <b>Auto redial</b> on = call the lead again after the
+          given minutes, up to <b>max times</b> for that result; after that (or with auto redial off) the lead is set aside until
+          you recycle its list (Leads &rarr; Recycle). The campaign's <b>Max attempts</b> still caps the total calls per lead.
+          Agent outcomes (e.g. the agent picks "No Answer") use the Dispositions retry time instead.
+        </div>
+        <table id="recycleRulesTable">
+          <thead><tr><th>Result</th><th>Auto redial</th><th>Redial after (min)</th><th>Max times</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div style="margin-top: 14px;">
+          <button class="btn-primary" onclick="saveRecycleRules()">Save Recycle Rules</button>
+          <button class="refresh-btn" onclick="document.getElementById('recycleRulesCard').style.display='none'">Close</button>
+        </div>
+        <div id="recycleRulesStatus"></div>
+      </div>
+
     </div>
 
     <div class="section" id="section-numbers">
@@ -649,9 +668,32 @@
       <div class="card" style="padding: 0; overflow: hidden;">
         <h3 style="padding: 18px 18px 0;">Lists</h3>
         <table id="listsTable" style="margin: 10px 0 0;">
-          <thead><tr><th style="padding-left:18px;">Name</th><th>Campaign</th><th>Leads</th><th>Dialer</th><th>Priority</th><th>Created</th><th>Actions</th></tr></thead>
+          <thead><tr><th style="padding-left:18px;">Name</th><th>Campaign</th><th>Leads</th><th title="Can be dialed now: not final, attempts left, retry time reached">Dialable now</th><th>Dialer</th><th>Priority</th><th>Created</th><th>Actions</th></tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+
+      <div class="card" id="recycleCard" style="display:none;">
+        <h3 id="recycleTitle">Recycle list</h3>
+        <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 10px;">
+          Make leads dialable again <b>right away</b>: tick the statuses to redial, then Recycle. Leads on the DNC list, Do Not Call
+          leads and leads on a call right now are never recycled. Final outcomes (e.g. Interested) are unticked by default - only
+          tick them if you really want those customers called again.
+        </div>
+        <table id="recycleTable">
+          <thead><tr><th></th><th>Status</th><th>Leads</th><th>Dialable now</th><th>Waiting for retry</th><th>Done (final / attempts used)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <label style="display:inline-flex; align-items:center; gap:6px; font-size:13px; margin: 12px 0;">
+          <input type="checkbox" id="recycleResetAttempts" checked style="width:auto; margin:0;">
+          <span id="recycleResetLabel">Reset attempt count to 0</span>
+        </label>
+        <div>
+          <button class="btn-primary" onclick="doRecycle()">Recycle</button>
+          <button class="refresh-btn" onclick="document.getElementById('recycleCard').style.display='none'">Close</button>
+        </div>
+        <div id="recycleStatus"></div>
+        <div id="recycleHistory" style="font-size: 12px; color: var(--muted); margin-top: 10px;"></div>
       </div>
 
       <div class="card">
@@ -1007,6 +1049,7 @@ async function loadCampaigns() {
       <td class="row-actions">
         <button class="btn-icon" onclick="editCampaign(${c.id})">Edit</button>
         <button class="btn-icon" onclick="openDispositions(${c.id})">Dispositions</button>
+        <button class="btn-icon" onclick="openRecycleRules(${c.id})">Recycle rules</button>
         <button class="btn-icon danger" onclick="deleteCampaign(${c.id}, '${c.name.replace(/'/g, "\\'")}')">Delete</button>
       </td>
     `;
@@ -1724,6 +1767,131 @@ async function deleteTeam(id) {
   }
 }
 
+// --- Recycle rules (D9): automatic redial per unsuccessful result ---
+let recycleRulesCampaignId = null;
+
+async function openRecycleRules(campaignId) {
+  const c = campaignsCache.find((x) => x.id === campaignId);
+  recycleRulesCampaignId = campaignId;
+  document.getElementById('recycleRulesTitle').textContent = `Recycle rules - ${c ? c.name : ''}`;
+  document.getElementById('recycleRulesStatus').textContent = '';
+  const res = await fetch(`/admin/campaigns/${campaignId}/recycle-rules`);
+  const rules = await res.json();
+  const tbody = document.querySelector('#recycleRulesTable tbody');
+  tbody.innerHTML = '';
+  for (const r of rules) {
+    const tr = document.createElement('tr');
+    tr.dataset.result = r.result;
+    tr.innerHTML = `
+      <td style="font-weight:600;">${escapeHtml(r.label)}</td>
+      <td><input type="checkbox" class="rr-enabled" style="width:auto;"></td>
+      <td><input type="number" class="rr-delay" min="1" max="10080" style="width:90px;"></td>
+      <td><input type="number" class="rr-tries" min="1" max="20" style="width:70px;"></td>
+    `;
+    tr.querySelector('.rr-enabled').checked = !!r.enabled;
+    tr.querySelector('.rr-delay').value = r.delay_min;
+    tr.querySelector('.rr-tries').value = r.max_tries;
+    tbody.appendChild(tr);
+  }
+  const card = document.getElementById('recycleRulesCard');
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function saveRecycleRules() {
+  const rules = {};
+  document.querySelectorAll('#recycleRulesTable tbody tr').forEach((tr) => {
+    rules[tr.dataset.result] = {
+      enabled: tr.querySelector('.rr-enabled').checked,
+      delayMin: tr.querySelector('.rr-delay').value,
+      maxTries: tr.querySelector('.rr-tries').value,
+    };
+  });
+  const res = await fetch(`/admin/campaigns/${recycleRulesCampaignId}/recycle-rules`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rules }),
+  });
+  const data = await res.json().catch(() => ({}));
+  const el = document.getElementById('recycleRulesStatus');
+  el.textContent = res.ok ? 'Recycle rules saved.' : (data.error || 'Failed to save');
+  el.style.color = res.ok ? '#16a34a' : '#dc2626';
+}
+
+// --- Recycle a list (D9): manual redial ---
+// Ticked by default: results of calls that never reached anyone, plus
+// leads never dialed / callbacks. Final agent outcomes stay unticked.
+const RECYCLE_DEFAULT_TICK = ['new', 'no_answer', 'busy', 'machine', 'network_error', 'abandoned', 'callback'];
+let recycleListId = null;
+
+async function openRecycle(listId) {
+  recycleListId = listId;
+  document.getElementById('recycleStatus').textContent = '';
+  await loadRecycle();
+  const card = document.getElementById('recycleCard');
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function loadRecycle() {
+  const res = await fetch(`/admin/lists/${recycleListId}/recycle`);
+  const data = await res.json();
+  if (!res.ok) {
+    document.getElementById('recycleStatus').textContent = data.error || 'Failed to load';
+    return;
+  }
+  document.getElementById('recycleTitle').textContent = `Recycle list - ${data.list.name}`;
+  document.getElementById('recycleResetLabel').textContent =
+    `Reset attempt count to 0 (needed for leads that used all ${data.list.maxAttempts} attempts)`;
+  const tbody = document.querySelector('#recycleTable tbody');
+  tbody.innerHTML = '';
+  for (const st of data.statuses) {
+    const tr = document.createElement('tr');
+    tr.dataset.status = st.status;
+    tr.innerHTML = `
+      <td><input type="checkbox" class="rc-pick" style="width:auto;" ${st.recyclable ? '' : 'disabled title="never recycled"'}></td>
+      <td>${escapeHtml(st.label || st.status)}${st.label ? ` <span class="muted-cell">(${escapeHtml(st.status)})</span>` : ''}</td>
+      <td>${st.total}</td><td>${st.dialable}</td><td>${st.scheduled}</td><td>${st.done}</td>
+    `;
+    tr.querySelector('.rc-pick').checked = st.recyclable && RECYCLE_DEFAULT_TICK.includes(st.status);
+    tbody.appendChild(tr);
+  }
+  if (!data.statuses.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--muted); padding: 14px;">This list has no leads.</td></tr>';
+  }
+  document.getElementById('recycleHistory').innerHTML = data.history.length
+    ? 'Recent: ' + data.history.map((h) =>
+      `${fmt(h.created_at)} - ${escapeHtml(h.username || '?')} recycled ${h.leads_recycled} (${escapeHtml(h.statuses)}${h.reset_attempts ? ', attempts reset' : ''})`
+    ).join('<br>')
+    : '';
+}
+
+async function doRecycle() {
+  const statuses = [...document.querySelectorAll('#recycleTable tbody tr')]
+    .filter((tr) => tr.querySelector('.rc-pick') && tr.querySelector('.rc-pick').checked)
+    .map((tr) => tr.dataset.status);
+  const el = document.getElementById('recycleStatus');
+  if (!statuses.length) { el.textContent = 'Tick at least one status'; el.style.color = '#dc2626'; return; }
+  if (!confirm(`Make all leads with status ${statuses.join(', ')} dialable again now?`)) return;
+  const res = await fetch(`/admin/lists/${recycleListId}/recycle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ statuses, resetAttempts: document.getElementById('recycleResetAttempts').checked }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    const skipped = [data.skippedDnc ? `${data.skippedDnc} on DNC` : '', data.skippedOnCall ? `${data.skippedOnCall} on a call` : '']
+      .filter(Boolean).join(', ');
+    el.textContent = `${data.recycled} lead(s) recycled${skipped ? ` (skipped: ${skipped})` : ''}. A running campaign dials them within seconds.`;
+    el.style.color = '#16a34a';
+    loadRecycle();
+    loadLists();
+  } else {
+    el.textContent = data.error || 'Recycle failed';
+    el.style.color = '#dc2626';
+  }
+}
+
 let listsCache = [];
 let editingListId = null;
 
@@ -1736,21 +1904,23 @@ async function loadLists() {
   for (const l of lists) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style="padding-left: 18px; font-weight: 600;">${l.name}</td>
-      <td>${l.campaign_name || '<span class="muted-cell">—</span>'}</td>
+      <td style="padding-left: 18px; font-weight: 600;">${escapeHtml(l.name)}</td>
+      <td>${l.campaign_name ? escapeHtml(l.campaign_name) : '<span class="muted-cell">—</span>'}</td>
       <td>${l.lead_count}</td>
+      <td>${l.dialable_count}</td>
       <td>${l.is_active ? 'Active' : '<span class="muted-cell">Inactive</span>'}</td>
       <td>${l.priority}</td>
       <td>${fmt(l.created_at)}</td>
       <td class="row-actions">
         <button class="btn-icon" onclick="editList(${l.id})">Edit</button>
+        <button class="btn-icon" onclick="openRecycle(${l.id})">Recycle</button>
         <button class="btn-icon danger" onclick="deleteList(${l.id}, '${l.name.replace(/'/g, "\\'")}')">Delete</button>
       </td>
     `;
     tbody.appendChild(tr);
   }
   if (lists.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--muted); padding: 20px;">No lists yet - create one above.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color: var(--muted); padding: 20px;">No lists yet - create one above.</td></tr>';
   }
 
   const importSelect = document.getElementById('importList');
