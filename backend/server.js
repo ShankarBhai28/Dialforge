@@ -175,6 +175,7 @@ app.post('/auth/login', async (req, res) => {
 
 app.post('/auth/logout', async (req, res) => {
   if (req.session.user && req.session.user.role === 'agent') {
+    await releasePreviewLocks(req.session.user.id, null);
     await closeOpenStatus(req.session.user.id);
     await syncQueueMembership(req.session.user.id, req.session.user.extensionName, 'offline', null);
   }
@@ -252,6 +253,12 @@ async function syncQueueMembership(userId, extensionName, newStatus, explicitQue
 }
 
 async function setAgentStatus(userId, status, reason, queueId, extensionName) {
+  let keepCampaignId = null;
+  if (status === 'available' && queueId) {
+    const [c] = await pool.query('SELECT id FROM campaigns WHERE queue_id = ? LIMIT 1', [queueId]);
+    keepCampaignId = c[0] ? c[0].id : null;
+  }
+  await releasePreviewLocks(userId, keepCampaignId).catch((err) => console.error('[preview release failed]', err.message));
   await closeOpenStatus(userId);
   await pool.query(
     'INSERT INTO agent_status_log (user_id, status, reason, queue_id, extension_name) VALUES (?, ?, ?, ?, ?)',
@@ -1067,6 +1074,117 @@ app.get('/admin/campaigns/:id/hopper', requireRole('admin'), async (req, res) =>
   res.json(rows);
 });
 
+// --- Agent: Preview mode (D6) ---
+// The agent "claims" the next hopper lead: the row is locked to them
+// (locked_by = user:<id>) so no other agent or the dialer can take it,
+// they read it, then Dial (normal click2call) or Skip.
+const previewLockOwner = (userId) => `user:${userId}`;
+
+async function currentAgentStatus(userId) {
+  const [rows] = await pool.query(
+    'SELECT status FROM agent_status_log WHERE user_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1', [userId]
+  );
+  return rows[0] ? rows[0].status : 'offline';
+}
+
+// Locks are given back to the hopper when the agent stops working that
+// campaign (break, ACW, logout, switching queue) - otherwise a lead would
+// sit locked until the engine's 10-minute stale-lock expiry.
+async function releasePreviewLocks(userId, keepCampaignId) {
+  await pool.query(
+    `UPDATE dial_hopper SET status = 'ready', locked_at = NULL, locked_by = NULL
+     WHERE locked_by = ? AND (? IS NULL OR campaign_id <> ?)`,
+    [previewLockOwner(userId), keepCampaignId || null, keepCampaignId || null]
+  );
+}
+
+async function previewLeadDetails(hopperRow) {
+  const [rows] = await pool.query(`
+    SELECT l.id, l.name, l.phone, l.alt_phone, l.status, l.attempts, l.custom_data, ls.name AS list_name,
+      cb.callback_at, cb.note AS callback_note
+    FROM leads l
+    LEFT JOIN lists ls ON ls.id = l.list_id
+    LEFT JOIN callbacks cb ON cb.lead_id = l.id AND cb.status = 'pending'
+    WHERE l.id = ?
+  `, [hopperRow.lead_id]);
+  return rows[0] ? { ...rows[0], is_callback: !!hopperRow.is_callback } : null;
+}
+
+// Why the agent can't get a preview lead right now (null = they can).
+async function previewBlocker(userId, campaign) {
+  if (!campaign) return 'pick a queue first';
+  if (campaign.dial_mode !== 'preview') return 'not a preview campaign';
+  if (campaign.dialer_state !== 'running') return `dialer is ${campaign.dialer_state} for this campaign`;
+  if (!isWithinCallWindow(campaign)) return 'outside calling hours';
+  if ((await currentAgentStatus(userId)) !== 'available') return 'go Available to get leads';
+  return null;
+}
+
+app.get('/agent/preview', requireAuth, async (req, res) => {
+  if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
+  const campaign = await findCurrentCampaign(req.session.user.id);
+  if (!campaign || campaign.dial_mode !== 'preview') return res.json({ enabled: false });
+  const [held] = await pool.query('SELECT * FROM dial_hopper WHERE locked_by = ? AND campaign_id = ? LIMIT 1',
+    [previewLockOwner(req.session.user.id), campaign.id]);
+  res.json({
+    enabled: true,
+    blocker: await previewBlocker(req.session.user.id, campaign),
+    autodialSec: campaign.preview_autodial_sec || 0,
+    lead: held[0] ? await previewLeadDetails(held[0]) : null,
+  });
+});
+
+app.post('/agent/preview/next', requireAuth, async (req, res) => {
+  if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
+  const userId = req.session.user.id;
+  const campaign = await findCurrentCampaign(userId);
+  const blocker = await previewBlocker(userId, campaign);
+  if (blocker) return res.json({ lead: null, blocker });
+
+  const owner = previewLockOwner(userId);
+  // Already holding one (e.g. page refresh) - give the same lead back.
+  const [held] = await pool.query('SELECT * FROM dial_hopper WHERE locked_by = ? AND campaign_id = ? LIMIT 1', [owner, campaign.id]);
+  if (held[0]) return res.json({ lead: await previewLeadDetails(held[0]) });
+
+  // FOR UPDATE SKIP LOCKED: two agents asking at the same moment each get
+  // a different row instead of one waiting on (or stealing) the other's.
+  const conn = await pool.getConnection();
+  let row = null;
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.query(`
+      SELECT * FROM dial_hopper
+      WHERE campaign_id = ? AND status = 'ready' AND (reserved_user_id IS NULL OR reserved_user_id = ?)
+      ORDER BY (reserved_user_id = ?) DESC, is_callback DESC, list_priority DESC, lead_priority DESC, attempts, lead_id
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    `, [campaign.id, userId, userId]);
+    row = rows[0] || null;
+    if (row) {
+      await conn.query("UPDATE dial_hopper SET status = 'locked', locked_at = NOW(), locked_by = ? WHERE id = ?", [owner, row.id]);
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    console.error('[preview next failed]', err);
+    return res.status(500).json({ error: 'failed to get next lead' });
+  } finally {
+    conn.release();
+  }
+  if (!row) return res.json({ lead: null, blocker: 'no leads waiting - the hopper is empty' });
+  res.json({ lead: await previewLeadDetails(row) });
+});
+
+// Skip: lead leaves the hopper and isn't offered again for 15 minutes.
+app.post('/agent/preview/skip', requireAuth, async (req, res) => {
+  if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
+  const [held] = await pool.query('SELECT id, lead_id FROM dial_hopper WHERE locked_by = ?', [previewLockOwner(req.session.user.id)]);
+  if (!held[0]) return res.status(404).json({ error: 'you have no preview lead' });
+  await pool.query('DELETE FROM dial_hopper WHERE id = ?', [held[0].id]);
+  await pool.query('UPDATE leads SET next_call_at = NOW() + INTERVAL 15 MINUTE WHERE id = ?', [held[0].lead_id]);
+  res.json({ status: 'ok' });
+});
+
 // --- Admin: per-campaign dispositions ---
 app.get('/admin/campaigns/:id/dispositions', requireRole('admin'), async (req, res) => {
   res.json(await getDispositions(Number(req.params.id)));
@@ -1776,6 +1894,11 @@ app.post('/calls/click2call', requireAuth, async (req, res) => {
   }
 
   if (leadId) {
+    const [inHopper] = await pool.query('SELECT locked_by FROM dial_hopper WHERE lead_id = ?', [leadId]);
+    if (inHopper[0] && inHopper[0].locked_by && inHopper[0].locked_by !== previewLockOwner(req.session.user.id)) {
+      return res.status(409).json({ error: 'another agent is previewing this lead right now' });
+    }
+    await pool.query('DELETE FROM dial_hopper WHERE lead_id = ?', [leadId]);
     await pool.query('UPDATE leads SET attempts = attempts + 1, last_attempt_at = NOW() WHERE id = ?', [leadId]);
   }
 

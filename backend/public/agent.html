@@ -113,6 +113,13 @@
   #formFields .choices { display: flex; flex-wrap: wrap; gap: 4px 14px; font-weight: 500; color: var(--text); }
   #formFields .choices input { width: auto; margin-right: 4px; }
   #formContext { font-size: 12.5px; color: var(--muted); margin: -6px 0 12px; }
+  #previewCard { border: 2px solid var(--primary-light); }
+  #previewCard .pv-name { font-size: 20px; font-weight: 800; }
+  #previewCard .pv-phone { font-size: 16px; font-weight: 600; color: var(--muted); margin: 2px 0 10px; }
+  #previewCard .pv-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--muted); margin-bottom: 12px; }
+  #previewCard .pv-data { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 16px; font-size: 13px; margin-bottom: 14px; }
+  #previewCard .pv-data b { color: var(--muted); font-weight: 600; display: block; font-size: 11.5px; }
+  #previewCountdown { font-size: 13px; font-weight: 700; color: #b45309; margin-left: 10px; }
   #formMsg { font-size: 13px; margin-top: 10px; min-height: 18px; font-weight: 500; }
 
   .btn-primary {
@@ -366,6 +373,11 @@
       </div>
     </div>
 
+    <div class="card" id="previewCard" style="display:none;">
+      <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Preview - Next Lead</h3>
+      <div id="previewBody"></div>
+    </div>
+
     <div class="card" id="callbacksCard" style="display:none;">
       <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> My Callbacks</h3>
       <table id="callbacksTable">
@@ -448,6 +460,9 @@ let jssipSession = null;
 let expectingOwnCallLeg = false;
 let activeLeadId = null;
 let campaignDispositions = [];  // current campaign's dispositions (from server)
+let previewState = { enabled: false, lead: null, blocker: null, autodialSec: 0 };
+let previewCountdownTimer = null;
+let previewBusy = false;   // a next/skip/dial request is in flight
 let leadsById = new Map();     // last loaded leads, for form pre-fill
 let agentForm = null;      // the current campaign's form definition (or null)
 let formLeadId = null;     // lead/call the form will be saved against -
@@ -731,6 +746,7 @@ async function selectQueue(queueId, queueName) {
   loadLeads();
   loadAgentForm();
   loadCallbacks();
+  refreshPreview('available');
 }
 
 async function loadDispositions() {
@@ -837,6 +853,7 @@ async function loadStats() {
     currentQueueName = stats.currentQueueName || currentQueueName;
     renderStatusPill(stats.currentStatus, stats.currentReason, stats.currentQueueName);
   }
+  refreshPreview(stats.currentStatus);
 }
 
 async function loadLeads() {
@@ -901,8 +918,125 @@ async function callLead(leadId, phone) {
     setStatusMsg(`Call started (id ${data.callId}) — check your softphone.`);
   } else {
     setStatusMsg('Call failed: ' + (data.error || 'unknown error'), true);
+    activeLeadId = null;
+    expectingOwnCallLeg = false;
   }
   setTimeout(() => { loadCalls(); loadStats(); }, 2000);
+}
+
+// --- Preview mode (D6) ---
+// When the campaign is a running Preview campaign and the agent is free
+// (Available, no call, no outcome popup open), claim the next lead from
+// the hopper automatically; the agent reads it and clicks Dial or Skip.
+function agentIsFree(status) {
+  return status === 'available' && !jssipSession && !activeLeadId &&
+    document.getElementById('dispositionPopup').style.display !== 'flex';
+}
+
+async function refreshPreview(status) {
+  if (previewBusy) return;
+  const res = await fetch('/agent/preview');
+  if (!res.ok) return;
+  previewState = await res.json();
+  if (previewState.enabled && !previewState.lead && !previewState.blocker && agentIsFree(status)) {
+    previewBusy = true;
+    try {
+      const r = await fetch('/agent/preview/next', { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      previewState.lead = data.lead || null;
+      previewState.blocker = data.blocker || (r.ok ? null : data.error);
+    } finally {
+      previewBusy = false;
+    }
+  }
+  renderPreview();
+}
+
+function renderPreview() {
+  const card = document.getElementById('previewCard');
+  if (!previewState.enabled) { card.style.display = 'none'; stopPreviewCountdown(); return; }
+  card.style.display = 'block';
+  const body = document.getElementById('previewBody');
+  const lead = previewState.lead;
+  if (!lead) {
+    stopPreviewCountdown();
+    body.innerHTML = `<div style="color: var(--muted); font-size: 13px;">${escapeHtml(previewState.blocker || 'Waiting for the next lead…')}</div>`;
+    return;
+  }
+  if (body.dataset.leadId === String(lead.id)) return;  // same lead already shown - keep countdown running
+  body.dataset.leadId = String(lead.id);
+  const labels = Object.fromEntries((agentForm ? agentForm.fields : []).map((f) => [f.field_key, f.label]));
+  const data = Object.entries(lead.custom_data || {})
+    .map(([k, v]) => `<div><b>${escapeHtml(labels[k] || k)}</b>${escapeHtml(Array.isArray(v) ? v.join(', ') : v)}</div>`).join('');
+  body.innerHTML = `
+    <div class="pv-name">${escapeHtml(lead.name || 'Unknown name')}</div>
+    <div class="pv-phone">${escapeHtml(lead.phone)}${lead.alt_phone ? ' · alt ' + escapeHtml(lead.alt_phone) : ''}</div>
+    <div class="pv-meta">
+      <span>List: ${escapeHtml(lead.list_name || '—')}</span>
+      <span>Attempts so far: ${lead.attempts}</span>
+      <span>Last outcome: ${escapeHtml(lead.status === 'new' ? 'New' : dispositionLabel(lead.status))}</span>
+      ${lead.is_callback ? `<span style="color:#b45309; font-weight:700;">Callback${lead.callback_note ? ': ' + escapeHtml(lead.callback_note) : ''}</span>` : ''}
+    </div>
+    ${data ? `<div class="pv-data">${data}</div>` : ''}
+    <button class="btn-primary" onclick="previewDial()">${PHONE_ICON} Dial</button>
+    <button onclick="previewSkip()" style="margin-left:6px; padding:9px 16px; border:1px solid var(--border); border-radius:8px; background:white; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer;">Skip</button>
+    <span id="previewCountdown"></span>
+  `;
+  startPreviewCountdown();
+}
+
+// Optional auto-dial: the campaign's preview_autodial_sec counts down,
+// then dials by itself. Clicking anywhere in the card's countdown text
+// (or Skip) stops it.
+function startPreviewCountdown() {
+  stopPreviewCountdown();
+  let left = previewState.autodialSec;
+  if (!left) return;
+  const el = document.getElementById('previewCountdown');
+  const draw = () => { el.innerHTML = `Auto-dial in ${left}s · <a href="#" onclick="stopPreviewCountdown(true); return false;">stop</a>`; };
+  draw();
+  previewCountdownTimer = setInterval(() => {
+    left -= 1;
+    if (left <= 0) { stopPreviewCountdown(); previewDial(); return; }
+    draw();
+  }, 1000);
+}
+
+function stopPreviewCountdown(byUser) {
+  clearInterval(previewCountdownTimer);
+  previewCountdownTimer = null;
+  const el = document.getElementById('previewCountdown');
+  if (el) el.textContent = byUser ? 'Auto-dial stopped' : '';
+}
+
+async function previewDial() {
+  const lead = previewState.lead;
+  if (!lead || previewBusy) return;
+  stopPreviewCountdown();
+  previewBusy = true;
+  previewState.lead = null;
+  document.getElementById('previewBody').dataset.leadId = '';
+  document.getElementById('previewBody').innerHTML = `<div style="font-size:13px;">Dialing ${escapeHtml(lead.name || lead.phone)}…</div>`;
+  leadsById.set(lead.id, lead);  // so the form pre-fills from this lead
+  try {
+    await callLead(lead.id, lead.phone);
+  } finally {
+    previewBusy = false;
+  }
+}
+
+async function previewSkip() {
+  if (previewBusy) return;
+  stopPreviewCountdown();
+  previewBusy = true;
+  try {
+    await fetch('/agent/preview/skip', { method: 'POST' });
+    previewState.lead = null;
+    document.getElementById('previewBody').dataset.leadId = '';
+  } finally {
+    previewBusy = false;
+  }
+  refreshPreview('available');
 }
 
 // --- Campaign custom form ---

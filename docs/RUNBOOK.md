@@ -938,6 +938,36 @@ D6 — Preview mode: the next hopper lead pops up on the agent's screen; agent c
 
 ---
 
+## Predictive Dialer D6 — Preview mode (2026-10-08, dialforge-dev)
+
+### What & why
+First mode that places calls from the hopper — but **only when the agent clicks Dial** (or an optional countdown runs out). Safest auto mode: a human sees every lead before it's called, and it can never abandon a customer.
+
+### How it works
+- Campaign: Dial mode **Preview**, dialer **Started** on the Dialer page (engine fills the hopper as in D5).
+- Agent goes Available in that campaign's queue → the page (every 5 s poll, only when the agent is free: Available, no call, no outcome popup) asks `POST /agent/preview/next`.
+- Server **claims** one hopper row for that agent: `SELECT … FOR UPDATE SKIP LOCKED` → `status='locked', locked_by='user:<id>'`. SKIP LOCKED means two agents asking at the same instant get *different* leads — never the same one, and neither waits. "Only me" callbacks go only to their owner, and first.
+- **Preview card** shows name, phone, alt phone, list, attempts, last outcome, callback note, and the lead's uploaded data (form labels). Buttons: **Dial** (normal click-to-call → all D3 checks apply: DNC, calling hours, attempts counted) and **Skip** (lead leaves the hopper, not offered again for 15 min).
+- **Auto-dial countdown**: if the campaign's *Preview auto-dial (sec)* is set, Dial happens automatically after N seconds unless the agent clicks "stop" or Skip.
+- Refreshing the page gives the **same** held lead back (no lead lost or double-claimed).
+- Locks are **released back to the hopper** when the agent goes to Break/ACW, logs out, or switches to another campaign's queue (plus the engine's 10-min stale-lock expiry as a safety net).
+- Click-to-call now always removes the lead from the hopper when dialed, and refuses with "another agent is previewing this lead" if someone else holds it — no double dial between preview and manual.
+
+### What changed
+- No DB change. `server.js`: `GET /agent/preview`, `POST /agent/preview/next`, `POST /agent/preview/skip`, lock release in `setAgentStatus` + logout, hopper guard in click2call. `agent.html`: Preview card, countdown, auto-claim; a failed click2call no longer leaves the page thinking a call is in progress.
+
+### Deploy / rollback
+Backup `~/backups/20261008-071846/` (code only). Rollback: restore `server.js` + `public/` from it, restart backend.
+
+### Verified
+- Backend healthy; new endpoints 401 without login; the claim query (`FOR UPDATE SKIP LOCKED`) parses and runs on MySQL 8 (inside a rolled-back transaction).
+- End-to-end test: see `docs/PREDICTIVE_DIALER_TEST_CHECKLIST.md`.
+
+### Next
+D7 — Progressive mode: the engine originates calls itself (ARI), answered calls go to the campaign queue, every attempt logged in `dial_attempts` with its network result.
+
+---
+
 ## How I'll keep this doc going
 
 I'll update this file after each meaningful step (not after every single command) — so it stays a fast, high-signal reference of *what exists and why*, not a full transcript. If you ever want the full command-by-command detail for something, ask and I'll pull it from the session.
