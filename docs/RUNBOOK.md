@@ -768,6 +768,136 @@ DEPLOY.md section 7 (Node.js) onwards.
 
 ---
 
+## Predictive Dialer D1 — Teams + team→campaign mapping (2026-10-08, dialforge-dev)
+
+Plan for the whole predictive-dialer track: `docs/PREDICTIVE_DIALER_PLAN.md` (steps D1–D11). This is D1.
+
+### What & why
+Before this, every agent saw every active campaign's queue. Now: **agent → team(s) → campaigns**. An agent only sees (and can only go Available on) queues of campaigns mapped to one of their *active* teams. An agent in no team sees nothing. Later dialer steps rely on this to know which agents belong to which campaign.
+
+### What changed
+- **DB** (`backend/migration-teams.sql`): `teams`, `team_members` (team↔user), `team_campaigns` (team↔campaign). Link tables use `ON DELETE CASCADE`, so deleting a team/campaign/user only drops the mapping, never call/lead data.
+- **Zero-change seed**: the migration creates "Default Team" containing all existing agents + all campaigns, so nobody lost access on deploy.
+- **Backend** (`server.js`): `GET /queues` filtered by team for agents (admins unchanged); `POST /agent/status` returns 403 if an agent tries to go Available on a queue outside their teams (server-side enforcement, not just hidden in UI; Break/ACW never blocked); new `GET/POST/PUT/DELETE /admin/teams` — create/edit replace members+campaigns inside one transaction.
+- **Admin UI**: new **Teams** sidebar module (name, status, agent + campaign checkboxes). Names are HTML-escaped.
+- **Agent UI**: if the remembered queue gets unmapped mid-session, the agent is told and re-picks.
+
+### Deploy (how it was done)
+1. Backup: `~/backups/20261008-062946/` (DB dump + old `server.js` + `public/`).
+2. `scp` migration, `server.js`, `admin.html`, `agent.html` to `~/dialforge-backend/`.
+3. `sudo mysql dialforge_dev < migration-teams.sql` → `sudo systemctl restart dialforge-backend` (restart logs everyone out — sessions are in memory).
+
+**Rollback**: copy `server.js` + `public/` back from the backup folder, restart, then `DROP TABLE team_campaigns, team_members, teams;`.
+
+### Verified
+- `/health` OK, ARI reconnected, Teams page served, `/admin/teams` → 401 without login.
+- Ran the team-filter SQL directly: each of agent1001/1002/1003 resolves to the same 3 queues as before.
+- **Not yet done (you, in the browser)**: create a second team with one agent + one campaign, untick that agent from Default Team, log in as that agent → only that campaign's queue should show.
+
+### Noticed, not touched
+`systemctl` warns the `dialforge-backend.service` unit file changed on disk without `daemon-reload`. Pre-existing; run `sudo systemctl daemon-reload` when convenient.
+
+### Next
+D2 — Custom Forms module.
+
+---
+
+## Predictive Dialer D2 — Custom Forms (2026-10-08, dialforge-dev)
+
+### What & why
+Admin builds a form (fields of type Text / Long text / Number / Email / Phone / Date / Dropdown / Radio / Checkbox, each optionally required). A campaign points at **one active form**. The agent working that campaign sees the form on their screen, fills it during the call, and saves it — one row per submission, linked to the lead and call being dialed.
+
+### What changed
+- **DB** (`backend/migration-forms.sql`): `forms`, `form_fields` (ordered, `field_key` unique per form, `options` JSON), `form_responses` (`data` JSON keyed by `field_key`, plus form/campaign/lead/call/user), `campaigns.form_id`.
+  - Why JSON for answers: each campaign's form has different fields; one JSON column avoids a schema change per form. Why `field_key`: stable machine name — in D4 it becomes the Excel column header for lead upload.
+- **Backend**: `GET/POST/PUT/DELETE /admin/forms`, `GET /admin/forms/:id/responses`, `GET /agent/form` (form of the agent's current campaign), `POST /agent/form-responses`.
+  - All values re-validated server-side against the form (required, number/email/phone/date format, choice must be one of the options; unknown keys dropped).
+  - Lead must belong to the agent's current campaign; call must be the agent's own.
+  - Blocked with a clear message: deleting a form used by a campaign or with saved responses (deactivate instead), deactivating a form a campaign still uses, attaching an inactive form. Campaign/lead delete now also blocked by form responses.
+- **Admin UI**: new **Forms** module (field builder with reorder, key auto-suggested from label, Responses viewer as a table). Campaigns page has a **Form** dropdown + column.
+- **Agent UI**: form card appears when the current campaign has a form; clicking **Call** on a lead links the form to that lead + call; Save / Clear.
+
+### Deploy
+Backup `~/backups/20261008-065314/`, then same steps as D1 with `migration-forms.sql`.
+**Rollback**: restore `server.js` + `public/` from backup, restart, then `ALTER TABLE campaigns DROP FOREIGN KEY campaigns_form_fk, DROP COLUMN form_id; DROP TABLE form_responses, form_fields, forms;`
+
+### Verified
+- Validation logic unit-tested offline (11 cases: bad/duplicate keys, missing options, required, number/email/choice checks, unknown keys dropped).
+- After deploy: `/health` OK, tables + `campaigns.form_id` exist, new endpoints return 401 without login, new pages served.
+- **To do in the browser**: create a form → attach it to a campaign → agent picks that campaign's queue → form appears → Call a lead → fill → Save → Admin Forms → Responses shows the row.
+
+### Next
+D3 — campaign dial settings (mode, ratio, hours, retries), per-campaign dispositions, callbacks, DNC list.
+
+---
+
+## Predictive Dialer D3 — Dial settings, dispositions, callbacks, DNC (2026-10-08, dialforge-dev)
+
+### What & why
+Everything the dialer engine (D5+) needs to *decide* — stored and editable now, and enforced on manual calls where it already makes sense.
+
+### What changed
+- **DB** (`backend/migration-dialer-settings.sql`):
+  - `campaigns` + dial settings: `dial_mode` (manual/preview/progressive/predictive), `dial_ratio`, `max_dial_ratio`, `target_abandon_pct`, `ring_timeout_sec`, `max_attempts`, `max_channels`, `amd_enabled`, `preview_autodial_sec`, `wrapup_sec`, `call_window_start/end`, `timezone` (default Asia/Kolkata — the server runs in UTC, so calling hours are evaluated in the campaign's timezone).
+  - `campaign_dispositions` per campaign: code, label, final / retry-after-minutes / callback / DNC. Every existing campaign seeded with the same 5 codes as before (interested, not_interested, callback, no_answer → retry 60 min, do_not_call), so reports and old leads keep working. New campaigns get these automatically.
+  - `leads` + `attempts`, `last_attempt_at`, `next_call_at`, `is_final` (+ index for the D5 hopper query).
+  - `dnc_numbers` (tenant-wide, normalised phone, unique) — seeded from the 2 leads already marked Do Not Call.
+  - `callbacks` (lead, campaign, user or NULL = anyone, time, note, pending/done/cancelled).
+- **Phone normalisation** (`normalizePhone`): digits only; `+91…`/`91…` (12 digits) and `0…` (11 digits) reduced to the 10-digit number, so every format matches in DNC.
+- **Disposition save** now follows the campaign's config, in one transaction: sets status + `is_final`, sets `next_call_at` (retry or callback time), closes any earlier pending callback for that lead, creates a callback if needed, adds the number to DNC if the disposition is DNC. Agents can only disposition leads in their current campaign (previously any lead).
+- **Click-to-call enforcement**: number on DNC list → refused; outside the campaign's calling hours → refused (only for real trunk calls, not internal extension tests); `attempts`/`last_attempt_at` counted per lead.
+- **Admin UI**: Campaigns page has a **Dialer settings** block (fields shown per mode), a Mode column, and a **Dispositions** editor per campaign. New **Callbacks** (list, overdue highlighted, cancel) and **DNC List** (bulk add, search, remove) modules.
+- **Agent UI**: disposition popup built from the campaign's dispositions; Callback opens a date/time picker (+ "only me" / note); **My Callbacks** card (own + "anyone" callbacks for the current campaign, due ones in red, Call button).
+
+### ⚠️ Behaviour change to remember
+Calling hours default to **09:00–21:00 Asia/Kolkata** for every campaign. Outside that window, manual trunk calls are refused with a clear message — widen the window on the campaign if testing late.
+
+### Deploy
+Backup `~/backups/20261008-065936/`, same steps as D1/D2 with `migration-dialer-settings.sql`.
+**Rollback**: restore `server.js` + `public/` from backup and restart; then either restore the DB dump from the backup folder, or drop `callbacks`, `dnc_numbers`, `campaign_dispositions` and the new `campaigns`/`leads` columns.
+
+### Verified
+- Helpers unit-tested offline: phone normalisation (6 formats), settings ranges (mode, ratio, max<ratio, reversed window, bad timezone, non-integer attempts), disposition rules (final+retry, DNC-not-final, reserved "new"), IST window maths.
+- After deploy: `/health` OK, 5 dispositions per campaign, 2 DNC numbers seeded, old DNC leads marked final, new endpoints 401 without login.
+- **To do in the browser**: edit a campaign's dialer settings + dispositions; agent: call a lead → Callback → pick time → appears in My Callbacks + admin Callbacks; mark a lead Do Not Call → number appears in DNC List → calling it is refused.
+
+### Next
+D4 — Excel (.xlsx) lead upload with the campaign form's fields as columns, DNC scrub at import.
+
+---
+
+## Predictive Dialer D4 — Excel lead upload (2026-10-08, dialforge-dev)
+
+### What & why
+Leads can now be uploaded as **.xlsx** (CSV still works), and the upload carries the campaign form's fields too — e.g. `loan_amount`, `plan` — so the agent's form opens pre-filled with what's already known about the customer.
+
+### What changed
+- **DB** (`backend/migration-lead-custom-data.sql`): `leads.alt_phone`, `leads.priority` (higher = dialed first by the D5 hopper), `leads.custom_data` JSON.
+- **New dependency**: `exceljs` 4.4.0. `npm audit` flagged its bundled `uuid` (moderate, in uuid v3/v5/v6 which exceljs doesn't use); fixed properly with an `overrides: { uuid: ^11.1.1 }` in `package.json` → **0 vulnerabilities**. `package-lock.json` now tracked locally (synced from the server).
+- **Import** (`POST /admin/leads/import`):
+  - Columns: `phone` (required), `name`, `alt_phone`, `priority`, + every `field_key` of the list's campaign form. Unknown columns → whole file rejected with the allowed list (catches typos before anything is saved).
+  - Phones normalised (`+91`, `0`, spaces removed). Duplicates (vs campaign + within file) and **DNC numbers** skipped and counted.
+  - Form-field values type-checked (number, date YYYY-MM-DD, email, phone, dropdown/radio choice, checkbox comma-list). Bad rows skipped with **row number + reason** (first 50 shown).
+  - Excel quirks handled: numeric phones, real date cells, rich text, formulas (uses the result), blank rows, BOM in CSV.
+  - Limits: 5 MB, 20,000 rows. Inserts are batched (500/statement) inside one transaction — all or nothing.
+- **Template** (`GET /admin/leads/template?listId=&format=xlsx|csv`): columns built from that list's campaign form + an example row; xlsx adds an **Instructions** sheet (type + allowed values per column) and keeps phone columns as text (no `9.84E+09`). Old `/admin/leads/csv-template` redirects to it.
+- **Admin UI**: Import accepts .xlsx/.csv, template buttons for the selected list, result shows DNC/duplicate/invalid counts + row errors.
+- **Agent UI**: clicking Call on a lead pre-fills the form from its `custom_data` and shows the lead's name.
+
+### Deploy
+Backup `~/backups/20261008-070805/` (also has old `package.json`/lock). Copied files + `package.json`, `npm install --omit=dev` on the server, migration, restart.
+**Rollback**: restore `server.js`, `public/`, `package.json`, `package-lock.json` from backup, `npm install --omit=dev`, restart; `ALTER TABLE leads DROP COLUMN alt_phone, DROP COLUMN priority, DROP COLUMN custom_data;`
+
+### Verified
+- Parser unit-tested offline with a messy .xlsx (numeric phone, Date cell, rich text, formula, blank row, invalid values), a CSV with BOM + quoted comma, and a corrupt file.
+- On the server: `npm audit` 0 vulnerabilities, exceljs loads, new columns exist, `/health` OK, new endpoints 401 without login.
+- **To do in the browser**: select a list whose campaign has a form → Download Template (.xlsx) → fill a few rows (include one DNC number, one duplicate, one bad value) → Import → check counts/row errors → agent calls an imported lead → form pre-filled.
+
+### Next
+D5 — dialer-engine service skeleton + hopper + Start/Pause/Stop per campaign.
+
+---
+
 ## How I'll keep this doc going
 
 I'll update this file after each meaningful step (not after every single command) — so it stays a fast, high-signal reference of *what exists and why*, not a full transcript. If you ever want the full command-by-command detail for something, ask and I'll pull it from the session.

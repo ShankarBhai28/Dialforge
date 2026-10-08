@@ -105,6 +105,15 @@
     font-family: inherit; font-size: 13px; background: #fbfcfe; transition: border-color 0.15s;
   }
   input:focus, select:focus { outline: none; border-color: var(--primary-light); }
+  #formFields { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 16px; margin-bottom: 14px; }
+  #formFields label.ff { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+  #formFields label.ff.wide { grid-column: 1 / -1; }
+  #formFields input, #formFields select, #formFields textarea { margin: 0; width: 100%; box-sizing: border-box; }
+  #formFields textarea { padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 13px; background: #fbfcfe; min-height: 64px; }
+  #formFields .choices { display: flex; flex-wrap: wrap; gap: 4px 14px; font-weight: 500; color: var(--text); }
+  #formFields .choices input { width: auto; margin-right: 4px; }
+  #formContext { font-size: 12.5px; color: var(--muted); margin: -6px 0 12px; }
+  #formMsg { font-size: 13px; margin-top: 10px; min-height: 18px; font-weight: 500; }
 
   .btn-primary {
     background: linear-gradient(135deg, var(--primary-light), var(--primary-dark)); color: white; border: none;
@@ -275,6 +284,16 @@
     <h3>Call Outcome</h3>
     <div class="sub">What happened on that call?</div>
     <div id="dispositionList" class="popup-list"></div>
+    <div id="callbackPicker" style="display:none; margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px;">
+      <div style="font-size: 13px; font-weight: 700; margin-bottom: 8px;">Schedule callback</div>
+      <input type="datetime-local" id="callbackAt" style="width:100%; box-sizing:border-box; margin:0 0 8px;">
+      <input id="callbackNote" placeholder="Note (optional)" style="width:100%; box-sizing:border-box; margin:0 0 8px;">
+      <label style="display:flex; align-items:center; gap:6px; font-size:13px; margin-bottom:10px;">
+        <input type="checkbox" id="callbackMine" checked style="width:auto; margin:0;"> Only I should call back
+      </label>
+      <button class="btn-primary" id="callbackConfirmBtn">Confirm Callback</button>
+    </div>
+    <div id="dispositionError" style="color:#dc2626; font-size:13px; margin-top:8px; min-height:16px;"></div>
   </div>
 </div>
 
@@ -347,6 +366,23 @@
       </div>
     </div>
 
+    <div class="card" id="callbacksCard" style="display:none;">
+      <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> My Callbacks</h3>
+      <table id="callbacksTable">
+        <thead><tr><th>When</th><th>Lead</th><th>Note</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card" id="formCard" style="display:none;">
+      <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M14 3v4a1 1 0 001 1h4M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2zM9 13h6M9 17h6"/></svg> <span id="formTitle">Form</span></h3>
+      <div id="formContext"></div>
+      <form id="formFields" onsubmit="return false;"></form>
+      <button class="btn-primary" onclick="submitAgentForm()">Save Form</button>
+      <button onclick="clearAgentForm()" style="margin-left:6px; padding:9px 16px; border:1px solid var(--border); border-radius:8px; background:white; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer;">Clear</button>
+      <div id="formMsg"></div>
+    </div>
+
     <div class="card">
       <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M12.5 7a4 4 0 11-8 0 4 4 0 018 0zM20 8v6M23 11h-6"/></svg> Add Lead</h3>
       <input id="leadName" placeholder="Name (optional)">
@@ -411,6 +447,12 @@ let ua = null;
 let jssipSession = null;
 let expectingOwnCallLeg = false;
 let activeLeadId = null;
+let campaignDispositions = [];  // current campaign's dispositions (from server)
+let leadsById = new Map();     // last loaded leads, for form pre-fill
+let agentForm = null;      // the current campaign's form definition (or null)
+let formLeadId = null;     // lead/call the form will be saved against -
+let formCallId = null;     // kept separately from activeLeadId, which is
+let formContextText = '';  // cleared as soon as the call ends
 let currentQueueId = null;
 let currentQueueName = null;
 
@@ -441,6 +483,10 @@ async function checkAuth() {
   loadLeads();
   loadCalls();
   loadStats();
+  loadAgentForm();
+  loadDispositions();
+  loadCallbacks();
+  setInterval(loadCallbacks, 30000);
   statsPollHandle = setInterval(loadStats, 5000);
 
   // Remember the last extension chosen and auto-reconnect on reload - a
@@ -609,11 +655,21 @@ async function setStatus(status, reason) {
 }
 
 async function postStatus(status, reason) {
-  await fetch('/agent/status', {
+  const res = await fetch('/agent/status', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status, reason, queueId: currentQueueId }),
   });
+  if (res.status === 403 && status === 'available') {
+    // The remembered queue's campaign was unmapped from the agent's team
+    // mid-session - forget it and make them pick again.
+    const data = await res.json().catch(() => ({}));
+    alert(data.error || 'This queue is no longer available to you.');
+    currentQueueId = null;
+    currentQueueName = null;
+    openQueuePopup();
+    return;
+  }
   renderStatusPill(status, reason, currentQueueName);
   loadStats();
 }
@@ -654,7 +710,7 @@ async function openQueuePopup() {
   const list = document.getElementById('queuePopupList');
   list.innerHTML = '';
   if (queues.length === 0) {
-    list.innerHTML = '<div style="color: var(--muted); text-align:center; padding: 12px; font-size: 13px;">No active queues configured yet - ask your admin to create one.</div>';
+    list.innerHTML = '<div style="color: var(--muted); text-align:center; padding: 12px; font-size: 13px;">No campaigns are assigned to your team yet - ask your admin to map one.</div>';
   }
   for (const q of queues) {
     const btn = document.createElement('button');
@@ -671,29 +727,93 @@ async function selectQueue(queueId, queueName) {
   currentQueueName = queueName;
   document.getElementById('queuePopup').style.display = 'none';
   await postStatus('available', null);
+  await loadDispositions();
+  loadLeads();
+  loadAgentForm();
+  loadCallbacks();
 }
 
-function showDispositionPopup(leadId) {
+async function loadDispositions() {
+  const res = await fetch('/agent/dispositions');
+  campaignDispositions = res.ok ? await res.json() : [];
+}
+
+function dispositionLabel(code) {
+  const d = campaignDispositions.find((x) => x.code === code);
+  return d ? d.label : (LEAD_STATUS_LABELS[code] || code);
+}
+
+function isDncStatus(code) {
+  const d = campaignDispositions.find((x) => x.code === code);
+  return code === 'do_not_call' || (d && d.marks_dnc);
+}
+
+async function showDispositionPopup(leadId) {
+  await loadDispositions();
   const list = document.getElementById('dispositionList');
   list.innerHTML = '';
-  for (const [value, label] of Object.entries(LEAD_STATUS_LABELS)) {
+  document.getElementById('callbackPicker').style.display = 'none';
+  document.getElementById('dispositionError').textContent = '';
+  for (const d of campaignDispositions) {
     const btn = document.createElement('button');
     btn.className = 'queue-option';
-    btn.innerHTML = `<span>${label}</span>`;
-    btn.onclick = () => submitDisposition(leadId, value);
+    btn.innerHTML = `<span>${escapeHtml(d.label)}</span>`;
+    btn.onclick = () => (d.is_callback ? showCallbackPicker(leadId, d.code) : submitDisposition(leadId, d.code));
     list.appendChild(btn);
   }
   document.getElementById('dispositionPopup').style.display = 'flex';
 }
 
-async function submitDisposition(leadId, status) {
-  await fetch(`/leads/${leadId}/disposition`, {
+// Default suggestion: one hour from now, in the agent's local time.
+function showCallbackPicker(leadId, code) {
+  const d = new Date(Date.now() + 60 * 60 * 1000);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  document.getElementById('callbackAt').value = d.toISOString().slice(0, 16);
+  document.getElementById('callbackNote').value = '';
+  document.getElementById('callbackPicker').style.display = 'block';
+  document.getElementById('callbackConfirmBtn').onclick = () => {
+    const local = document.getElementById('callbackAt').value;
+    if (!local) { document.getElementById('dispositionError').textContent = 'Pick a date and time'; return; }
+    submitDisposition(leadId, code, {
+      callbackAt: new Date(local).toISOString(),  // browser local time -> UTC for the server
+      callbackMine: document.getElementById('callbackMine').checked,
+      note: document.getElementById('callbackNote').value.trim(),
+    });
+  };
+}
+
+async function submitDisposition(leadId, status, extra) {
+  const res = await fetch(`/leads/${leadId}/disposition`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, ...(extra || {}) }),
   });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    document.getElementById('dispositionError').textContent = data.error || 'Failed to save outcome';
+    return;
+  }
   document.getElementById('dispositionPopup').style.display = 'none';
   loadLeads();
+  loadCallbacks();
+}
+
+async function loadCallbacks() {
+  const res = await fetch('/agent/callbacks');
+  if (!res.ok) return;
+  const rows = await res.json();
+  const card = document.getElementById('callbacksCard');
+  card.style.display = rows.length ? 'block' : 'none';
+  const now = Date.now();
+  document.querySelector('#callbacksTable tbody').innerHTML = rows.map((r) => {
+    const due = new Date(r.callback_at).getTime() <= now;
+    return `<tr>
+      <td style="${due ? 'color:#dc2626; font-weight:700;' : ''}">${new Date(r.callback_at).toLocaleString()}${due ? ' (due)' : ''}${r.user_id ? '' : ' · anyone'}</td>
+      <td>${escapeHtml(r.name || '')} ${escapeHtml(r.phone)}</td>
+      <td>${r.note ? escapeHtml(r.note) : '—'}</td>
+      <td><button class="btn-call" onclick="callLead(${r.lead_id}, '${escapeHtml(r.phone)}')">${PHONE_ICON} Call</button></td>
+    </tr>`;
+  }).join('');
 }
 
 function fmtDuration(totalSeconds) {
@@ -722,18 +842,19 @@ async function loadStats() {
 async function loadLeads() {
   const res = await fetch('/leads');
   const leads = await res.json();
+  leadsById = new Map(leads.map((l) => [l.id, l]));
   const tbody = document.querySelector('#leadsTable tbody');
   tbody.innerHTML = '';
   for (const lead of leads) {
     const tr = document.createElement('tr');
-    const isDnc = lead.status === 'do_not_call';
+    const isDnc = isDncStatus(lead.status);
     const callBtn = isDnc
       ? `<span style="color: var(--muted); font-size:12px; font-weight:600;">Do Not Call</span>`
       : `<button class="btn-call" onclick="callLead(${lead.id}, '${lead.phone}')">${PHONE_ICON} Call</button>`;
     tr.innerHTML = `
       <td>${lead.name || '—'}</td>
       <td>${lead.phone}</td>
-      <td>${LEAD_STATUS_LABELS[lead.status] || lead.status}</td>
+      <td>${escapeHtml(lead.status === 'new' ? 'New' : dispositionLabel(lead.status))}</td>
       <td>${callBtn}</td>
     `;
     tbody.appendChild(tr);
@@ -766,6 +887,9 @@ async function callLead(leadId, phone) {
   // as opposed to a genuine unsolicited customer call ringing in.
   expectingOwnCallLeg = true;
   activeLeadId = leadId || null;
+  const lead = leadsById.get(leadId);
+  setFormContext(leadId || null, null, lead && lead.name ? `${lead.name} (${phone})` : `Lead ${phone}`);
+  prefillAgentForm(lead ? lead.custom_data : null);
   const res = await fetch('/calls/click2call', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -773,11 +897,120 @@ async function callLead(leadId, phone) {
   });
   const data = await res.json();
   if (res.ok) {
+    formCallId = data.callId;
     setStatusMsg(`Call started (id ${data.callId}) — check your softphone.`);
   } else {
     setStatusMsg('Call failed: ' + (data.error || 'unknown error'), true);
   }
   setTimeout(() => { loadCalls(); loadStats(); }, 2000);
+}
+
+// --- Campaign custom form ---
+async function loadAgentForm() {
+  const res = await fetch('/agent/form');
+  agentForm = res.ok ? await res.json() : null;
+  const card = document.getElementById('formCard');
+  if (!agentForm) { card.style.display = 'none'; return; }
+  document.getElementById('formTitle').textContent = agentForm.name;
+  renderAgentForm();
+  card.style.display = 'block';
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+const FORM_INPUT_TYPES = { text: 'text', number: 'number', email: 'email', phone: 'tel', date: 'date' };
+
+function renderAgentForm() {
+  const container = document.getElementById('formFields');
+  container.innerHTML = agentForm.fields.map((f) => {
+    const name = escapeHtml(f.field_key);
+    const label = escapeHtml(f.label) + (f.is_required ? ' *' : '');
+    const req = f.is_required ? 'required' : '';
+    const opts = f.options || [];
+    if (f.field_type === 'textarea') {
+      return `<label class="ff wide">${label}<textarea name="${name}" ${req}></textarea></label>`;
+    }
+    if (f.field_type === 'dropdown') {
+      return `<label class="ff">${label}<select name="${name}" ${req}><option value="">-- select --</option>${opts.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}</select></label>`;
+    }
+    if (f.field_type === 'radio' || f.field_type === 'checkbox') {
+      return `<label class="ff">${label}<span class="choices">${opts.map((o) =>
+        `<span><input type="${f.field_type}" name="${name}" value="${escapeHtml(o)}">${escapeHtml(o)}</span>`).join('')}</span></label>`;
+    }
+    return `<label class="ff">${label}<input type="${FORM_INPUT_TYPES[f.field_type] || 'text'}" name="${name}" ${req}></label>`;
+  }).join('');
+  renderFormContext();
+}
+
+function setFormContext(leadId, callId, text) {
+  formLeadId = leadId;
+  formCallId = callId;
+  formContextText = text || '';
+  renderFormContext();
+}
+
+function renderFormContext() {
+  document.getElementById('formContext').textContent = formContextText
+    ? `Saving against: ${formContextText}`
+    : 'Not linked to a lead - answers will be saved without one.';
+}
+
+// Data uploaded with the lead (Excel columns matching form keys) is put
+// into the form so the agent only fills in what's new.
+function prefillAgentForm(data) {
+  if (!agentForm) return;
+  const formEl = document.getElementById('formFields');
+  formEl.reset();
+  if (!data) return;
+  for (const f of agentForm.fields) {
+    const v = data[f.field_key];
+    if (v == null) continue;
+    if (f.field_type === 'checkbox' || f.field_type === 'radio') {
+      const wanted = new Set(Array.isArray(v) ? v.map(String) : [String(v)]);
+      formEl.querySelectorAll(`input[name="${f.field_key}"]`).forEach((b) => { b.checked = wanted.has(b.value); });
+    } else if (formEl.elements[f.field_key]) {
+      formEl.elements[f.field_key].value = String(v);
+    }
+  }
+}
+
+function clearAgentForm() {
+  document.getElementById('formFields').reset();
+  setFormContext(null, null, '');
+  document.getElementById('formMsg').textContent = '';
+}
+
+async function submitAgentForm() {
+  if (!agentForm) return;
+  const formEl = document.getElementById('formFields');
+  const msg = document.getElementById('formMsg');
+  const data = {};
+  for (const f of agentForm.fields) {
+    if (f.field_type === 'checkbox') {
+      data[f.field_key] = [...formEl.querySelectorAll(`input[name="${f.field_key}"]:checked`)].map((b) => b.value);
+    } else if (f.field_type === 'radio') {
+      const picked = formEl.querySelector(`input[name="${f.field_key}"]:checked`);
+      data[f.field_key] = picked ? picked.value : '';
+    } else {
+      data[f.field_key] = formEl.elements[f.field_key].value;
+    }
+  }
+  const res = await fetch('/agent/form-responses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ leadId: formLeadId, callId: formCallId, data }),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (res.ok) {
+    clearAgentForm();
+    msg.textContent = 'Form saved.';
+    msg.style.color = '#16a34a';
+  } else {
+    msg.textContent = out.error || 'Failed to save form';
+    msg.style.color = '#dc2626';
+  }
 }
 
 async function loadCalls() {

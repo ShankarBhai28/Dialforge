@@ -120,6 +120,14 @@
   .muted-cell { color: var(--offline); }
 
   .row-actions { display: flex; gap: 6px; }
+  .dial-settings { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 14px; margin: 16px 0; padding: 14px; border: 1px dashed var(--border); border-radius: 10px; }
+  .dial-settings .ds-title { grid-column: 1 / -1; font-size: 13px; font-weight: 700; }
+  .dial-settings .ds-title span { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .dial-settings label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .dial-settings label.ds-check { flex-direction: row; align-items: center; gap: 6px; }
+  .dial-settings input, .dial-settings select { margin: 0; width: 100%; box-sizing: border-box; }
+  .dial-settings input[type=checkbox] { width: auto; }
+  #dispoTable input { margin: 0; }
   .btn-icon {
     background: white; border: 1px solid var(--border); color: var(--muted); padding: 5px 10px; border-radius: 6px;
     font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; transition: color 0.15s, border-color 0.15s;
@@ -168,9 +176,17 @@
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
       Call Log
     </div>
+    <div class="navitem" data-section="teams" onclick="showSection('teams', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 21v-1a6 6 0 0112 0v1M15 21v-1a4 4 0 016-3.46"/></svg>
+      Teams
+    </div>
     <div class="navitem" data-section="queues" onclick="showSection('queues', this)">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
       Queues
+    </div>
+    <div class="navitem" data-section="forms" onclick="showSection('forms', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 3v4a1 1 0 001 1h4M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2zM9 13h6M9 17h6"/></svg>
+      Forms
     </div>
     <div class="navitem" data-section="campaigns" onclick="showSection('campaigns', this)">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 3h18v4H3zM3 10h12v4H3zM3 17h7v4H3z"/></svg>
@@ -183,6 +199,14 @@
     <div class="navitem" data-section="numbers" onclick="showSection('numbers', this)">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
       DID Numbers
+    </div>
+    <div class="navitem" data-section="callbacks" onclick="showSection('callbacks', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      Callbacks
+    </div>
+    <div class="navitem" data-section="dnc" onclick="showSection('dnc', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M5.7 5.7l12.6 12.6"/></svg>
+      DNC List
     </div>
     <div class="navitem" data-section="reports" onclick="showSection('reports', this)">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 3v18h18M7 14l4-4 3 3 5-6"/></svg>
@@ -337,6 +361,134 @@
       </div>
     </div>
 
+    <div class="section" id="section-teams">
+      <div class="pagehead">
+        <div><h1>Teams</h1><div class="sub">Group agents and map them to campaigns - an agent only sees campaigns mapped to their team(s)</div></div>
+        <button class="refresh-btn" onclick="loadTeams()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+
+      <div class="card">
+        <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><circle cx="9" cy="7" r="3"/><path d="M3 21v-1a6 6 0 0112 0v1M19 8v6M16 11h6"/></svg> <span id="teamFormTitle">Create Team</span></h3>
+        <input id="newTeamName" placeholder="Team name">
+        <select id="newTeamStatus">
+          <option value="active">Status: Active</option>
+          <option value="inactive">Status: Inactive</option>
+        </select>
+        <div style="display:flex; gap:24px; flex-wrap:wrap; margin: 12px 0;">
+          <div>
+            <div style="font-size:12.5px; font-weight:700; margin-bottom:6px;">Agents</div>
+            <div id="teamAgentChecks" style="display:flex; flex-direction:column; gap:4px; font-size:13px;"></div>
+          </div>
+          <div>
+            <div style="font-size:12.5px; font-weight:700; margin-bottom:6px;">Campaigns</div>
+            <div id="teamCampaignChecks" style="display:flex; flex-direction:column; gap:4px; font-size:13px;"></div>
+          </div>
+        </div>
+        <button class="btn-primary" id="teamSubmitBtn" onclick="saveTeam()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+          Create Team
+        </button>
+        <button class="refresh-btn" id="teamCancelBtn" onclick="cancelTeamEdit()" style="display:none;">Cancel</button>
+        <div id="teamStatus"></div>
+      </div>
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <h3 style="padding: 18px 18px 0;">Teams</h3>
+        <table id="teamsTable" style="margin: 10px 0 0;">
+          <thead><tr><th style="padding-left:18px;">Name</th><th>Agents</th><th>Campaigns</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section" id="section-forms">
+      <div class="pagehead">
+        <div><h1>Forms</h1><div class="sub">Custom forms agents fill in during a call - attach an active form to a campaign from the Campaigns page</div></div>
+        <button class="refresh-btn" onclick="loadForms()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+
+      <div class="card">
+        <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M14 3v4a1 1 0 001 1h4M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2zM12 11v6M9 14h6"/></svg> <span id="formFormTitle">Create Form</span></h3>
+        <input id="newFormName" placeholder="Form name">
+        <input id="newFormDescription" placeholder="Description (optional)" style="min-width: 260px;">
+        <select id="newFormStatus">
+          <option value="active">Status: Active</option>
+          <option value="inactive">Status: Inactive</option>
+        </select>
+        <div style="font-size: 12.5px; color: var(--muted); margin: 12px 0 6px;">
+          <b>Key</b> is the field's machine name (lowercase, e.g. <code>loan_amount</code>) - saved answers and, later, the Excel lead-upload columns use it. <b>Options</b> (comma-separated) are needed for Dropdown / Radio / Checkbox.
+        </div>
+        <table id="formFieldsTable">
+          <thead><tr><th>Label</th><th>Key</th><th>Type</th><th>Options</th><th>Required</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div style="margin: 10px 0 14px;">
+          <button class="refresh-btn" onclick="addFormFieldRow()">+ Add Field</button>
+        </div>
+        <button class="btn-primary" id="formSubmitBtn" onclick="saveForm()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+          Create Form
+        </button>
+        <button class="refresh-btn" id="formCancelBtn" onclick="cancelFormEdit()" style="display:none;">Cancel</button>
+        <div id="formStatus"></div>
+      </div>
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <h3 style="padding: 18px 18px 0;">Forms</h3>
+        <table id="formsTable" style="margin: 10px 0 0;">
+          <thead><tr><th style="padding-left:18px;">Name</th><th>Fields</th><th>Used by campaigns</th><th>Responses</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="card" id="formResponsesCard" style="display:none; padding: 0; overflow: auto;">
+        <h3 style="padding: 18px 18px 0;" id="formResponsesTitle">Responses</h3>
+        <table id="formResponsesTable" style="margin: 10px 0 0;">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section" id="section-dnc">
+      <div class="pagehead">
+        <div><h1>DNC List</h1><div class="sub">Numbers that must never be called - click-to-call (and later the dialer) refuses them</div></div>
+      </div>
+      <div class="card">
+        <h3>Add Numbers</h3>
+        <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 10px;">One per line or comma-separated. Stored normalised: +91 / 0 prefixes and spaces are removed, so every format of the same number matches.</div>
+        <textarea id="dncInput" rows="4" style="width:100%; box-sizing:border-box; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:13px;"></textarea>
+        <div style="margin-top: 10px;"><button class="btn-primary" onclick="addDncNumbers()">Add to DNC</button></div>
+        <div id="dncStatus"></div>
+      </div>
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding: 18px 18px 0;">
+          <h3 style="margin:0;" id="dncTitle">Numbers</h3>
+          <input id="dncSearch" placeholder="Search number" oninput="loadDnc()" style="margin:0;">
+        </div>
+        <table id="dncTable" style="margin: 10px 0 0;">
+          <thead><tr><th style="padding-left:18px;">Number</th><th>Source</th><th>Added by</th><th>Added</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section" id="section-callbacks">
+      <div class="pagehead">
+        <div><h1>Callbacks</h1><div class="sub">Callbacks scheduled by agents from the Callback disposition</div></div>
+        <button class="refresh-btn" onclick="loadCallbacksAdmin()">Refresh</button>
+      </div>
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <table id="callbacksTable">
+          <thead><tr><th style="padding-left:18px;">When</th><th>Lead</th><th>Campaign</th><th>Assigned to</th><th>Note</th><th>Status</th><th>Created by</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="section" id="section-campaigns">
       <div class="pagehead">
         <div><h1>Campaigns</h1><div class="sub">A campaign references a queue, plus its outbound CLI and auto-answer behavior</div></div>
@@ -346,6 +498,7 @@
         <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M3 3h18v4H3zM3 10h12v4H3zM3 17h7v4H3z"/></svg> Create Campaign</h3>
         <input id="newCampaignName" placeholder="Campaign name">
         <select id="newCampaignQueue"></select>
+        <select id="newCampaignForm"></select>
         <input id="newCampaignCallerId" placeholder="Outbound Caller ID (DID)">
         <select id="newCampaignStatus">
           <option value="active">Status: Active</option>
@@ -354,6 +507,29 @@
         <label style="display:inline-flex; align-items:center; gap:6px; font-size:13px; margin-left:4px;">
           <input type="checkbox" id="newCampaignAutoAnswer" style="width:auto; margin:0;"> Auto Answer
         </label>
+        <div class="dial-settings">
+          <div class="ds-title">Dialer settings <span>(mode, ratio, limits and calling hours - the dialer engine uses these from D5; calling hours are already enforced on manual outside calls)</span></div>
+          <label>Dial mode
+            <select id="cDialMode" onchange="syncDialModeFields()">
+              <option value="manual">Manual - agent dials</option>
+              <option value="preview">Preview - lead shown, agent clicks dial</option>
+              <option value="progressive">Progressive - auto-dial at fixed ratio</option>
+              <option value="predictive">Predictive - adaptive ratio</option>
+            </select>
+          </label>
+          <label class="ds-auto">Dial ratio <input id="cDialRatio" type="number" step="0.1" min="1" max="5" value="1"></label>
+          <label class="ds-predictive">Max dial ratio <input id="cMaxDialRatio" type="number" step="0.1" min="1" max="5" value="2.5"></label>
+          <label class="ds-predictive">Target abandon % <input id="cTargetAbandon" type="number" step="0.5" min="0" max="10" value="3"></label>
+          <label class="ds-preview">Preview auto-dial (sec, blank = off) <input id="cPreviewAutodial" type="number" min="0" max="120"></label>
+          <label>Ring timeout (sec) <input id="cRingTimeout" type="number" min="10" max="60" value="30"></label>
+          <label>Max attempts / lead <input id="cMaxAttempts" type="number" min="1" max="20" value="3"></label>
+          <label>Max channels <input id="cMaxChannels" type="number" min="1" max="200" value="10"></label>
+          <label>Wrap-up (sec) <input id="cWrapup" type="number" min="0" max="600" value="10"></label>
+          <label>Calling from <input id="cWindowStart" type="time" value="09:00"></label>
+          <label>Calling until <input id="cWindowEnd" type="time" value="21:00"></label>
+          <label>Timezone <input id="cTimezone" value="Asia/Kolkata"></label>
+          <label class="ds-auto ds-check"><input type="checkbox" id="cAmd"> Answering-machine detection</label>
+        </div>
         <button class="btn-primary" id="campaignSubmitBtn" onclick="createCampaign()">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
           Create Campaign
@@ -364,9 +540,26 @@
       <div class="card" style="padding: 0; overflow: hidden;">
         <h3 style="padding: 18px 18px 0;">Campaigns</h3>
         <table id="campaignsTable" style="margin: 10px 0 0;">
-          <thead><tr><th style="padding-left:18px;">Name</th><th>Queue</th><th>Outbound Caller ID</th><th>Auto Answer</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th style="padding-left:18px;">Name</th><th>Queue</th><th>Outbound Caller ID</th><th>Auto Answer</th><th>Form</th><th>Mode</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+
+      <div class="card" id="dispoCard" style="display:none;">
+        <h3 id="dispoTitle">Dispositions</h3>
+        <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 10px;">
+          What the agent picks after a call. <b>Final</b> = lead is done. <b>Retry</b> = dialer may call again after N minutes.
+          <b>Callback</b> = agent picks a date/time. <b>DNC</b> = number goes on the Do Not Call list (must also be final).
+          The code is what's stored on the lead - avoid changing codes already in use.
+        </div>
+        <table id="dispoTable">
+          <thead><tr><th>Label</th><th>Code</th><th>Final</th><th>Retry (min)</th><th>Callback</th><th>DNC</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div style="margin: 10px 0 14px;"><button class="refresh-btn" onclick="addDispoRow()">+ Add Disposition</button></div>
+        <button class="btn-primary" onclick="saveDispositions()">Save Dispositions</button>
+        <button class="refresh-btn" onclick="document.getElementById('dispoCard').style.display='none'">Close</button>
+        <div id="dispoStatus"></div>
       </div>
 
     </div>
@@ -431,15 +624,17 @@
 
       <div class="card">
         <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg> Import Leads</h3>
-        <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 12px;">CSV needs a <code>phone</code> column (and optionally <code>name</code>). Rows already in the list's campaign, or duplicated within the file, are skipped automatically.</div>
+        <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 12px;">Excel (.xlsx) or CSV. Needs a <code>phone</code> column; optional <code>name</code>, <code>alt_phone</code>, <code>priority</code>, plus one column per field of the campaign's form. <b>Download Template</b> gives the exact columns for the selected list. Numbers already in the campaign, repeated in the file, or on the DNC list are skipped.</div>
         <select id="importList"></select>
-        <input type="file" id="importFile" accept=".csv" style="padding: 7px;">
+        <input type="file" id="importFile" accept=".xlsx,.csv" style="padding: 7px;">
         <button class="btn-primary" onclick="importLeadsCsv()">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
           Import
         </button>
-        <button class="refresh-btn" onclick="window.open('/admin/leads/csv-template', '_blank')">Download Template</button>
+        <button class="refresh-btn" onclick="downloadLeadTemplate('xlsx')">Download Template (.xlsx)</button>
+        <button class="refresh-btn" onclick="downloadLeadTemplate('csv')">.csv</button>
         <div id="importStatus"></div>
+        <div id="importErrors" style="font-size: 12.5px; color: #b45309; margin-top: 6px;"></div>
       </div>
 
       <div class="card" id="editLeadCard" style="display:none;">
@@ -590,6 +785,18 @@ function showSection(name, el) {
   }
   if (name === 'queues') {
     loadQueues();
+  }
+  if (name === 'teams') {
+    loadTeams();
+  }
+  if (name === 'forms') {
+    loadForms();
+  }
+  if (name === 'dnc') {
+    loadDnc();
+  }
+  if (name === 'callbacks') {
+    loadCallbacksAdmin();
   }
   if (name === 'numbers') {
     loadDids();
@@ -743,6 +950,8 @@ let editingCampaignId = null;
 
 async function loadCampaigns() {
   await loadQueues();
+  await loadCampaignFormOptions();
+  syncDialModeFields();
   const res = await fetch('/admin/campaigns');
   const campaigns = await res.json();
   campaignsCache = campaigns;
@@ -755,16 +964,19 @@ async function loadCampaigns() {
       <td>${c.queue_name || '<span class="muted-cell">—</span>'}</td>
       <td>${c.outbound_caller_id || '<span class="muted-cell">—</span>'}</td>
       <td>${c.auto_answer ? 'Yes' : 'No'}</td>
+      <td>${c.form_name ? escapeHtml(c.form_name) : '<span class="muted-cell">—</span>'}</td>
+      <td>${escapeHtml(c.dial_mode)}${c.dial_mode === 'progressive' ? ' ' + Number(c.dial_ratio) + ':1' : ''}${c.dial_mode === 'predictive' ? ' ≤' + Number(c.max_dial_ratio) + ':1' : ''}</td>
       <td><span class="role-pill ${c.status === 'active' ? 'agent' : 'admin'}">${c.status}</span></td>
       <td class="row-actions">
         <button class="btn-icon" onclick="editCampaign(${c.id})">Edit</button>
+        <button class="btn-icon" onclick="openDispositions(${c.id})">Dispositions</button>
         <button class="btn-icon danger" onclick="deleteCampaign(${c.id}, '${c.name.replace(/'/g, "\\'")}')">Delete</button>
       </td>
     `;
     tbody.appendChild(tr);
   }
   if (campaigns.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--muted); padding: 20px;">No campaigns yet - create one above.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color: var(--muted); padding: 20px;">No campaigns yet - create one above.</td></tr>';
   }
 
   const didSelect = document.getElementById('newDidCampaign');
@@ -786,9 +998,11 @@ function editCampaign(id) {
   editingCampaignId = id;
   document.getElementById('newCampaignName').value = c.name;
   document.getElementById('newCampaignQueue').value = c.queue_id || '';
+  document.getElementById('newCampaignForm').value = c.form_id || '';
   document.getElementById('newCampaignCallerId').value = c.outbound_caller_id || '';
   document.getElementById('newCampaignStatus').value = c.status;
   document.getElementById('newCampaignAutoAnswer').checked = !!c.auto_answer;
+  fillCampaignSettings(c);
   document.getElementById('campaignSubmitBtn').textContent = 'Save Changes';
   document.getElementById('campaignCancelBtn').style.display = 'inline-flex';
   document.getElementById('campaignStatus').textContent = '';
@@ -798,9 +1012,11 @@ function cancelCampaignEdit() {
   editingCampaignId = null;
   document.getElementById('newCampaignName').value = '';
   document.getElementById('newCampaignQueue').value = '';
+  document.getElementById('newCampaignForm').value = '';
   document.getElementById('newCampaignCallerId').value = '';
   document.getElementById('newCampaignStatus').value = 'active';
   document.getElementById('newCampaignAutoAnswer').checked = false;
+  fillCampaignSettings(null);
   document.getElementById('campaignSubmitBtn').textContent = 'Create Campaign';
   document.getElementById('campaignCancelBtn').style.display = 'none';
   document.getElementById('campaignStatus').textContent = '';
@@ -817,12 +1033,20 @@ async function deleteCampaign(id, name) {
   }
 }
 
+function downloadLeadTemplate(format) {
+  const listId = document.getElementById('importList').value;
+  const q = new URLSearchParams({ format });
+  if (listId) q.set('listId', listId);
+  window.open('/admin/leads/template?' + q.toString(), '_blank');
+}
+
 async function importLeadsCsv() {
   const listId = document.getElementById('importList').value;
   const fileInput = document.getElementById('importFile');
   const el = document.getElementById('importStatus');
   if (!listId) { el.textContent = 'Create a list first.'; el.style.color = '#dc2626'; return; }
-  if (!fileInput.files[0]) { el.textContent = 'Choose a CSV file first.'; el.style.color = '#dc2626'; return; }
+  if (!fileInput.files[0]) { el.textContent = 'Choose an .xlsx or .csv file first.'; el.style.color = '#dc2626'; return; }
+  document.getElementById('importErrors').innerHTML = '';
 
   const formData = new FormData();
   formData.append('file', fileInput.files[0]);
@@ -831,9 +1055,13 @@ async function importLeadsCsv() {
   el.textContent = 'Importing...';
   el.style.color = '#6b7a90';
   const res = await fetch('/admin/leads/import', { method: 'POST', body: formData });
-  const data = await res.json();
+  const data = await res.json().catch(() => ({ error: `server returned ${res.status}` }));
   if (res.ok) {
-    el.textContent = `Imported ${data.imported} of ${data.total} (${data.duplicates} duplicate, ${data.invalid} invalid).`;
+    el.textContent = `Imported ${data.imported} of ${data.total} (${data.duplicates} duplicate, ${data.dnc} on DNC list, ${data.invalid} invalid).`;
+    if (data.errors && data.errors.length) {
+      document.getElementById('importErrors').innerHTML = '<b>Invalid rows' + (data.invalid > data.errors.length ? ` (first ${data.errors.length} of ${data.invalid})` : '') + ':</b><br>' +
+        data.errors.map((e) => `Row ${e.row}: ${escapeHtml(e.reason)}`).join('<br>');
+    }
     el.style.color = '#16a34a';
     fileInput.value = '';
     loadLists();
@@ -841,6 +1069,519 @@ async function importLeadsCsv() {
   } else {
     el.textContent = 'Import failed: ' + (data.error || 'unknown error');
     el.style.color = '#dc2626';
+  }
+}
+
+// Team/agent/campaign names are admin-typed text going into innerHTML -
+// escape them so a name like "<b>" can't inject markup.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+const FIELD_TYPE_LABELS = {
+  text: 'Text', textarea: 'Long text', number: 'Number', email: 'Email', phone: 'Phone',
+  date: 'Date', dropdown: 'Dropdown', radio: 'Radio', checkbox: 'Checkbox',
+};
+let formsCache = [];
+let editingFormId = null;
+
+async function loadForms() {
+  const res = await fetch('/admin/forms');
+  const forms = await res.json();
+  formsCache = forms;
+  const tbody = document.querySelector('#formsTable tbody');
+  tbody.innerHTML = '';
+  for (const f of forms) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding-left: 18px; font-weight: 600;">${escapeHtml(f.name)}${f.description ? `<div class="muted-cell" style="font-weight:400; font-size:12px;">${escapeHtml(f.description)}</div>` : ''}</td>
+      <td>${f.fields.map((x) => escapeHtml(x.label) + (x.is_required ? '*' : '')).join(', ')}</td>
+      <td>${f.campaigns ? escapeHtml(f.campaigns) : '<span class="muted-cell">—</span>'}</td>
+      <td>${f.response_count}</td>
+      <td><span class="role-pill ${f.status === 'active' ? 'agent' : 'admin'}">${escapeHtml(f.status)}</span></td>
+      <td class="row-actions">
+        <button class="btn-icon" onclick="viewFormResponses(${f.id})">Responses</button>
+        <button class="btn-icon" onclick="editForm(${f.id})">Edit</button>
+        <button class="btn-icon danger" onclick="deleteForm(${f.id})">Delete</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (forms.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--muted); padding: 20px;">No forms yet - create one above.</td></tr>';
+  }
+  if (document.querySelectorAll('#formFieldsTable tbody tr').length === 0) addFormFieldRow();
+}
+
+// The key is suggested from the label while the admin hasn't typed one
+// themselves - saves typing, but never overwrites a deliberate key.
+function slugifyKey(label) {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').replace(/^([0-9])/, 'f_$1').slice(0, 50);
+}
+
+function addFormFieldRow(field) {
+  const f = field || {};
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input class="ff-label" placeholder="e.g. Loan Amount" style="margin:0; width:160px;"></td>
+    <td><input class="ff-key" placeholder="loan_amount" style="margin:0; width:140px;"></td>
+    <td><select class="ff-type" style="margin:0;">${Object.entries(FIELD_TYPE_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></td>
+    <td><input class="ff-options" placeholder="Yes, No, Maybe" style="margin:0; width:180px;"></td>
+    <td><input type="checkbox" class="ff-required" style="width:auto; margin:0;"></td>
+    <td class="row-actions">
+      <button class="btn-icon" title="Move up" onclick="moveFormFieldRow(this, -1)">↑</button>
+      <button class="btn-icon" title="Move down" onclick="moveFormFieldRow(this, 1)">↓</button>
+      <button class="btn-icon danger" onclick="this.closest('tr').remove()">Remove</button>
+    </td>
+  `;
+  const labelInput = tr.querySelector('.ff-label');
+  const keyInput = tr.querySelector('.ff-key');
+  const typeSelect = tr.querySelector('.ff-type');
+  const optionsInput = tr.querySelector('.ff-options');
+  labelInput.value = f.label || '';
+  keyInput.value = f.field_key || '';
+  typeSelect.value = f.field_type || 'text';
+  optionsInput.value = (f.options || []).join(', ');
+  tr.querySelector('.ff-required').checked = !!f.is_required;
+  keyInput.dataset.manual = f.field_key ? '1' : '';
+  labelInput.addEventListener('input', () => { if (!keyInput.dataset.manual) keyInput.value = slugifyKey(labelInput.value); });
+  keyInput.addEventListener('input', () => { keyInput.dataset.manual = '1'; });
+  const syncOptions = () => { optionsInput.disabled = !['dropdown', 'radio', 'checkbox'].includes(typeSelect.value); };
+  typeSelect.addEventListener('change', syncOptions);
+  syncOptions();
+  document.querySelector('#formFieldsTable tbody').appendChild(tr);
+}
+
+function moveFormFieldRow(btn, dir) {
+  const tr = btn.closest('tr');
+  const sibling = dir < 0 ? tr.previousElementSibling : tr.nextElementSibling;
+  if (!sibling) return;
+  if (dir < 0) tr.parentNode.insertBefore(tr, sibling);
+  else tr.parentNode.insertBefore(sibling, tr);
+}
+
+function editForm(id) {
+  const f = formsCache.find((x) => x.id === id);
+  if (!f) return;
+  editingFormId = id;
+  document.getElementById('newFormName').value = f.name;
+  document.getElementById('newFormDescription').value = f.description || '';
+  document.getElementById('newFormStatus').value = f.status;
+  document.querySelector('#formFieldsTable tbody').innerHTML = '';
+  f.fields.forEach((field) => addFormFieldRow(field));
+  document.getElementById('formFormTitle').textContent = 'Edit Form';
+  document.getElementById('formSubmitBtn').textContent = 'Save Changes';
+  document.getElementById('formCancelBtn').style.display = 'inline-flex';
+  const el = document.getElementById('formStatus');
+  el.textContent = f.response_count
+    ? `This form has ${f.response_count} saved response(s). Changing a field's key means old answers stay under the old key.`
+    : '';
+  el.style.color = '#b45309';
+}
+
+function cancelFormEdit() {
+  editingFormId = null;
+  document.getElementById('newFormName').value = '';
+  document.getElementById('newFormDescription').value = '';
+  document.getElementById('newFormStatus').value = 'active';
+  document.querySelector('#formFieldsTable tbody').innerHTML = '';
+  addFormFieldRow();
+  document.getElementById('formFormTitle').textContent = 'Create Form';
+  document.getElementById('formSubmitBtn').textContent = 'Create Form';
+  document.getElementById('formCancelBtn').style.display = 'none';
+  document.getElementById('formStatus').textContent = '';
+}
+
+async function saveForm() {
+  const el = document.getElementById('formStatus');
+  const name = document.getElementById('newFormName').value.trim();
+  if (!name) { el.textContent = 'Form name is required'; el.style.color = '#dc2626'; return; }
+  const fields = [...document.querySelectorAll('#formFieldsTable tbody tr')].map((tr) => ({
+    label: tr.querySelector('.ff-label').value.trim(),
+    fieldKey: tr.querySelector('.ff-key').value.trim(),
+    fieldType: tr.querySelector('.ff-type').value,
+    options: tr.querySelector('.ff-options').value.split(',').map((o) => o.trim()).filter(Boolean),
+    isRequired: tr.querySelector('.ff-required').checked,
+  })).filter((f) => f.label || f.fieldKey);
+  const res = await fetch(editingFormId ? `/admin/forms/${editingFormId}` : '/admin/forms', {
+    method: editingFormId ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name,
+      description: document.getElementById('newFormDescription').value.trim(),
+      status: document.getElementById('newFormStatus').value,
+      fields,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    cancelFormEdit();
+    el.textContent = `Saved form: ${name}`;
+    el.style.color = '#16a34a';
+    loadForms();
+  } else {
+    el.textContent = data.error || 'Failed to save form';
+    el.style.color = '#dc2626';
+  }
+}
+
+async function deleteForm(id) {
+  const f = formsCache.find((x) => x.id === id);
+  if (!f || !confirm(`Delete form "${f.name}"?`)) return;
+  const res = await fetch(`/admin/forms/${id}`, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    if (editingFormId === id) cancelFormEdit();
+    loadForms();
+  } else {
+    alert(data.error || 'Delete failed');
+  }
+}
+
+// One column per form field (current definition), so the table reads like
+// a spreadsheet of answers.
+async function viewFormResponses(id) {
+  const f = formsCache.find((x) => x.id === id);
+  if (!f) return;
+  const res = await fetch(`/admin/forms/${id}/responses`);
+  const rows = await res.json();
+  document.getElementById('formResponsesCard').style.display = 'block';
+  document.getElementById('formResponsesTitle').textContent = `Responses - ${f.name} (latest ${rows.length})`;
+  const none = '<span class="muted-cell">—</span>';
+  const fmtValue = (v) => (v == null || v === '' ? none : escapeHtml(Array.isArray(v) ? v.join(', ') : v));
+  document.querySelector('#formResponsesTable thead').innerHTML =
+    `<tr><th style="padding-left:18px;">When</th><th>Agent</th><th>Campaign</th><th>Lead</th>${f.fields.map((x) => `<th>${escapeHtml(x.label)}</th>`).join('')}</tr>`;
+  document.querySelector('#formResponsesTable tbody').innerHTML = rows.length
+    ? rows.map((r) => `<tr>
+        <td style="padding-left:18px;">${fmt(r.created_at)}</td>
+        <td>${escapeHtml(r.username)}</td>
+        <td>${r.campaign_name ? escapeHtml(r.campaign_name) : none}</td>
+        <td>${r.lead_phone ? escapeHtml(r.lead_phone) : none}</td>
+        ${f.fields.map((x) => `<td>${fmtValue(r.data[x.field_key])}</td>`).join('')}
+      </tr>`).join('')
+    : `<tr><td colspan="${4 + f.fields.length}" style="text-align:center; color: var(--muted); padding: 20px;">No responses yet.</td></tr>`;
+}
+
+// Campaign page: only active forms can be picked.
+async function loadCampaignFormOptions() {
+  const res = await fetch('/admin/forms');
+  formsCache = await res.json();
+  const select = document.getElementById('newCampaignForm');
+  const current = select.value;
+  select.innerHTML = '<option value="">Form: none</option>' + formsCache
+    .filter((f) => f.status === 'active')
+    .map((f) => `<option value="${f.id}">Form: ${escapeHtml(f.name)}</option>`).join('');
+  select.value = current;
+}
+
+// --- Campaign dial settings ---
+const CAMPAIGN_SETTING_DEFAULTS = {
+  dial_mode: 'manual', dial_ratio: 1, max_dial_ratio: 2.5, target_abandon_pct: 3, preview_autodial_sec: null,
+  ring_timeout_sec: 30, max_attempts: 3, max_channels: 10, wrapup_sec: 10,
+  call_window_start: '09:00:00', call_window_end: '21:00:00', timezone: 'Asia/Kolkata', amd_enabled: 0,
+};
+
+function fillCampaignSettings(c) {
+  const v = { ...CAMPAIGN_SETTING_DEFAULTS, ...(c || {}) };
+  document.getElementById('cDialMode').value = v.dial_mode;
+  document.getElementById('cDialRatio').value = Number(v.dial_ratio);
+  document.getElementById('cMaxDialRatio').value = Number(v.max_dial_ratio);
+  document.getElementById('cTargetAbandon').value = Number(v.target_abandon_pct);
+  document.getElementById('cPreviewAutodial').value = v.preview_autodial_sec == null ? '' : v.preview_autodial_sec;
+  document.getElementById('cRingTimeout').value = v.ring_timeout_sec;
+  document.getElementById('cMaxAttempts').value = v.max_attempts;
+  document.getElementById('cMaxChannels').value = v.max_channels;
+  document.getElementById('cWrapup').value = v.wrapup_sec;
+  document.getElementById('cWindowStart').value = String(v.call_window_start).slice(0, 5);
+  document.getElementById('cWindowEnd').value = String(v.call_window_end).slice(0, 5);
+  document.getElementById('cTimezone').value = v.timezone;
+  document.getElementById('cAmd').checked = !!v.amd_enabled;
+  syncDialModeFields();
+}
+
+function campaignSettingsBody() {
+  const val = (id) => document.getElementById(id).value;
+  return {
+    dialMode: val('cDialMode'),
+    dialRatio: val('cDialRatio'),
+    maxDialRatio: val('cMaxDialRatio'),
+    targetAbandonPct: val('cTargetAbandon'),
+    previewAutodialSec: val('cPreviewAutodial'),
+    ringTimeoutSec: val('cRingTimeout'),
+    maxAttempts: val('cMaxAttempts'),
+    maxChannels: val('cMaxChannels'),
+    wrapupSec: val('cWrapup'),
+    callWindowStart: val('cWindowStart'),
+    callWindowEnd: val('cWindowEnd'),
+    timezone: val('cTimezone').trim(),
+    amdEnabled: document.getElementById('cAmd').checked,
+  };
+}
+
+// Only show the knobs that matter for the chosen mode.
+function syncDialModeFields() {
+  const mode = document.getElementById('cDialMode').value;
+  const show = (cls, on) => document.querySelectorAll('.dial-settings .' + cls).forEach((el) => { el.style.display = on ? '' : 'none'; });
+  show('ds-preview', mode === 'preview');
+  show('ds-auto', mode === 'progressive' || mode === 'predictive');
+  show('ds-predictive', mode === 'predictive');
+}
+
+// --- Per-campaign dispositions editor ---
+let dispoCampaignId = null;
+
+async function openDispositions(campaignId) {
+  const c = campaignsCache.find((x) => x.id === campaignId);
+  dispoCampaignId = campaignId;
+  document.getElementById('dispoTitle').textContent = `Dispositions - ${c ? c.name : ''}`;
+  document.getElementById('dispoStatus').textContent = '';
+  const res = await fetch(`/admin/campaigns/${campaignId}/dispositions`);
+  const list = await res.json();
+  document.querySelector('#dispoTable tbody').innerHTML = '';
+  list.forEach((d) => addDispoRow(d));
+  const card = document.getElementById('dispoCard');
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth' });
+}
+
+function addDispoRow(d) {
+  const x = d || {};
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input class="dp-label" placeholder="e.g. Wrong Number" style="width:150px;"></td>
+    <td><input class="dp-code" placeholder="wrong_number" style="width:130px;"></td>
+    <td><input type="checkbox" class="dp-final" style="width:auto;"></td>
+    <td><input class="dp-retry" type="number" min="1" placeholder="—" style="width:80px;"></td>
+    <td><input type="checkbox" class="dp-callback" style="width:auto;"></td>
+    <td><input type="checkbox" class="dp-dnc" style="width:auto;"></td>
+    <td class="row-actions">
+      <button class="btn-icon" onclick="moveFormFieldRow(this, -1)">↑</button>
+      <button class="btn-icon" onclick="moveFormFieldRow(this, 1)">↓</button>
+      <button class="btn-icon danger" onclick="this.closest('tr').remove()">Remove</button>
+    </td>
+  `;
+  const label = tr.querySelector('.dp-label');
+  const code = tr.querySelector('.dp-code');
+  label.value = x.label || '';
+  code.value = x.code || '';
+  tr.querySelector('.dp-final').checked = !!x.is_final;
+  tr.querySelector('.dp-retry').value = x.retry_after_min || '';
+  tr.querySelector('.dp-callback').checked = !!x.is_callback;
+  tr.querySelector('.dp-dnc').checked = !!x.marks_dnc;
+  code.dataset.manual = x.code ? '1' : '';
+  label.addEventListener('input', () => { if (!code.dataset.manual) code.value = slugifyKey(label.value).slice(0, 30); });
+  code.addEventListener('input', () => { code.dataset.manual = '1'; });
+  document.querySelector('#dispoTable tbody').appendChild(tr);
+}
+
+async function saveDispositions() {
+  const el = document.getElementById('dispoStatus');
+  const dispositions = [...document.querySelectorAll('#dispoTable tbody tr')].map((tr) => ({
+    label: tr.querySelector('.dp-label').value.trim(),
+    code: tr.querySelector('.dp-code').value.trim(),
+    isFinal: tr.querySelector('.dp-final').checked,
+    retryAfterMin: tr.querySelector('.dp-retry').value,
+    isCallback: tr.querySelector('.dp-callback').checked,
+    marksDnc: tr.querySelector('.dp-dnc').checked,
+  })).filter((d) => d.label || d.code);
+  const res = await fetch(`/admin/campaigns/${dispoCampaignId}/dispositions`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dispositions }),
+  });
+  const data = await res.json().catch(() => ({}));
+  el.textContent = res.ok ? 'Dispositions saved.' : (data.error || 'Failed to save');
+  el.style.color = res.ok ? '#16a34a' : '#dc2626';
+}
+
+// --- DNC list ---
+async function loadDnc() {
+  const q = document.getElementById('dncSearch').value.trim();
+  const res = await fetch('/admin/dnc' + (q ? `?q=${encodeURIComponent(q)}` : ''));
+  const { total, rows } = await res.json();
+  document.getElementById('dncTitle').textContent = `Numbers (${total} total${q ? `, ${rows.length} matching` : ''})`;
+  const tbody = document.querySelector('#dncTable tbody');
+  tbody.innerHTML = rows.length
+    ? rows.map((r) => `<tr>
+        <td style="padding-left:18px; font-weight:600;">${escapeHtml(r.phone)}</td>
+        <td>${escapeHtml(r.source)}</td>
+        <td>${r.created_by_name ? escapeHtml(r.created_by_name) : '<span class="muted-cell">—</span>'}</td>
+        <td>${fmt(r.created_at)}</td>
+        <td class="row-actions"><button class="btn-icon danger" onclick="removeDnc(${r.id}, '${escapeHtml(r.phone)}')">Remove</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" style="text-align:center; color: var(--muted); padding: 20px;">No numbers.</td></tr>';
+}
+
+async function addDncNumbers() {
+  const el = document.getElementById('dncStatus');
+  const res = await fetch('/admin/dnc', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phones: document.getElementById('dncInput').value }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    el.textContent = `Added ${data.added}, already listed ${data.existing}, invalid ${data.invalid}.`;
+    el.style.color = '#16a34a';
+    document.getElementById('dncInput').value = '';
+    loadDnc();
+  } else {
+    el.textContent = data.error || 'Failed';
+    el.style.color = '#dc2626';
+  }
+}
+
+async function removeDnc(id, phone) {
+  if (!confirm(`Remove ${phone} from the DNC list? It can be called again (unless a lead with it is still marked Do Not Call).`)) return;
+  const res = await fetch(`/admin/dnc/${id}`, { method: 'DELETE' });
+  if (res.ok) loadDnc();
+  else alert('Remove failed');
+}
+
+// --- Callbacks overview ---
+async function loadCallbacksAdmin() {
+  const res = await fetch('/admin/callbacks');
+  const rows = await res.json();
+  const none = '<span class="muted-cell">—</span>';
+  const now = Date.now();
+  document.querySelector('#callbacksTable tbody').innerHTML = rows.length
+    ? rows.map((r) => {
+      const overdue = r.status === 'pending' && new Date(r.callback_at).getTime() < now;
+      return `<tr>
+        <td style="padding-left:18px; ${overdue ? 'color:#dc2626; font-weight:700;' : ''}">${fmt(r.callback_at)}${overdue ? ' (overdue)' : ''}</td>
+        <td>${escapeHtml(r.name || '')} ${escapeHtml(r.phone)}</td>
+        <td>${r.campaign_name ? escapeHtml(r.campaign_name) : none}</td>
+        <td>${r.assigned_to ? escapeHtml(r.assigned_to) : 'Anyone'}</td>
+        <td>${r.note ? escapeHtml(r.note) : none}</td>
+        <td>${escapeHtml(r.status)}</td>
+        <td>${escapeHtml(r.created_by_name)}</td>
+        <td>${r.status === 'pending' ? `<button class="btn-icon danger" onclick="cancelCallback(${r.id})">Cancel</button>` : ''}</td>
+      </tr>`;
+    }).join('')
+    : '<tr><td colspan="8" style="text-align:center; color: var(--muted); padding: 20px;">No callbacks yet.</td></tr>';
+}
+
+async function cancelCallback(id) {
+  if (!confirm('Cancel this callback?')) return;
+  const res = await fetch(`/admin/callbacks/${id}/cancel`, { method: 'POST' });
+  if (res.ok) loadCallbacksAdmin();
+  else alert('Cancel failed');
+}
+
+let teamsCache = [];
+let editingTeamId = null;
+
+async function loadTeams() {
+  const [teamsRes, usersRes, campaignsRes] = await Promise.all([
+    fetch('/admin/teams'), fetch('/admin/users'), fetch('/admin/campaigns'),
+  ]);
+  const teams = await teamsRes.json();
+  const agents = (await usersRes.json()).filter((u) => u.role === 'agent');
+  const campaigns = await campaignsRes.json();
+  teamsCache = teams;
+
+  // Rebuilding the checkboxes keeps whatever is ticked while editing.
+  const ticked = (boxName) => new Set([...document.querySelectorAll(`input[name="${boxName}"]:checked`)].map((b) => Number(b.value)));
+  const tickedAgents = ticked('teamAgent');
+  const tickedCampaigns = ticked('teamCampaign');
+  document.getElementById('teamAgentChecks').innerHTML = agents.length
+    ? agents.map((a) => `<label><input type="checkbox" name="teamAgent" value="${a.id}" ${tickedAgents.has(a.id) ? 'checked' : ''} style="width:auto; margin:0 6px 0 0;">${escapeHtml(a.username)}</label>`).join('')
+    : '<span class="muted-cell">No agents yet</span>';
+  document.getElementById('teamCampaignChecks').innerHTML = campaigns.length
+    ? campaigns.map((c) => `<label><input type="checkbox" name="teamCampaign" value="${c.id}" ${tickedCampaigns.has(c.id) ? 'checked' : ''} style="width:auto; margin:0 6px 0 0;">${escapeHtml(c.name)}${c.status !== 'active' ? ' <span class="muted-cell">(' + escapeHtml(c.status) + ')</span>' : ''}</label>`).join('')
+    : '<span class="muted-cell">No campaigns yet</span>';
+
+  const tbody = document.querySelector('#teamsTable tbody');
+  tbody.innerHTML = '';
+  for (const t of teams) {
+    const tr = document.createElement('tr');
+    const none = '<span class="muted-cell">—</span>';
+    tr.innerHTML = `
+      <td style="padding-left: 18px; font-weight: 600;">${escapeHtml(t.name)}</td>
+      <td>${t.members.length ? t.members.map((m) => escapeHtml(m.username)).join(', ') : none}</td>
+      <td>${t.campaigns.length ? t.campaigns.map((c) => escapeHtml(c.name)).join(', ') : none}</td>
+      <td><span class="role-pill ${t.status === 'active' ? 'agent' : 'admin'}">${escapeHtml(t.status)}</span></td>
+      <td class="row-actions">
+        <button class="btn-icon" onclick="editTeam(${t.id})">Edit</button>
+        <button class="btn-icon danger" onclick="deleteTeam(${t.id})">Delete</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (teams.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--muted); padding: 20px;">No teams yet - create one above.</td></tr>';
+  }
+}
+
+function setTeamChecks(boxName, ids) {
+  const wanted = new Set(ids);
+  document.querySelectorAll(`input[name="${boxName}"]`).forEach((b) => { b.checked = wanted.has(Number(b.value)); });
+}
+
+function editTeam(id) {
+  const t = teamsCache.find((x) => x.id === id);
+  if (!t) return;
+  editingTeamId = id;
+  document.getElementById('newTeamName').value = t.name;
+  document.getElementById('newTeamStatus').value = t.status;
+  setTeamChecks('teamAgent', t.members.map((m) => m.id));
+  setTeamChecks('teamCampaign', t.campaigns.map((c) => c.id));
+  document.getElementById('teamFormTitle').textContent = 'Edit Team';
+  document.getElementById('teamSubmitBtn').textContent = 'Save Changes';
+  document.getElementById('teamCancelBtn').style.display = 'inline-flex';
+  document.getElementById('teamStatus').textContent = '';
+}
+
+function cancelTeamEdit() {
+  editingTeamId = null;
+  document.getElementById('newTeamName').value = '';
+  document.getElementById('newTeamStatus').value = 'active';
+  setTeamChecks('teamAgent', []);
+  setTeamChecks('teamCampaign', []);
+  document.getElementById('teamFormTitle').textContent = 'Create Team';
+  document.getElementById('teamSubmitBtn').textContent = 'Create Team';
+  document.getElementById('teamCancelBtn').style.display = 'none';
+  document.getElementById('teamStatus').textContent = '';
+}
+
+async function saveTeam() {
+  const name = document.getElementById('newTeamName').value.trim();
+  const el = document.getElementById('teamStatus');
+  if (!name) { el.textContent = 'Team name is required'; el.style.color = '#dc2626'; return; }
+  const checkedIds = (boxName) => [...document.querySelectorAll(`input[name="${boxName}"]:checked`)].map((b) => Number(b.value));
+  const body = {
+    name,
+    status: document.getElementById('newTeamStatus').value,
+    memberIds: checkedIds('teamAgent'),
+    campaignIds: checkedIds('teamCampaign'),
+  };
+  const res = await fetch(editingTeamId ? `/admin/teams/${editingTeamId}` : '/admin/teams', {
+    method: editingTeamId ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    cancelTeamEdit();
+    el.textContent = `Saved team: ${name}`;
+    el.style.color = '#16a34a';
+    loadTeams();
+  } else {
+    el.textContent = data.error || 'Failed to save team';
+    el.style.color = '#dc2626';
+  }
+}
+
+async function deleteTeam(id) {
+  const t = teamsCache.find((x) => x.id === id);
+  if (!t || !confirm(`Delete team "${t.name}"? Its agents will lose access to its campaigns.`)) return;
+  const res = await fetch(`/admin/teams/${id}`, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    if (editingTeamId === id) cancelTeamEdit();
+    loadTeams();
+  } else {
+    alert(data.error || 'Delete failed');
   }
 }
 
@@ -1262,6 +2003,7 @@ async function createQueue() {
 async function createCampaign() {
   const name = document.getElementById('newCampaignName').value.trim();
   const queueId = document.getElementById('newCampaignQueue').value || null;
+  const formId = document.getElementById('newCampaignForm').value || null;
   const outboundCallerId = document.getElementById('newCampaignCallerId').value.trim() || null;
   const autoAnswer = document.getElementById('newCampaignAutoAnswer').checked;
   const status = document.getElementById('newCampaignStatus').value;
@@ -1272,7 +2014,7 @@ async function createCampaign() {
     const res = await fetch(`/admin/campaigns/${editingCampaignId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, queueId, outboundCallerId, autoAnswer, status }),
+      body: JSON.stringify({ name, queueId, outboundCallerId, autoAnswer, status, formId, ...campaignSettingsBody() }),
     });
     if (res.ok) {
       cancelCampaignEdit();
@@ -1288,7 +2030,7 @@ async function createCampaign() {
   const res = await fetch('/admin/campaigns', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, queueId, outboundCallerId, autoAnswer, status }),
+    body: JSON.stringify({ name, queueId, outboundCallerId, autoAnswer, status, formId, ...campaignSettingsBody() }),
   });
   if (res.ok) {
     el.textContent = `Created campaign: ${name}`;
@@ -1297,9 +2039,11 @@ async function createCampaign() {
     document.getElementById('newCampaignCallerId').value = '';
     document.getElementById('newCampaignAutoAnswer').checked = false;
     document.getElementById('newCampaignStatus').value = 'active';
+    fillCampaignSettings(null);
     loadCampaigns();
   } else {
-    el.textContent = 'Failed to create campaign';
+    const data = await res.json().catch(() => ({}));
+    el.textContent = data.error || 'Failed to create campaign';
     el.style.color = '#dc2626';
   }
 }

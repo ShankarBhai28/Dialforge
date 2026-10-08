@@ -7,6 +7,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const ExcelJS = require('exceljs');
 const pool = require('./db');
 const ari = require('./ari');
 const ami = require('./ami');
@@ -21,7 +22,7 @@ if (missingEnvVars.length > 0) {
   process.exit(1);
 }
 
-const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
+const leadUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 // Hand-rolled, not another dependency - correctly handles quoted fields
 // with embedded commas/escaped quotes, which is the actual tricky part
@@ -280,6 +281,14 @@ app.post('/agent/status', requireAuth, async (req, res) => {
   if (status === 'available' && !queueId) {
     return res.status(400).json({ error: 'a queue must be selected to go Available' });
   }
+  // Enforced here too, not just by hiding queues in the UI - otherwise a
+  // hand-crafted request could join any campaign's queue.
+  if (status === 'available') {
+    const allowed = await findAgentQueues(req.session.user.id);
+    if (!allowed.some((q) => q.id === Number(queueId))) {
+      return res.status(403).json({ error: 'this queue is not in any of your teams\' campaigns' });
+    }
+  }
   await setAgentStatus(
     req.session.user.id,
     status,
@@ -312,16 +321,38 @@ app.get('/agent/call-policy', requireAuth, async (req, res) => {
 // A queue only shows up here once some active campaign actually
 // references it - an unassigned queue has no campaign context for an
 // agent to be working under.
+// Agents additionally only see campaigns mapped to one of their (active)
+// teams - an agent in no team sees nothing, by design.
 app.get('/queues', requireAuth, async (req, res) => {
-  const [rows] = await pool.query(`
-    SELECT q.id, q.name, c.name AS campaign_name
-    FROM queues q
-    JOIN campaigns c ON c.queue_id = q.id
-    WHERE q.status = 'active' AND c.status = 'active'
-    ORDER BY c.name, q.name
-  `);
-  res.json(rows);
+  if (req.session.user.role !== 'agent') {
+    const [rows] = await pool.query(`
+      SELECT q.id, q.name, c.name AS campaign_name
+      FROM queues q
+      JOIN campaigns c ON c.queue_id = q.id
+      WHERE q.status = 'active' AND c.status = 'active'
+      ORDER BY c.name, q.name
+    `);
+    return res.json(rows);
+  }
+  res.json(await findAgentQueues(req.session.user.id));
 });
+
+// Queues this agent may work, via team membership -> team's campaigns.
+// DISTINCT because an agent in two teams sharing a campaign would
+// otherwise see that queue twice.
+async function findAgentQueues(userId) {
+  const [rows] = await pool.query(`
+    SELECT DISTINCT q.id, q.name, c.name AS campaign_name
+    FROM team_members tm
+    JOIN teams t ON t.id = tm.team_id AND t.status = 'active'
+    JOIN team_campaigns tc ON tc.team_id = t.id
+    JOIN campaigns c ON c.id = tc.campaign_id AND c.status = 'active'
+    JOIN queues q ON q.id = c.queue_id AND q.status = 'active'
+    WHERE tm.user_id = ?
+    ORDER BY c.name, q.name
+  `, [userId]);
+  return rows;
+}
 
 // --- Admin: standalone queue management (reusable across campaigns) ---
 app.get('/admin/queues', requireRole('admin'), async (req, res) => {
@@ -451,37 +482,215 @@ app.delete('/admin/queues/:id', requireRole('admin'), async (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// --- D3: phone normalisation, DNC, calling window, campaign dial settings,
+// per-campaign dispositions ---
+
+// One canonical form for comparing numbers (DNC lookups): digits only, and
+// an Indian number written as 91xxxxxxxxxx / 0xxxxxxxxxx reduced to its 10
+// digits, so "+91 98400 12345", "098400 12345" and "9840012345" all match.
+function normalizePhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+  return digits;
+}
+
+async function isDnc(phone) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return false;
+  const [rows] = await pool.query('SELECT 1 FROM dnc_numbers WHERE tenant_id = 1 AND phone = ? LIMIT 1', [normalized]);
+  return rows.length > 0;
+}
+
+async function addDnc(phone, source, userId) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return false;
+  const [result] = await pool.query(
+    'INSERT IGNORE INTO dnc_numbers (tenant_id, phone, source, created_by) VALUES (1, ?, ?, ?)',
+    [normalized, source, userId || null]
+  );
+  return result.affectedRows > 0;
+}
+
+// Current wall-clock time in the campaign's timezone as "HH:MM:SS" - the
+// server itself runs in UTC, so this can't just use new Date().getHours().
+function localTimeIn(timezone) {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).format(new Date());
+}
+
+function isWithinCallWindow(campaign) {
+  const now = localTimeIn(campaign.timezone || 'Asia/Kolkata');
+  return now >= campaign.call_window_start && now < campaign.call_window_end;
+}
+
+const DIAL_MODES = ['manual', 'preview', 'progressive', 'predictive'];
+
+// Parses and range-checks the dial settings block of a campaign form.
+// Returns { error } or { settings } with DB column names.
+function parseCampaignSettings(body) {
+  const num = (v, def) => (v === undefined || v === null || v === '' ? def : Number(v));
+  const s = {
+    dial_mode: body.dialMode || 'manual',
+    dial_ratio: num(body.dialRatio, 1),
+    max_dial_ratio: num(body.maxDialRatio, 2.5),
+    target_abandon_pct: num(body.targetAbandonPct, 3),
+    ring_timeout_sec: num(body.ringTimeoutSec, 30),
+    max_attempts: num(body.maxAttempts, 3),
+    max_channels: num(body.maxChannels, 10),
+    amd_enabled: body.amdEnabled ? 1 : 0,
+    preview_autodial_sec: num(body.previewAutodialSec, null),
+    wrapup_sec: num(body.wrapupSec, 10),
+    call_window_start: body.callWindowStart || '09:00',
+    call_window_end: body.callWindowEnd || '21:00',
+    timezone: body.timezone || 'Asia/Kolkata',
+  };
+  const inRange = (v, lo, hi) => Number.isFinite(v) && v >= lo && v <= hi;
+  if (!DIAL_MODES.includes(s.dial_mode)) return { error: 'unknown dial mode' };
+  if (!inRange(s.dial_ratio, 1, 5)) return { error: 'dial ratio must be between 1 and 5' };
+  if (!inRange(s.max_dial_ratio, s.dial_ratio, 5)) return { error: 'max dial ratio must be between the dial ratio and 5' };
+  if (!inRange(s.target_abandon_pct, 0, 10)) return { error: 'target abandon % must be between 0 and 10' };
+  if (!inRange(s.ring_timeout_sec, 10, 60)) return { error: 'ring timeout must be 10-60 seconds' };
+  if (!inRange(s.max_attempts, 1, 20) || !Number.isInteger(s.max_attempts)) return { error: 'max attempts must be a whole number 1-20' };
+  if (!inRange(s.max_channels, 1, 200) || !Number.isInteger(s.max_channels)) return { error: 'max channels must be a whole number 1-200' };
+  if (s.preview_autodial_sec !== null && !inRange(s.preview_autodial_sec, 0, 120)) return { error: 'preview auto-dial must be 0-120 seconds' };
+  if (!inRange(s.wrapup_sec, 0, 600)) return { error: 'wrap-up must be 0-600 seconds' };
+  const timeRe = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+  if (!timeRe.test(s.call_window_start) || !timeRe.test(s.call_window_end)) return { error: 'calling window times must be HH:MM' };
+  if (s.call_window_start.length === 5) s.call_window_start += ':00';
+  if (s.call_window_end.length === 5) s.call_window_end += ':00';
+  if (s.call_window_start >= s.call_window_end) return { error: 'calling window start must be before its end' };
+  try {
+    localTimeIn(s.timezone);
+  } catch {
+    return { error: `unknown timezone "${s.timezone}"` };
+  }
+  return { settings: s };
+}
+
+// Seeded into every new campaign - same codes the system always used.
+const DEFAULT_DISPOSITIONS = [
+  { code: 'interested', label: 'Interested', is_final: 1, retry_after_min: null, marks_dnc: 0, is_callback: 0 },
+  { code: 'not_interested', label: 'Not Interested', is_final: 1, retry_after_min: null, marks_dnc: 0, is_callback: 0 },
+  { code: 'callback', label: 'Callback', is_final: 0, retry_after_min: null, marks_dnc: 0, is_callback: 1 },
+  { code: 'no_answer', label: 'No Answer', is_final: 0, retry_after_min: 60, marks_dnc: 0, is_callback: 0 },
+  { code: 'do_not_call', label: 'Do Not Call', is_final: 1, retry_after_min: null, marks_dnc: 1, is_callback: 0 },
+];
+
+// A lead with no campaign (e.g. added by an admin without one) falls back
+// to the defaults so it can still be dispositioned.
+async function getDispositions(campaignId) {
+  if (!campaignId) return DEFAULT_DISPOSITIONS;
+  const [rows] = await pool.query(
+    'SELECT code, label, is_final, retry_after_min, marks_dnc, is_callback FROM campaign_dispositions WHERE campaign_id = ? ORDER BY sort_order, id',
+    [campaignId]
+  );
+  return rows;
+}
+
+function validateDispositions(list) {
+  if (!Array.isArray(list) || list.length === 0) return { error: 'a campaign needs at least one disposition' };
+  const seen = new Set();
+  const cleaned = [];
+  for (const d of list) {
+    const code = String(d.code || '').trim();
+    const label = String(d.label || '').trim();
+    if (!/^[a-z][a-z0-9_]{0,29}$/.test(code)) return { error: `code "${code}" must be lowercase letters, digits, underscores, starting with a letter` };
+    if (code === 'new') return { error: '"new" is reserved for leads not yet called' };
+    if (seen.has(code)) return { error: `code "${code}" is used twice` };
+    seen.add(code);
+    if (!label) return { error: `disposition "${code}" needs a label` };
+    const retry = d.retryAfterMin === '' || d.retryAfterMin == null ? null : Number(d.retryAfterMin);
+    if (retry !== null && (!Number.isInteger(retry) || retry < 1 || retry > 43200)) {
+      return { error: `"${label}": retry must be a whole number of minutes (1-43200)` };
+    }
+    const isFinal = d.isFinal ? 1 : 0;
+    const isCallback = d.isCallback ? 1 : 0;
+    const marksDnc = d.marksDnc ? 1 : 0;
+    if (isFinal && (retry !== null || isCallback)) return { error: `"${label}": a final disposition can't also retry or schedule a callback` };
+    if (marksDnc && !isFinal) return { error: `"${label}": Do-Not-Call dispositions must also be final` };
+    if (isCallback && retry !== null) return { error: `"${label}": pick either callback or retry, not both` };
+    cleaned.push({ code, label, is_final: isFinal, retry_after_min: retry, marks_dnc: marksDnc, is_callback: isCallback });
+  }
+  return { dispositions: cleaned };
+}
+
+async function replaceDispositions(conn, campaignId, list) {
+  await conn.query('DELETE FROM campaign_dispositions WHERE campaign_id = ?', [campaignId]);
+  for (const [i, d] of list.entries()) {
+    await conn.query(
+      `INSERT INTO campaign_dispositions (campaign_id, code, label, is_final, retry_after_min, marks_dnc, is_callback, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [campaignId, d.code, d.label, d.is_final, d.retry_after_min, d.marks_dnc, d.is_callback, i]
+    );
+  }
+}
+
 // --- Admin: campaigns (each references one queue) ---
 app.get('/admin/campaigns', requireRole('admin'), async (req, res) => {
   const [rows] = await pool.query(`
-    SELECT c.*, q.name AS queue_name, q.ring_strategy, q.wait_timeout
+    SELECT c.*, q.name AS queue_name, q.ring_strategy, q.wait_timeout, f.name AS form_name
     FROM campaigns c
     LEFT JOIN queues q ON q.id = c.queue_id
+    LEFT JOIN forms f ON f.id = c.form_id
     ORDER BY c.id DESC
   `);
   res.json(rows);
 });
 
+// Only an active form can be attached to a campaign.
+async function checkCampaignForm(formId) {
+  if (!formId) return null;
+  const [rows] = await pool.query('SELECT status FROM forms WHERE id = ?', [formId]);
+  if (!rows[0]) return 'form not found';
+  if (rows[0].status !== 'active') return 'that form is inactive';
+  return null;
+}
+
 app.post('/admin/campaigns', requireRole('admin'), async (req, res) => {
-  const { name, queueId, outboundCallerId, autoAnswer } = req.body;
+  const { name, queueId, outboundCallerId, autoAnswer, formId } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
-  const [result] = await pool.query(
-    'INSERT INTO campaigns (tenant_id, name, queue_id, outbound_caller_id, auto_answer) VALUES (1, ?, ?, ?, ?)',
-    [name, queueId || null, outboundCallerId || null, autoAnswer ? 1 : 0]
-  );
+  const formError = await checkCampaignForm(formId);
+  if (formError) return res.status(400).json({ error: formError });
+  const { error, settings } = parseCampaignSettings(req.body);
+  if (error) return res.status(400).json({ error });
+  const conn = await pool.getConnection();
+  let result;
+  try {
+    await conn.beginTransaction();
+    [result] = await conn.query(
+      'INSERT INTO campaigns SET ?',
+      [{ tenant_id: 1, name, queue_id: queueId || null, outbound_caller_id: outboundCallerId || null,
+        auto_answer: autoAnswer ? 1 : 0, form_id: formId || null, ...settings }]
+    );
+    await replaceDispositions(conn, result.insertId, DEFAULT_DISPOSITIONS);
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    console.error('[campaign create failed]', err);
+    return res.status(500).json({ error: 'failed to create campaign' });
+  } finally {
+    conn.release();
+  }
   res.status(201).json({ id: result.insertId, name });
 });
 
 app.put('/admin/campaigns/:id', requireRole('admin'), async (req, res) => {
-  const { name, queueId, outboundCallerId, autoAnswer, status } = req.body;
+  const { name, queueId, outboundCallerId, autoAnswer, status, formId } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'campaign not found' });
+  const formError = await checkCampaignForm(formId);
+  if (formError) return res.status(400).json({ error: formError });
+  const { error, settings } = parseCampaignSettings(req.body);
+  if (error) return res.status(400).json({ error });
 
-  await pool.query(
-    'UPDATE campaigns SET name = ?, queue_id = ?, outbound_caller_id = ?, auto_answer = ?, status = ? WHERE id = ?',
-    [name, queueId || null, outboundCallerId || null, autoAnswer ? 1 : 0, status || 'active', req.params.id]
-  );
+  await pool.query('UPDATE campaigns SET ? WHERE id = ?', [
+    { name, queue_id: queueId || null, outbound_caller_id: outboundCallerId || null, auto_answer: autoAnswer ? 1 : 0,
+      status: status || 'active', form_id: formId || null, ...settings },
+    req.params.id,
+  ]);
   res.json({ id: Number(req.params.id), name });
 });
 
@@ -495,11 +704,15 @@ app.delete('/admin/campaigns/:id', requireRole('admin'), async (req, res) => {
   const [didRefs] = await pool.query('SELECT number FROM dids WHERE campaign_id = ?', [req.params.id]);
   const [leadRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM leads WHERE campaign_id = ?', [req.params.id]);
   const [callRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM calls WHERE campaign_id = ?', [req.params.id]);
+  const [responseRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM form_responses WHERE campaign_id = ?', [req.params.id]);
+  const [callbackRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM callbacks WHERE campaign_id = ?', [req.params.id]);
 
   const blockers = [];
   if (didRefs.length) blockers.push(`${didRefs.length} DID number(s) (${didRefs.map((d) => d.number).join(', ')})`);
   if (leadRefs[0].cnt > 0) blockers.push(`${leadRefs[0].cnt} lead(s)`);
   if (callRefs[0].cnt > 0) blockers.push(`${callRefs[0].cnt} call record(s)`);
+  if (responseRefs[0].cnt > 0) blockers.push(`${responseRefs[0].cnt} form response(s)`);
+  if (callbackRefs[0].cnt > 0) blockers.push(`${callbackRefs[0].cnt} callback(s)`);
   if (blockers.length) {
     return res.status(409).json({ error: `Cannot delete - still referenced by ${blockers.join(' and ')}. Reassign or remove them first.` });
   }
@@ -590,6 +803,409 @@ app.delete('/admin/lists/:id', requireRole('admin'), async (req, res) => {
     return res.status(409).json({ error: `Cannot delete - ${leadRefs[0].cnt} lead(s) still belong to this list. Reassign or remove them first.` });
   }
   await pool.query('DELETE FROM lists WHERE id = ?', [req.params.id]);
+  res.json({ status: 'ok' });
+});
+
+// --- Admin: custom forms (fields an agent fills in per call) ---
+const FORM_FIELD_TYPES = ['text', 'textarea', 'number', 'email', 'phone', 'date', 'dropdown', 'radio', 'checkbox'];
+const FIELD_TYPES_WITH_OPTIONS = ['dropdown', 'radio', 'checkbox'];
+
+// Returns an error string, or null plus the cleaned field list. Checked
+// server-side because a bad field_key or a dropdown with no options would
+// otherwise only show up later as a broken agent screen.
+function validateFormFields(fields) {
+  if (!Array.isArray(fields) || fields.length === 0) return { error: 'a form needs at least one field' };
+  const seen = new Set();
+  const cleaned = [];
+  for (const [i, f] of fields.entries()) {
+    const key = String(f.fieldKey || '').trim();
+    const label = String(f.label || '').trim();
+    if (!/^[a-z][a-z0-9_]{0,49}$/.test(key)) {
+      return { error: `field ${i + 1}: key "${key}" must be lowercase letters, digits, underscores, starting with a letter` };
+    }
+    if (seen.has(key)) return { error: `field key "${key}" is used twice` };
+    seen.add(key);
+    if (!label) return { error: `field "${key}" needs a label` };
+    if (!FORM_FIELD_TYPES.includes(f.fieldType)) return { error: `field "${key}" has an unknown type` };
+    let options = null;
+    if (FIELD_TYPES_WITH_OPTIONS.includes(f.fieldType)) {
+      options = (f.options || []).map((o) => String(o).trim()).filter(Boolean);
+      if (options.length === 0) return { error: `field "${key}" (${f.fieldType}) needs at least one option` };
+    }
+    cleaned.push({ key, label, type: f.fieldType, options, required: f.isRequired ? 1 : 0, order: i });
+  }
+  return { fields: cleaned };
+}
+
+async function loadFormsWithFields(whereSql = '', params = []) {
+  const [forms] = await pool.query(`SELECT * FROM forms ${whereSql} ORDER BY id DESC`, params);
+  if (forms.length === 0) return [];
+  const [fields] = await pool.query(
+    'SELECT * FROM form_fields WHERE form_id IN (?) ORDER BY sort_order, id', [forms.map((f) => f.id)]
+  );
+  return forms.map((form) => ({ ...form, fields: fields.filter((f) => f.form_id === form.id) }));
+}
+
+app.get('/admin/forms', requireRole('admin'), async (req, res) => {
+  const forms = await loadFormsWithFields();
+  const [usage] = await pool.query(
+    'SELECT form_id, GROUP_CONCAT(name ORDER BY name SEPARATOR \', \') AS campaigns FROM campaigns WHERE form_id IS NOT NULL GROUP BY form_id'
+  );
+  const [counts] = await pool.query('SELECT form_id, COUNT(*) AS cnt FROM form_responses GROUP BY form_id');
+  res.json(forms.map((f) => ({
+    ...f,
+    campaigns: (usage.find((u) => u.form_id === f.id) || {}).campaigns || null,
+    response_count: (counts.find((c) => c.form_id === f.id) || {}).cnt || 0,
+  })));
+});
+
+// Create and edit replace the whole field list in one transaction. Old
+// responses are stored by field_key, so re-creating field rows is safe.
+async function saveForm(formId, { name, description, status, fields }) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    if (formId) {
+      await conn.query('UPDATE forms SET name = ?, description = ?, status = ? WHERE id = ?',
+        [name, description || null, status || 'active', formId]);
+      await conn.query('DELETE FROM form_fields WHERE form_id = ?', [formId]);
+    } else {
+      const [result] = await conn.query('INSERT INTO forms (tenant_id, name, description, status) VALUES (1, ?, ?, ?)',
+        [name, description || null, status || 'active']);
+      formId = result.insertId;
+    }
+    for (const f of fields) {
+      await conn.query(
+        'INSERT INTO form_fields (form_id, field_key, label, field_type, options, is_required, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [formId, f.key, f.label, f.type, f.options ? JSON.stringify(f.options) : null, f.required, f.order]
+      );
+    }
+    await conn.commit();
+    return formId;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+async function handleFormSave(req, res, formId) {
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  const { error, fields } = validateFormFields(req.body.fields);
+  if (error) return res.status(400).json({ error });
+  // Deactivating a form a campaign still points at would silently remove
+  // the form from agents' screens - make the admin unlink it first.
+  if (formId && req.body.status === 'inactive') {
+    const [refs] = await pool.query('SELECT name FROM campaigns WHERE form_id = ?', [formId]);
+    if (refs.length) {
+      return res.status(409).json({ error: `Cannot deactivate - used by campaign(s): ${refs.map((r) => r.name).join(', ')}. Pick another form for them first.` });
+    }
+  }
+  try {
+    const id = await saveForm(formId, { ...req.body, name, fields });
+    res.status(formId ? 200 : 201).json({ id, name });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'a form with that name already exists' });
+    console.error('[form save failed]', err);
+    res.status(500).json({ error: 'failed to save form' });
+  }
+}
+
+app.post('/admin/forms', requireRole('admin'), (req, res) => handleFormSave(req, res, null));
+
+app.put('/admin/forms/:id', requireRole('admin'), async (req, res) => {
+  const [rows] = await pool.query('SELECT id FROM forms WHERE id = ?', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'form not found' });
+  return handleFormSave(req, res, Number(req.params.id));
+});
+
+// Blocked while referenced: a campaign using it, or saved responses
+// (those are real call data - deactivate the form instead).
+app.delete('/admin/forms/:id', requireRole('admin'), async (req, res) => {
+  const [rows] = await pool.query('SELECT id FROM forms WHERE id = ?', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'form not found' });
+  const [campRefs] = await pool.query('SELECT name FROM campaigns WHERE form_id = ?', [req.params.id]);
+  const [respRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM form_responses WHERE form_id = ?', [req.params.id]);
+  const blockers = [];
+  if (campRefs.length) blockers.push(`campaign(s) ${campRefs.map((c) => c.name).join(', ')}`);
+  if (respRefs[0].cnt > 0) blockers.push(`${respRefs[0].cnt} saved response(s) - set it Inactive instead`);
+  if (blockers.length) return res.status(409).json({ error: `Cannot delete - still referenced by ${blockers.join(' and ')}.` });
+  await pool.query('DELETE FROM forms WHERE id = ?', [req.params.id]);
+  res.json({ status: 'ok' });
+});
+
+app.get('/admin/forms/:id/responses', requireRole('admin'), async (req, res) => {
+  const [rows] = await pool.query(`
+    SELECT r.id, r.data, r.created_at, r.lead_id, r.call_id, u.username, c.name AS campaign_name, l.phone AS lead_phone
+    FROM form_responses r
+    JOIN users u ON u.id = r.user_id
+    LEFT JOIN campaigns c ON c.id = r.campaign_id
+    LEFT JOIN leads l ON l.id = r.lead_id
+    WHERE r.form_id = ?
+    ORDER BY r.id DESC LIMIT 200
+  `, [req.params.id]);
+  res.json(rows);
+});
+
+// --- Agent: the form for the campaign they're currently working ---
+app.get('/agent/form', requireAuth, async (req, res) => {
+  const campaign = await findCurrentCampaign(req.session.user.id);
+  if (!campaign || !campaign.form_id) return res.json(null);
+  const [form] = await loadFormsWithFields('WHERE id = ? AND status = \'active\'', [campaign.form_id]);
+  res.json(form || null);
+});
+
+// Values are re-checked against the form definition here - the browser's
+// "required" attribute is a convenience, not a guarantee.
+function validateFormData(fields, data) {
+  const clean = {};
+  for (const f of fields) {
+    let v = data[f.field_key];
+    const options = f.options || [];
+    if (f.field_type === 'checkbox') {
+      v = Array.isArray(v) ? v.map(String) : [];
+      if (v.some((x) => !options.includes(x))) return { error: `"${f.label}" has an invalid choice` };
+      if (f.is_required && v.length === 0) return { error: `"${f.label}" is required` };
+      clean[f.field_key] = v;
+      continue;
+    }
+    v = v == null ? '' : String(v).trim();
+    if (v === '') {
+      if (f.is_required) return { error: `"${f.label}" is required` };
+      clean[f.field_key] = null;
+      continue;
+    }
+    if (f.field_type === 'number' && !Number.isFinite(Number(v))) return { error: `"${f.label}" must be a number` };
+    if (f.field_type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return { error: `"${f.label}" must be an email` };
+    if (f.field_type === 'phone' && !/^\+?[0-9]{6,15}$/.test(v)) return { error: `"${f.label}" must be a phone number` };
+    if (f.field_type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return { error: `"${f.label}" must be a date` };
+    if (['dropdown', 'radio'].includes(f.field_type) && !options.includes(v)) return { error: `"${f.label}" has an invalid choice` };
+    clean[f.field_key] = f.field_type === 'number' ? Number(v) : v;
+  }
+  return { data: clean };
+}
+
+app.post('/agent/form-responses', requireAuth, async (req, res) => {
+  if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
+  const campaign = await findCurrentCampaign(req.session.user.id);
+  if (!campaign || !campaign.form_id) return res.status(400).json({ error: 'your current campaign has no form' });
+  const [form] = await loadFormsWithFields('WHERE id = ? AND status = \'active\'', [campaign.form_id]);
+  if (!form) return res.status(400).json({ error: 'your current campaign has no active form' });
+
+  const { leadId, callId } = req.body;
+  // The lead must belong to the campaign being worked, and the call must
+  // be one this agent placed/took - otherwise answers could be attached
+  // to someone else's record.
+  if (leadId) {
+    const [leads] = await pool.query('SELECT id FROM leads WHERE id = ? AND campaign_id = ?', [leadId, campaign.id]);
+    if (!leads[0]) return res.status(400).json({ error: 'that lead is not in your current campaign' });
+  }
+  if (callId) {
+    const [calls] = await pool.query('SELECT id FROM calls WHERE id = ? AND from_extension = ?', [callId, req.session.user.extensionName]);
+    if (!calls[0]) return res.status(400).json({ error: 'that call is not yours' });
+  }
+
+  const { error, data } = validateFormData(form.fields, req.body.data || {});
+  if (error) return res.status(400).json({ error });
+  const [result] = await pool.query(
+    'INSERT INTO form_responses (tenant_id, form_id, campaign_id, lead_id, call_id, user_id, data) VALUES (1, ?, ?, ?, ?, ?, ?)',
+    [form.id, campaign.id, leadId || null, callId || null, req.session.user.id, JSON.stringify(data)]
+  );
+  res.status(201).json({ id: result.insertId });
+});
+
+// --- Admin: per-campaign dispositions ---
+app.get('/admin/campaigns/:id/dispositions', requireRole('admin'), async (req, res) => {
+  res.json(await getDispositions(Number(req.params.id)));
+});
+
+// Replaces the whole set. Leads keep whatever code they already have -
+// a removed code just shows as its raw code in lists.
+app.put('/admin/campaigns/:id/dispositions', requireRole('admin'), async (req, res) => {
+  const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'campaign not found' });
+  const { error, dispositions } = validateDispositions(req.body.dispositions);
+  if (error) return res.status(400).json({ error });
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await replaceDispositions(conn, req.params.id, dispositions);
+    await conn.commit();
+    res.json({ status: 'ok' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('[dispositions save failed]', err);
+    res.status(500).json({ error: 'failed to save dispositions' });
+  } finally {
+    conn.release();
+  }
+});
+
+// --- Agent: dispositions + callbacks for the campaign they're working ---
+app.get('/agent/dispositions', requireAuth, async (req, res) => {
+  const campaign = await findCurrentCampaign(req.session.user.id);
+  res.json(await getDispositions(campaign ? campaign.id : null));
+});
+
+// Pending callbacks the agent should see: their own, plus "anyone"
+// callbacks in the campaign they're currently working.
+app.get('/agent/callbacks', requireAuth, async (req, res) => {
+  if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
+  const campaign = await findCurrentCampaign(req.session.user.id);
+  const [rows] = await pool.query(`
+    SELECT cb.id, cb.lead_id, cb.callback_at, cb.note, cb.user_id, l.name, l.phone, c.name AS campaign_name
+    FROM callbacks cb
+    JOIN leads l ON l.id = cb.lead_id
+    LEFT JOIN campaigns c ON c.id = cb.campaign_id
+    WHERE cb.status = 'pending'
+      AND (cb.user_id = ? OR (cb.user_id IS NULL AND cb.campaign_id = ?))
+    ORDER BY cb.callback_at
+    LIMIT 100
+  `, [req.session.user.id, campaign ? campaign.id : -1]);
+  res.json(rows);
+});
+
+app.get('/admin/callbacks', requireRole('admin'), async (req, res) => {
+  const [rows] = await pool.query(`
+    SELECT cb.id, cb.callback_at, cb.status, cb.note, l.name, l.phone, c.name AS campaign_name,
+      u.username AS assigned_to, cu.username AS created_by_name
+    FROM callbacks cb
+    JOIN leads l ON l.id = cb.lead_id
+    LEFT JOIN campaigns c ON c.id = cb.campaign_id
+    LEFT JOIN users u ON u.id = cb.user_id
+    JOIN users cu ON cu.id = cb.created_by
+    ORDER BY cb.status = 'pending' DESC, cb.callback_at
+    LIMIT 300
+  `);
+  res.json(rows);
+});
+
+app.post('/admin/callbacks/:id/cancel', requireRole('admin'), async (req, res) => {
+  const [result] = await pool.query("UPDATE callbacks SET status = 'cancelled' WHERE id = ? AND status = 'pending'", [req.params.id]);
+  if (!result.affectedRows) return res.status(404).json({ error: 'no pending callback with that id' });
+  res.json({ status: 'ok' });
+});
+
+// --- Admin: DNC list ---
+app.get('/admin/dnc', requireRole('admin'), async (req, res) => {
+  const q = normalizePhone(req.query.q || '');
+  const [rows] = await pool.query(`
+    SELECT d.id, d.phone, d.source, d.created_at, u.username AS created_by_name
+    FROM dnc_numbers d LEFT JOIN users u ON u.id = d.created_by
+    WHERE d.tenant_id = 1 ${q ? 'AND d.phone LIKE ?' : ''}
+    ORDER BY d.id DESC LIMIT 500
+  `, q ? [`%${q}%`] : []);
+  const [count] = await pool.query('SELECT COUNT(*) AS cnt FROM dnc_numbers WHERE tenant_id = 1');
+  res.json({ total: count[0].cnt, rows });
+});
+
+// Bulk add: one number per line (or comma-separated).
+app.post('/admin/dnc', requireRole('admin'), async (req, res) => {
+  const entries = String(req.body.phones || '').split(/[\n,]+/).map((p) => p.trim()).filter(Boolean);
+  if (entries.length === 0) return res.status(400).json({ error: 'enter at least one number' });
+  if (entries.length > 5000) return res.status(400).json({ error: 'max 5000 numbers per add' });
+  let added = 0;
+  let existing = 0;
+  let invalid = 0;
+  for (const p of entries) {
+    const n = normalizePhone(p);
+    if (n.length < 3 || n.length > 15) { invalid++; continue; }
+    if (await addDnc(n, 'manual', req.session.user.id)) added++;
+    else existing++;
+  }
+  res.json({ added, existing, invalid });
+});
+
+app.delete('/admin/dnc/:id', requireRole('admin'), async (req, res) => {
+  const [result] = await pool.query('DELETE FROM dnc_numbers WHERE id = ? AND tenant_id = 1', [req.params.id]);
+  if (!result.affectedRows) return res.status(404).json({ error: 'not found' });
+  res.json({ status: 'ok' });
+});
+
+// --- Admin: teams (a group of agents + the campaigns they may work) ---
+// Members and campaigns come back as id arrays so the edit form can
+// pre-tick its checkboxes, plus names for the table.
+app.get('/admin/teams', requireRole('admin'), async (req, res) => {
+  const [teams] = await pool.query('SELECT * FROM teams ORDER BY id DESC');
+  const [members] = await pool.query(
+    'SELECT tm.team_id, u.id, u.username FROM team_members tm JOIN users u ON u.id = tm.user_id ORDER BY u.username'
+  );
+  const [campaigns] = await pool.query(
+    'SELECT tc.team_id, c.id, c.name FROM team_campaigns tc JOIN campaigns c ON c.id = tc.campaign_id ORDER BY c.name'
+  );
+  res.json(teams.map((t) => ({
+    ...t,
+    members: members.filter((m) => m.team_id === t.id).map(({ id, username }) => ({ id, username })),
+    campaigns: campaigns.filter((c) => c.team_id === t.id).map(({ id, name }) => ({ id, name })),
+  })));
+});
+
+// Create and edit both replace the full member/campaign sets inside one
+// transaction, so a half-saved team (name changed, mappings not) can't happen.
+async function saveTeam(teamId, { name, status, memberIds, campaignIds }) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    if (teamId) {
+      await conn.query('UPDATE teams SET name = ?, status = ? WHERE id = ?', [name, status || 'active', teamId]);
+      await conn.query('DELETE FROM team_members WHERE team_id = ?', [teamId]);
+      await conn.query('DELETE FROM team_campaigns WHERE team_id = ?', [teamId]);
+    } else {
+      const [result] = await conn.query(
+        'INSERT INTO teams (tenant_id, name, status) VALUES (1, ?, ?)', [name, status || 'active']
+      );
+      teamId = result.insertId;
+    }
+    for (const userId of memberIds || []) {
+      await conn.query('INSERT INTO team_members (team_id, user_id) VALUES (?, ?)', [teamId, userId]);
+    }
+    for (const campaignId of campaignIds || []) {
+      await conn.query('INSERT INTO team_campaigns (team_id, campaign_id) VALUES (?, ?)', [teamId, campaignId]);
+    }
+    await conn.commit();
+    return teamId;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+app.post('/admin/teams', requireRole('admin'), async (req, res) => {
+  if (!req.body.name) return res.status(400).json({ error: 'name is required' });
+  try {
+    const id = await saveTeam(null, req.body);
+    res.status(201).json({ id, name: req.body.name });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'a team with that name already exists' });
+    console.error('[team save failed]', err);
+    res.status(500).json({ error: 'failed to save team' });
+  }
+});
+
+app.put('/admin/teams/:id', requireRole('admin'), async (req, res) => {
+  if (!req.body.name) return res.status(400).json({ error: 'name is required' });
+  const [rows] = await pool.query('SELECT id FROM teams WHERE id = ?', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'team not found' });
+  try {
+    await saveTeam(Number(req.params.id), req.body);
+    res.json({ id: Number(req.params.id), name: req.body.name });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'a team with that name already exists' });
+    console.error('[team save failed]', err);
+    res.status(500).json({ error: 'failed to save team' });
+  }
+});
+
+// Deleting a team only removes the grouping (link rows cascade); no call
+// or lead data references teams, so nothing needs to block it.
+app.delete('/admin/teams/:id', requireRole('admin'), async (req, res) => {
+  const [rows] = await pool.query('SELECT id FROM teams WHERE id = ?', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'team not found' });
+  await pool.query('DELETE FROM teams WHERE id = ?', [req.params.id]);
   res.json({ status: 'ok' });
 });
 
@@ -714,20 +1330,61 @@ app.post('/leads', requireAuth, async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
-// --- Lead disposition: the actual outcome of an outbound call, set by
-// the agent right after it ends. "do_not_call" is enforced below, not
-// just a label - click2call refuses to dial a lead marked this way.
-const LEAD_STATUSES = ['new', 'interested', 'not_interested', 'callback', 'no_answer', 'do_not_call'];
+// --- Lead disposition: the actual outcome of a call, set by the agent
+// right after it ends. What it does comes from the campaign's own
+// disposition config: final (lead done), retry after N minutes, schedule a
+// callback, and/or add the number to the DNC list (click2call then refuses it).
 app.post('/leads/:id/disposition', requireAuth, async (req, res) => {
-  const { status } = req.body;
-  if (!LEAD_STATUSES.includes(status)) {
-    return res.status(400).json({ error: `status must be one of: ${LEAD_STATUSES.join(', ')}` });
+  const { status, callbackAt, callbackMine, note } = req.body;
+  const [leadRows] = await pool.query('SELECT id, phone, campaign_id FROM leads WHERE id = ?', [req.params.id]);
+  const lead = leadRows[0];
+  if (!lead) return res.status(404).json({ error: 'lead not found' });
+  if (req.session.user.role === 'agent') {
+    const campaign = await findCurrentCampaign(req.session.user.id);
+    if (lead.campaign_id && (!campaign || campaign.id !== lead.campaign_id)) {
+      return res.status(403).json({ error: 'that lead is not in your current campaign' });
+    }
   }
-  await pool.query('UPDATE leads SET status = ?, updated_by = ? WHERE id = ?', [
-    status,
-    req.session.user.id,
-    req.params.id,
-  ]);
+  const dispositions = await getDispositions(lead.campaign_id);
+  const d = dispositions.find((x) => x.code === status);
+  if (!d) return res.status(400).json({ error: `status must be one of: ${dispositions.map((x) => x.code).join(', ')}` });
+
+  let nextCallAt = null;
+  let when = null;
+  if (d.is_callback) {
+    when = new Date(callbackAt);
+    if (!callbackAt || Number.isNaN(when.getTime())) return res.status(400).json({ error: 'pick a callback date and time' });
+    if (when < new Date(Date.now() - 60 * 1000)) return res.status(400).json({ error: 'callback time is in the past' });
+    if (when > new Date(Date.now() + 90 * 24 * 3600 * 1000)) return res.status(400).json({ error: 'callback must be within 90 days' });
+    nextCallAt = when;
+  } else if (d.retry_after_min) {
+    nextCallAt = new Date(Date.now() + d.retry_after_min * 60 * 1000);
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query(
+      'UPDATE leads SET status = ?, updated_by = ?, is_final = ?, next_call_at = ? WHERE id = ?',
+      [d.code, req.session.user.id, d.is_final ? 1 : 0, nextCallAt, lead.id]
+    );
+    // Any earlier pending callback for this lead is now handled.
+    await conn.query("UPDATE callbacks SET status = 'done' WHERE lead_id = ? AND status = 'pending'", [lead.id]);
+    if (d.is_callback) {
+      await conn.query(
+        'INSERT INTO callbacks (tenant_id, lead_id, campaign_id, user_id, callback_at, note, created_by) VALUES (1, ?, ?, ?, ?, ?, ?)',
+        [lead.id, lead.campaign_id, callbackMine ? req.session.user.id : null, when, note ? String(note).slice(0, 255) : null, req.session.user.id]
+      );
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    console.error('[disposition failed]', err);
+    return res.status(500).json({ error: 'failed to save disposition' });
+  } finally {
+    conn.release();
+  }
+  if (d.marks_dnc) await addDnc(lead.phone, 'disposition', req.session.user.id);
   res.json({ status: 'ok' });
 });
 
@@ -738,8 +1395,9 @@ app.put('/admin/leads/:id', requireRole('admin'), async (req, res) => {
   if (!phone || !/^\+?[0-9]{7,15}$/.test(phone)) {
     return res.status(400).json({ error: 'a valid phone is required' });
   }
-  if (status && !LEAD_STATUSES.includes(status)) {
-    return res.status(400).json({ error: `status must be one of: ${LEAD_STATUSES.join(', ')}` });
+  if (status && status !== 'new') {
+    const codes = (await getDispositions(campaignId || null)).map((x) => x.code);
+    if (!codes.includes(status)) return res.status(400).json({ error: `status must be new or one of: ${codes.join(', ')}` });
   }
   const [rows] = await pool.query('SELECT id FROM leads WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'lead not found' });
@@ -759,69 +1417,262 @@ app.delete('/admin/leads/:id', requireRole('admin'), async (req, res) => {
   if (callRefs[0].cnt > 0) {
     return res.status(409).json({ error: `Cannot delete - ${callRefs[0].cnt} call record(s) reference this lead.` });
   }
+  const [responseRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM form_responses WHERE lead_id = ?', [req.params.id]);
+  if (responseRefs[0].cnt > 0) {
+    return res.status(409).json({ error: `Cannot delete - ${responseRefs[0].cnt} form response(s) reference this lead.` });
+  }
+  const [callbackRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM callbacks WHERE lead_id = ?', [req.params.id]);
+  if (callbackRefs[0].cnt > 0) {
+    return res.status(409).json({ error: `Cannot delete - ${callbackRefs[0].cnt} callback(s) reference this lead.` });
+  }
 
   await pool.query('DELETE FROM leads WHERE id = ?', [req.params.id]);
   res.json({ status: 'ok' });
 });
 
-// --- Admin: CSV lead import, assigned to a specific campaign ---
-app.get('/admin/leads/csv-template', requireRole('admin'), (req, res) => {
-  const csv = 'name,phone\nJohn Doe,9000000001\n';
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename="leads-template.csv"');
-  res.send(csv);
-});
+// --- Admin: lead upload (.xlsx or .csv) into a list ---
+// Fixed columns every upload understands; on top of these, every field
+// key of the list's campaign form is accepted and stored in custom_data.
+const LEAD_BASE_COLUMNS = [
+  { key: 'phone', required: true, help: 'Mobile/landline. +91, 0 and spaces are fine - stored as digits.' },
+  { key: 'name', required: false, help: 'Customer name' },
+  { key: 'alt_phone', required: false, help: 'Second number (optional)' },
+  { key: 'priority', required: false, help: 'Whole number -100..100, higher is dialed first (default 0)' },
+];
+const MAX_IMPORT_ROWS = 20000;
 
-app.post('/admin/leads/import', requireRole('admin'), csvUpload.single('file'), async (req, res) => {
+// An Excel cell can be a plain value, a Date, rich text, a hyperlink or
+// a formula - flatten all of them to the string a person sees.
+function excelCellToString(v) {
+  if (v == null) return '';
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === 'object') {
+    if (Array.isArray(v.richText)) return v.richText.map((r) => r.text).join('');
+    if ('result' in v) return excelCellToString(v.result);
+    if ('text' in v) return excelCellToString(v.text);
+    return '';
+  }
+  return String(v);
+}
+
+// Returns { headers, rows: [{ rowNum, values: {header: string} }] } or { error }.
+async function readLeadUpload(file) {
+  const isXlsx = /\.xlsx$/i.test(file.originalname) || file.buffer.subarray(0, 2).toString() === 'PK';
+  let table = [];
+  if (isXlsx) {
+    const wb = new ExcelJS.Workbook();
+    try {
+      await wb.xlsx.load(file.buffer);
+    } catch {
+      return { error: 'could not read that Excel file - save it as .xlsx and try again' };
+    }
+    const ws = wb.worksheets[0];
+    if (!ws) return { error: 'the Excel file has no sheets' };
+    ws.eachRow({ includeEmpty: false }, (row, rowNum) => {
+      const cells = [];
+      for (let c = 1; c <= row.cellCount; c++) cells.push(excelCellToString(row.getCell(c).value).trim());
+      table.push({ rowNum, cells });
+    });
+  } else {
+    const lines = file.buffer.toString('utf-8').replace(/^﻿/, '').split(/\r?\n/);
+    table = lines.map((l, i) => ({ rowNum: i + 1, cells: parseCsvLine(l).map((c) => c.trim()) }))
+      .filter((r) => r.cells.some((c) => c !== ''));
+  }
+  if (table.length < 2) return { error: 'the file has no data rows (row 1 must be the column headers)' };
+  if (table.length - 1 > MAX_IMPORT_ROWS) return { error: `max ${MAX_IMPORT_ROWS} rows per upload - split the file` };
+  const headers = table[0].cells.map((h) => h.toLowerCase().trim());
+  const rows = table.slice(1).map(({ rowNum, cells }) => ({
+    rowNum,
+    values: Object.fromEntries(headers.map((h, i) => [h, cells[i] || ''])),
+  }));
+  return { headers, rows };
+}
+
+// Lead data is pre-call information, so values are checked for type/choice
+// like form answers, but "required" doesn't apply.
+function parseLeadCustomValue(field, raw) {
+  const opts = field.options || [];
+  switch (field.field_type) {
+    case 'number':
+      return Number.isFinite(Number(raw)) ? { value: Number(raw) } : { error: 'must be a number' };
+    case 'date':
+      return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? { value: raw } : { error: 'must be a date (YYYY-MM-DD)' };
+    case 'email':
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw) ? { value: raw } : { error: 'must be an email' };
+    case 'phone': {
+      const n = normalizePhone(raw);
+      return n.length >= 6 && n.length <= 15 ? { value: n } : { error: 'must be a phone number' };
+    }
+    case 'dropdown':
+    case 'radio':
+      return opts.includes(raw) ? { value: raw } : { error: `must be one of: ${opts.join(', ')}` };
+    case 'checkbox': {
+      const picked = raw.split(',').map((x) => x.trim()).filter(Boolean);
+      const bad = picked.filter((x) => !opts.includes(x));
+      return bad.length ? { error: `"${bad[0]}" is not one of: ${opts.join(', ')}` } : { value: picked };
+    }
+    default:
+      return { value: raw };
+  }
+}
+
+async function getCampaignFormFields(campaignId) {
+  const [rows] = await pool.query('SELECT form_id FROM campaigns WHERE id = ?', [campaignId]);
+  if (!rows[0] || !rows[0].form_id) return [];
+  const [form] = await loadFormsWithFields('WHERE id = ?', [rows[0].form_id]);
+  return form ? form.fields : [];
+}
+
+// Upload errors (e.g. too large) answered as JSON, not Express's HTML page.
+function receiveLeadFile(req, res, next) {
+  leadUpload.single('file')(req, res, (err) => {
+    if (!err) return next();
+    res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'file is larger than 5 MB' : err.message });
+  });
+}
+
+app.post('/admin/leads/import', requireRole('admin'), receiveLeadFile, async (req, res) => {
   const { listId } = req.body;
-  if (!req.file) return res.status(400).json({ error: 'CSV file is required' });
+  if (!req.file) return res.status(400).json({ error: 'choose an .xlsx or .csv file' });
   if (!listId) return res.status(400).json({ error: 'listId is required - create a list first' });
-
   const [listRows] = await pool.query('SELECT * FROM lists WHERE id = ?', [listId]);
   const list = listRows[0];
   if (!list) return res.status(400).json({ error: 'list not found' });
   const campaignId = list.campaign_id;
 
-  const text = req.file.buffer.toString('utf-8');
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (lines.length < 2) return res.status(400).json({ error: 'CSV has no data rows' });
+  const parsed = await readLeadUpload(req.file);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  const { headers, rows } = parsed;
 
-  const headers = parseCsvLine(lines[0]).map((h) => h.toLowerCase());
-  const phoneIdx = headers.indexOf('phone');
-  const nameIdx = headers.indexOf('name');
-  if (phoneIdx === -1) return res.status(400).json({ error: 'CSV must have a "phone" column' });
-
-  const [existingRows] = await pool.query('SELECT phone FROM leads WHERE campaign_id = ?', [campaignId]);
-  const existingPhones = new Set(existingRows.map((r) => r.phone));
-  const seenInFile = new Set();
-
-  let imported = 0;
-  let duplicates = 0;
-  let invalid = 0;
-
-  for (let i = 1; i < lines.length; i++) {
-    const cols = parseCsvLine(lines[i]);
-    const phone = cols[phoneIdx];
-    const name = nameIdx !== -1 ? cols[nameIdx] : null;
-
-    if (!phone || !/^\+?[0-9]{7,15}$/.test(phone)) {
-      invalid++;
-      continue;
-    }
-    if (existingPhones.has(phone) || seenInFile.has(phone)) {
-      duplicates++;
-      continue;
-    }
-    seenInFile.add(phone);
-    await pool.query(
-      'INSERT INTO leads (tenant_id, phone, name, campaign_id, list_id) VALUES (1, ?, ?, ?, ?)',
-      [phone, name || null, campaignId, listId]
-    );
-    imported++;
+  const fields = await getCampaignFormFields(campaignId);
+  const known = new Set([...LEAD_BASE_COLUMNS.map((c) => c.key), ...fields.map((f) => f.field_key)]);
+  if (!headers.includes('phone')) return res.status(400).json({ error: 'the file must have a "phone" column' });
+  const unknown = headers.filter((h) => h && !known.has(h));
+  if (unknown.length) {
+    return res.status(400).json({
+      error: `unknown column(s): ${unknown.join(', ')}. Allowed: ${[...known].join(', ')} - download the template for this list.`,
+    });
   }
 
-  res.json({ imported, duplicates, invalid, total: lines.length - 1 });
+  // Duplicates and DNC compared on the normalised number, so "+91 98400
+  // 12345" in the file matches "9840012345" already in the campaign.
+  const [existingRows] = await pool.query('SELECT phone FROM leads WHERE campaign_id = ?', [campaignId]);
+  const existing = new Set(existingRows.map((r) => normalizePhone(r.phone)));
+  const [dncRows] = await pool.query('SELECT phone FROM dnc_numbers WHERE tenant_id = 1');
+  const dnc = new Set(dncRows.map((r) => r.phone));
+
+  const summary = { total: rows.length, imported: 0, duplicates: 0, dnc: 0, invalid: 0 };
+  const errors = [];
+  const toInsert = [];
+  const rowError = (rowNum, reason) => {
+    summary.invalid++;
+    if (errors.length < 50) errors.push({ row: rowNum, reason });
+  };
+
+  for (const { rowNum, values } of rows) {
+    const phone = normalizePhone(values.phone);
+    if (phone.length < 7 || phone.length > 15) { rowError(rowNum, `invalid phone "${values.phone}"`); continue; }
+    let altPhone = null;
+    if (values.alt_phone) {
+      altPhone = normalizePhone(values.alt_phone);
+      if (altPhone.length < 7 || altPhone.length > 15) { rowError(rowNum, `invalid alt_phone "${values.alt_phone}"`); continue; }
+    }
+    let priority = 0;
+    if (values.priority) {
+      priority = Number(values.priority);
+      if (!Number.isInteger(priority) || priority < -100 || priority > 100) { rowError(rowNum, 'priority must be a whole number -100..100'); continue; }
+    }
+    const custom = {};
+    let bad = null;
+    for (const f of fields) {
+      const raw = values[f.field_key];
+      if (!raw) continue;
+      const r = parseLeadCustomValue(f, raw);
+      if (r.error) { bad = `${f.field_key} ${r.error}`; break; }
+      custom[f.field_key] = r.value;
+    }
+    if (bad) { rowError(rowNum, bad); continue; }
+    if (dnc.has(phone)) { summary.dnc++; continue; }
+    if (existing.has(phone)) { summary.duplicates++; continue; }
+    existing.add(phone);
+    toInsert.push([1, phone, altPhone, values.name || null, campaignId, list.id, priority,
+      Object.keys(custom).length ? JSON.stringify(custom) : null]);
+  }
+
+  // One transaction, multi-row INSERTs in chunks - all or nothing, and
+  // far fewer round-trips than one INSERT per lead.
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    for (let i = 0; i < toInsert.length; i += 500) {
+      await conn.query(
+        'INSERT INTO leads (tenant_id, phone, alt_phone, name, campaign_id, list_id, priority, custom_data) VALUES ?',
+        [toInsert.slice(i, i + 500)]
+      );
+    }
+    await conn.commit();
+    summary.imported = toInsert.length;
+  } catch (err) {
+    await conn.rollback();
+    console.error('[lead import failed]', err);
+    return res.status(500).json({ error: 'import failed - nothing was saved' });
+  } finally {
+    conn.release();
+  }
+  res.json({ ...summary, errors });
 });
+
+// Template built from the list's campaign form, so the columns always
+// match what the import accepts. xlsx (default) adds an Instructions sheet.
+app.get('/admin/leads/template', requireRole('admin'), async (req, res) => {
+  let fields = [];
+  let fileName = 'leads-template';
+  if (req.query.listId) {
+    const [rows] = await pool.query('SELECT l.name, l.campaign_id FROM lists l WHERE l.id = ?', [req.query.listId]);
+    if (!rows[0]) return res.status(404).json({ error: 'list not found' });
+    fields = await getCampaignFormFields(rows[0].campaign_id);
+    fileName = `leads-${rows[0].name.replace(/[^A-Za-z0-9_-]+/g, '_')}`;
+  }
+  const headers = [...LEAD_BASE_COLUMNS.map((c) => c.key), ...fields.map((f) => f.field_key)];
+  const example = { phone: '9840012345', name: 'Ravi Kumar', alt_phone: '', priority: '0' };
+  for (const f of fields) {
+    const o = f.options || [];
+    example[f.field_key] = { number: '50000', date: '2026-12-31', email: 'ravi@example.com', phone: '9840012346',
+      dropdown: o[0], radio: o[0], checkbox: o.slice(0, 2).join(', ') }[f.field_type] || '';
+  }
+
+  if (req.query.format === 'csv') {
+    const esc = (v) => (/[",\n]/.test(v) ? `"${String(v).replace(/"/g, '""')}"` : v);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}.csv"`);
+    return res.send(`${headers.join(',')}\n${headers.map((h) => esc(example[h] || '')).join(',')}\n`);
+  }
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Leads');
+  ws.addRow(headers).font = { bold: true };
+  ws.addRow(headers.map((h) => example[h] || ''));
+  ws.columns.forEach((col) => { col.width = 18; });
+  ws.getColumn(1).numFmt = '@';  // keep phone numbers as text (no 9.84E+09)
+  ws.getColumn(3).numFmt = '@';
+  const info = wb.addWorksheet('Instructions');
+  info.addRow(['Column', 'Required', 'Type', 'Allowed values / notes']).font = { bold: true };
+  for (const c of LEAD_BASE_COLUMNS) info.addRow([c.key, c.required ? 'yes' : 'no', 'text', c.help]);
+  for (const f of fields) {
+    info.addRow([f.field_key, 'no', f.field_type,
+      `${f.label}${(f.options || []).length ? ' - one of: ' + f.options.join(', ') : ''}${f.field_type === 'checkbox' ? ' (comma-separate several)' : ''}${f.field_type === 'date' ? ' (YYYY-MM-DD)' : ''}`]);
+  }
+  info.addRow([]);
+  info.addRow(['Row 2 of the Leads sheet is an example - replace or delete it. Numbers on the DNC list and numbers already in the campaign are skipped.']);
+  info.columns.forEach((col, i) => { col.width = [16, 10, 12, 70][i]; });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}.xlsx"`);
+  await wb.xlsx.write(res);
+  res.end();
+});
+
+// Old template URL kept working for bookmarks.
+app.get('/admin/leads/csv-template', requireRole('admin'), (req, res) => res.redirect('/admin/leads/template?format=csv'));
 
 // --- Calls (admin sees everything, agent sees only their own extension's calls) ---
 app.get('/calls', requireAuth, async (req, res) => {
@@ -857,8 +1708,25 @@ app.post('/calls/click2call', requireAuth, async (req, res) => {
     }
   }
 
+  if (await isDnc(toNumber)) {
+    return res.status(403).json({ error: 'this number is on the Do Not Call list' });
+  }
+
   const campaign =
     req.session.user.role === 'agent' ? await findCurrentCampaign(req.session.user.id) : null;
+
+  // Calling hours only apply to real outside calls through the trunk,
+  // not to internal extension-to-extension test calls.
+  const [extRows] = await pool.query('SELECT 1 FROM extensions WHERE name = ? LIMIT 1', [toNumber]);
+  if (campaign && extRows.length === 0 && !isWithinCallWindow(campaign)) {
+    return res.status(403).json({
+      error: `outside this campaign's calling hours (${campaign.call_window_start.slice(0, 5)}-${campaign.call_window_end.slice(0, 5)} ${campaign.timezone})`,
+    });
+  }
+
+  if (leadId) {
+    await pool.query('UPDATE leads SET attempts = attempts + 1, last_attempt_at = NOW() WHERE id = ?', [leadId]);
+  }
 
   const [insertResult] = await pool.query(
     `INSERT INTO calls (tenant_id, lead_id, direction, from_extension, to_number, campaign_id)
