@@ -404,6 +404,7 @@
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
     </div>
     <div class="incoming-label">Incoming Call</div>
+    <div id="incomingName" style="font-size: 15px; font-weight: 700; margin-top: 6px;"></div>
     <div id="incomingNumber">—</div>
     <div class="incoming-actions">
       <button id="rejectCallBtn" class="incoming-btn reject">
@@ -754,12 +755,91 @@ function dialCall() {
   document.getElementById('dialDisplay').value = '';
 }
 
-function showIncomingCallPopup(session) {
-  const number = (session.remote_identity && session.remote_identity.uri && session.remote_identity.uri.user) || 'Unknown number';
-  document.getElementById('incomingNumber').textContent = number;
-  document.getElementById('incomingCallPopup').style.display = 'flex';
+// --- Ringtone ---
+// Generated with Web Audio (Indian ring: 400+450 Hz, two 0.4 s bursts
+// every 3 s), so there's no sound file to load. Browsers only allow audio
+// after the user has interacted with the page, so the audio context is
+// unlocked on the first click/key (agents always click Connect or
+// Available before a call can arrive).
+let ringCtx = null;
+let ringTimer = null;
+let ringOscillators = [];
 
+function unlockRingtone() {
+  try {
+    if (!ringCtx) ringCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ringCtx.state === 'suspended') ringCtx.resume();
+  } catch (err) {
+    // No Web Audio - the popup still shows, just silently.
+  }
+}
+document.addEventListener('click', unlockRingtone);
+document.addEventListener('keydown', unlockRingtone);
+
+function ringBurst(at, seconds) {
+  const gain = ringCtx.createGain();
+  gain.gain.value = 0.08;
+  gain.connect(ringCtx.destination);
+  for (const freq of [400, 450]) {
+    const osc = ringCtx.createOscillator();
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    osc.start(at);
+    osc.stop(at + seconds);
+    ringOscillators.push(osc);
+  }
+}
+
+function startRingtone() {
+  stopRingtone();
+  unlockRingtone();
+  if (!ringCtx) return;
+  const cycle = () => {
+    ringOscillators = ringOscillators.slice(-8);  // older bursts have finished
+    const t = ringCtx.currentTime + 0.05;
+    ringBurst(t, 0.4);
+    ringBurst(t + 0.6, 0.4);
+  };
+  cycle();
+  ringTimer = setInterval(cycle, 3000);
+}
+
+function stopRingtone() {
+  clearInterval(ringTimer);
+  ringTimer = null;
+  ringOscillators.forEach((o) => { try { o.stop(); } catch (err) { /* already stopped */ } });
+  ringOscillators = [];
+}
+
+// Caller as Asterisk presents it: dialer calls carry the customer's number
+// and lead name, transfers show "Transfer".
+function callerOf(session) {
+  const id = session.remote_identity || {};
+  const number = (id.uri && id.uri.user) || 'Unknown number';
+  const name = id.display_name && id.display_name !== number ? id.display_name : '';
+  return { number, name };
+}
+
+function showIncomingCallPopup(session) {
+  const { number, name } = callerOf(session);
+  document.getElementById('incomingNumber').textContent = number;
+  document.getElementById('incomingName').textContent = name;
+  document.getElementById('incomingCallPopup').style.display = 'flex';
+  startRingtone();
+  // The tab title flashes so the call is noticed from another tab.
+  let flip = false;
+  const titleTimer = setInterval(() => {
+    flip = !flip;
+    document.title = flip ? `📞 Incoming call ${number}` : `${name || number} calling…`;
+  }, 1000);
+
+  let closed = false;
   function closePopup() {
+    if (closed) return;
+    closed = true;
+    clearInterval(titleTimer);
+    stopRingtone();
+    document.title = PAGE_TITLE;
     document.getElementById('incomingCallPopup').style.display = 'none';
   }
 
@@ -1098,14 +1178,10 @@ function setInCallInfo(info) {
   }
 }
 
-function remoteNumberOf(session) {
-  const id = session.remote_identity;
-  return (id && ((id.uri && id.uri.user) || id.display_name)) || 'Unknown number';
-}
 
 function inCallAttach(session) {
   inCall.session = session;
-  inCall.info = inCall.pending || { number: remoteNumberOf(session), name: '', kind: 'Incoming call' };
+  inCall.info = inCall.pending || { ...callerOf(session), kind: 'Incoming call' };
   inCall.pending = null;
   inCall.answeredAt = null;
   inCall.ringingCustomer = false;

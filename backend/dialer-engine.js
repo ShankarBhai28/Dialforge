@@ -457,8 +457,9 @@ async function onAriEvent(event) {
       // Customer answered: record it, open a calls row, hand to the queue.
       const attemptId = Number(event.args[1]);
       const [[a]] = await pool.query(
-        `SELECT a.*, c.abandon_wait_sec, c.amd_enabled, c.auto_answer, q.asterisk_name
+        `SELECT a.*, c.abandon_wait_sec, c.amd_enabled, c.auto_answer, q.asterisk_name, l.name AS lead_name
          FROM dial_attempts a JOIN campaigns c ON c.id = a.campaign_id JOIN queues q ON q.id = c.queue_id
+         LEFT JOIN leads l ON l.id = a.lead_id
          WHERE a.id = ?`, [attemptId]
       );
       if (!a) { await ari.hangup(event.channel.id).catch(() => {}); return; }
@@ -475,6 +476,10 @@ async function onAriEvent(event) {
       await ari.setChannelVar(event.channel.id, 'DIALER_ATTEMPT_ID', String(attemptId));
       await ari.setChannelVar(event.channel.id, 'DIALER_MAXWAIT', String(a.abandon_wait_sec || 5));
       await ari.setChannelVar(event.channel.id, 'DIALER_AMD', a.amd_enabled ? '1' : '0');
+      // What the agent's phone shows when the queue rings it: the customer
+      // (the channel still carries our own outbound caller ID otherwise).
+      await ari.setChannelVar(event.channel.id, 'CALLERID(num)', a.phone).catch(() => {});
+      await ari.setChannelVar(event.channel.id, 'CALLERID(name)', (a.lead_name || '').replace(/["<>]/g, '').slice(0, 40)).catch(() => {});
       await ari.continueInDialplan(event.channel.id, { context: 'dialer-answered', extension: 's', priority: 1 });
       log(`attempt ${attemptId}: answered -> queue ${a.asterisk_name}`);
     } else if (event.type === 'ChannelDestroyed' && event.channel.id.startsWith('dfd-')) {
