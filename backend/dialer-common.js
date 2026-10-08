@@ -24,4 +24,44 @@ function isWithinCallWindow(campaign) {
   return now >= campaign.call_window_start && now < campaign.call_window_end;
 }
 
-module.exports = { normalizePhone, localTimeIn, isWithinCallWindow };
+
+// --- Dial attempt results (D7) ---
+// Used by the engine (unanswered calls: busy, no answer, ...) and the web
+// backend (answered calls: AMI tells it abandoned / machine), so a lead is
+// rescheduled the same way whichever process saw the outcome.
+const RETRY_LIKE_NO_ANSWER = ['no_answer', 'busy', 'congestion', 'failed', 'machine'];
+const CALL_BACK_SOON = ['abandoned', 'customer_hangup'];  // they answered - try again shortly
+
+// Records the final result once (first writer wins - several events can
+// report the same call ending) and reschedules the lead. Returns true if
+// this call recorded it.
+async function finishAttempt(pool, attemptId, result, hangupCause) {
+  const [upd] = await pool.query(
+    `UPDATE dial_attempts SET result = ?, hangup_cause = COALESCE(?, hangup_cause), status = 'ended', ended_at = NOW()
+     WHERE id = ? AND result IS NULL`,
+    [result, hangupCause == null ? null : hangupCause, attemptId]
+  );
+  if (!upd.affectedRows) return false;
+  const [[attempt]] = await pool.query('SELECT lead_id, campaign_id, call_id FROM dial_attempts WHERE id = ?', [attemptId]);
+  if (attempt.call_id) {
+    await pool.query('UPDATE calls SET end_time = COALESCE(end_time, NOW()), disposition = ? WHERE id = ?', [result, attempt.call_id]);
+  }
+  if (RETRY_LIKE_NO_ANSWER.includes(result)) {
+    // Same retry delay the campaign uses for the agent's "No Answer".
+    const [d] = await pool.query(
+      "SELECT retry_after_min FROM campaign_dispositions WHERE campaign_id = ? AND code = 'no_answer'", [attempt.campaign_id]
+    );
+    const retryMin = (d[0] && d[0].retry_after_min) || 60;
+    await pool.query(
+      "UPDATE leads SET status = 'no_answer', next_call_at = NOW() + INTERVAL ? MINUTE WHERE id = ? AND is_final = 0",
+      [retryMin, attempt.lead_id]
+    );
+  } else if (CALL_BACK_SOON.includes(result)) {
+    await pool.query('UPDATE leads SET next_call_at = NOW() + INTERVAL 2 MINUTE WHERE id = ? AND is_final = 0', [attempt.lead_id]);
+  } else if (result === 'invalid') {
+    await pool.query("UPDATE leads SET status = 'invalid_number', is_final = 1 WHERE id = ?", [attempt.lead_id]);
+  }
+  return true;
+}
+
+module.exports = { normalizePhone, localTimeIn, isWithinCallWindow, finishAttempt };

@@ -57,4 +57,16 @@ Server: **dialforge-dev** (`https://dialforge.ddnsfree.com:3000`). Tick each box
 - [ ] Agent goes on **Break** → Admin Hopper shows the lead back to **ready** (not locked).
 - [ ] Dialer → **Stop** when done.
 
-<!-- D7 / D8 sections are added as those steps are deployed. -->
+## D7 — Progressive
+Start small: **test leads = your own extensions**, max channels **1**.
+- [ ] As the agent (on extension 1001), Add Lead **1002** while Available in the test campaign's queue (it gets the campaign; leads with no list are dialable too). Register **1002** in a second browser tab (the "customer").
+- [ ] Campaign: mode **Progressive**, ratio 1, **Auto Answer on**, Max channels 1, Max wait for agent 5 → Save. Dialer → **Start**.
+- [ ] Agent 1001 Available → within ~1-5 s extension **1002 rings** (the dialer called the "customer").
+- [ ] Answer on 1002 → agent 1001 auto-answers → status line shows **"Dialer call: … 1002"**, form linked → talk → hang up → outcome popup → save → after wrap-up seconds the agent is **Available again by itself**.
+- [ ] Dialer page "Today": 1 dialed · 1 answered · 1 to agent.
+- [ ] **No answer**: add another test lead (an extension nobody answers) → let it ring out → Today shows "not reached"; lead's next call moved by the No Answer retry time.
+- [ ] **Abandon**: agent Available → while 1002 is still *ringing*, put agent 1001 on **Break** → now answer on 1002 → no agent in the queue → after ~5 s 1002 hears the "busy" prompt and is hung up → Today shows **1 abandoned** (% in red).
+- [ ] Only then, one real trunk test: a lead with **your own mobile**, max channels 1 → phone rings → answer → reaches the agent.
+- [ ] Dialer → **Stop**.
+
+<!-- D8 section is added when deployed. -->

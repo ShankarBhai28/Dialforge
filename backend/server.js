@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
-const { normalizePhone, localTimeIn, isWithinCallWindow } = require('./dialer-common');
+const { normalizePhone, localTimeIn, isWithinCallWindow, finishAttempt } = require('./dialer-common');
 const pool = require('./db');
 const ari = require('./ari');
 const ami = require('./ami');
@@ -388,7 +388,7 @@ app.post('/admin/queues', requireRole('admin'), async (req, res) => {
   // Make it real in Asterisk, not just a database row - this is what
   // makes "queue show" list it and lets agents actually join it.
   const announceFrequency = announce === 'yes' ? 30 : 0;
-  const stanza = `\n[${asteriskName}]\nstrategy = ${ringStrategy || 'ringall'}\ntimeout = ${waitTimeout || 30}\nretry = ${retry || 1}\ntimeoutrestart = ${timeoutRestart || 'yes'}\nannounce-frequency = ${announceFrequency}\n`;
+  const stanza = `\n[${asteriskName}]\nstrategy = ${ringStrategy || 'ringall'}\ntimeout = ${waitTimeout || 30}\nretry = ${retry || 1}\ntimeoutrestart = ${timeoutRestart || 'yes'}\nannounce-frequency = ${announceFrequency}\nringinuse = no\n`;
   try {
     fs.appendFileSync(QUEUES_CONF_PATH, stanza);
     await ami.queueReload();
@@ -400,6 +400,9 @@ app.post('/admin/queues', requireRole('admin'), async (req, res) => {
   res.status(201).json({ id: result.insertId, name, asteriskName });
 });
 
+// ringinuse = no: never ring a member who is already on a call - essential
+// once the dialer feeds the queue (an agent mid-call must not get a second
+// customer). Optional in the regex so stanzas written before D7 still match.
 // Ring-behavior fields live in a 6-line stanza in queues.conf, written
 // without any brackets in the body - this regex relies on that to find
 // exactly one stanza and nothing past the next queue's `[name]` line.
@@ -407,7 +410,7 @@ app.post('/admin/queues', requireRole('admin'), async (req, res) => {
 // produces [a-z0-9_], never a regex metacharacter.
 function queueStanzaRegex(asteriskName) {
   return new RegExp(
-    `\\n?\\[${asteriskName}\\]\\nstrategy = [^\\n]*\\ntimeout = [^\\n]*\\nretry = [^\\n]*\\ntimeoutrestart = [^\\n]*\\nannounce-frequency = [^\\n]*\\n`
+    `\\n?\\[${asteriskName}\\]\\nstrategy = [^\\n]*\\ntimeout = [^\\n]*\\nretry = [^\\n]*\\ntimeoutrestart = [^\\n]*\\nannounce-frequency = [^\\n]*\\n(?:ringinuse = [^\\n]*\\n)?`
   );
 }
 
@@ -434,7 +437,7 @@ app.put('/admin/queues/:id', requireRole('admin'), async (req, res) => {
   );
 
   const announceFrequency = updated.announce === 'yes' ? 30 : 0;
-  const newStanza = `[${queue.asterisk_name}]\nstrategy = ${updated.ringStrategy}\ntimeout = ${updated.waitTimeout}\nretry = ${updated.retry}\ntimeoutrestart = ${updated.timeoutRestart}\nannounce-frequency = ${announceFrequency}\n`;
+  const newStanza = `[${queue.asterisk_name}]\nstrategy = ${updated.ringStrategy}\ntimeout = ${updated.waitTimeout}\nretry = ${updated.retry}\ntimeoutrestart = ${updated.timeoutRestart}\nannounce-frequency = ${announceFrequency}\nringinuse = no\n`;
   try {
     const content = fs.readFileSync(QUEUES_CONF_PATH, 'utf-8');
     const re = queueStanzaRegex(queue.asterisk_name);
@@ -530,6 +533,7 @@ function parseCampaignSettings(body) {
     call_window_start: body.callWindowStart || '09:00',
     call_window_end: body.callWindowEnd || '21:00',
     timezone: body.timezone || 'Asia/Kolkata',
+    abandon_wait_sec: num(body.abandonWaitSec, 5),
   };
   const inRange = (v, lo, hi) => Number.isFinite(v) && v >= lo && v <= hi;
   if (!DIAL_MODES.includes(s.dial_mode)) return { error: 'unknown dial mode' };
@@ -541,6 +545,7 @@ function parseCampaignSettings(body) {
   if (!inRange(s.max_channels, 1, 200) || !Number.isInteger(s.max_channels)) return { error: 'max channels must be a whole number 1-200' };
   if (s.preview_autodial_sec !== null && !inRange(s.preview_autodial_sec, 0, 120)) return { error: 'preview auto-dial must be 0-120 seconds' };
   if (!inRange(s.wrapup_sec, 0, 600)) return { error: 'wrap-up must be 0-600 seconds' };
+  if (!inRange(s.abandon_wait_sec, 2, 30) || !Number.isInteger(s.abandon_wait_sec)) return { error: 'max wait for an agent must be 2-30 seconds' };
   const timeRe = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
   if (!timeRe.test(s.call_window_start) || !timeRe.test(s.call_window_end)) return { error: 'calling window times must be HH:MM' };
   if (s.call_window_start.length === 5) s.call_window_start += ':00';
@@ -1047,16 +1052,28 @@ app.get('/admin/dialer', requireRole('admin'), async (req, res) => {
   const [campaigns] = await pool.query(`
     SELECT c.id, c.name, c.status, c.dial_mode, c.dial_ratio, c.max_dial_ratio, c.dialer_state, c.dialer_state_changed_at,
       u.username AS changed_by, q.name AS queue_name,
-      s.hopper_ready, s.hopper_locked, s.idle_agents, s.would_dial, s.note, s.last_tick_at
+      s.hopper_ready, s.hopper_locked, s.idle_agents, s.would_dial, s.in_flight, s.active_calls, s.note, s.last_tick_at
     FROM campaigns c
     LEFT JOIN queues q ON q.id = c.queue_id
     LEFT JOIN users u ON u.id = c.dialer_state_changed_by
     LEFT JOIN dialer_status s ON s.campaign_id = c.id
     ORDER BY c.dialer_state = 'running' DESC, c.dialer_state = 'paused' DESC, c.name
   `);
+  // Today = since midnight in India (server clock is UTC).
+  const [stats] = await pool.query(`
+    SELECT campaign_id, COUNT(*) AS attempts,
+      SUM(answered_at IS NOT NULL) AS answered,
+      SUM(result = 'connected') AS connected,
+      SUM(result = 'abandoned' OR result = 'customer_hangup') AS abandoned,
+      SUM(result IN ('no_answer', 'busy', 'congestion', 'failed', 'invalid')) AS not_reached,
+      SUM(result = 'machine') AS machine
+    FROM dial_attempts
+    WHERE started_at >= CONVERT_TZ(DATE(CONVERT_TZ(NOW(), '+00:00', '+05:30')), '+05:30', '+00:00')
+    GROUP BY campaign_id
+  `);
   res.json({
     engine: engine ? { ...engine, alive: engine.age_sec <= 15 } : { alive: false },
-    campaigns,
+    campaigns: campaigns.map((c) => ({ ...c, today: stats.find((x) => x.campaign_id === c.id) || null })),
   });
 });
 
@@ -1072,6 +1089,28 @@ app.get('/admin/campaigns/:id/hopper', requireRole('admin'), async (req, res) =>
     LIMIT 200
   `, [req.params.id]);
   res.json(rows);
+});
+
+// --- Agent: the dialer call they're on right now (screen pop, D7) ---
+// The dialer's customer reaches the agent through Queue(), so the browser
+// only sees "a call came in"; this tells it which lead it is.
+app.get('/agent/active-call', requireAuth, async (req, res) => {
+  if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
+  const [rows] = await pool.query(`
+    SELECT c.id AS call_id, c.lead_id, l.name, l.phone, l.alt_phone, l.status, l.attempts, l.custom_data, ls.name AS list_name
+    FROM calls c
+    JOIN leads l ON l.id = c.lead_id
+    LEFT JOIN lists ls ON ls.id = l.list_id
+    WHERE c.from_extension = ? AND c.end_time IS NULL AND c.dial_attempt_id IS NOT NULL
+      AND c.start_time > NOW() - INTERVAL 3 HOUR
+    ORDER BY c.id DESC LIMIT 1
+  `, [req.session.user.extensionName]);
+  res.json(rows[0] || null);
+});
+
+app.get('/agent/campaign-info', requireAuth, async (req, res) => {
+  const c = await findCurrentCampaign(req.session.user.id);
+  res.json(c ? { id: c.id, name: c.name, dialMode: c.dial_mode, wrapupSec: c.wrapup_sec, dialerState: c.dialer_state } : null);
 });
 
 // --- Agent: Preview mode (D6) ---
@@ -2397,15 +2436,35 @@ ari.connectEvents(APP_NAME, async (event) => {
 // native Queue() - once continueInDialplan() runs above, Stasis stops
 // receiving any more events for that channel, so these AMI events are
 // the only way left to know who answered and when it ended.
+// Inbound calls are in the in-memory map; dialer calls are placed by the
+// separate engine process, so they're found by channel name in the DB.
+async function findQueueCall(channelName) {
+  const callId = queueCallChannels.get(channelName);
+  if (callId) return { callId, attemptId: null };
+  if (!channelName) return null;
+  const [rows] = await pool.query(
+    'SELECT id, dial_attempt_id FROM calls WHERE channel_name = ? ORDER BY id DESC LIMIT 1', [channelName]
+  );
+  return rows[0] ? { callId: rows[0].id, attemptId: rows[0].dial_attempt_id } : null;
+}
+
 ami.on('AgentConnect', async (fields) => {
   try {
-    const callId = queueCallChannels.get(fields.Channel);
-    if (!callId) return;
+    const found = await findQueueCall(fields.Channel);
+    if (!found) return;
+    const { callId, attemptId } = found;
     const match = (fields.Interface || '').match(/PJSIP\/([^\s,]+)/i);
     const extensionName = match ? match[1] : null;
     if (!extensionName) return;
-    await pool.query('UPDATE calls SET from_extension = ?, answer_time = NOW() WHERE id = ?', [extensionName, callId]);
+    // Dialer calls already have answer_time (when the customer picked up).
+    await pool.query('UPDATE calls SET from_extension = ?, answer_time = COALESCE(answer_time, NOW()) WHERE id = ?', [extensionName, callId]);
     await logEvent(callId, 'agent_answered', { extensionName, interface: fields.Interface });
+    if (attemptId) {
+      await pool.query(
+        "UPDATE dial_attempts SET status = 'connected', result = 'connected', connected_at = NOW(), agent_user_id = ? WHERE id = ? AND result IS NULL",
+        [await findAgentIdByExtension(extensionName), attemptId]
+      );
+    }
   } catch (err) {
     console.error('[AMI AgentConnect handling error]', err);
   }
@@ -2413,9 +2472,13 @@ ami.on('AgentConnect', async (fields) => {
 
 ami.on('AgentComplete', async (fields) => {
   try {
-    const callId = queueCallChannels.get(fields.Channel);
-    if (!callId) return;
+    const found = await findQueueCall(fields.Channel);
+    if (!found) return;
+    const { callId, attemptId } = found;
     queueCallChannels.delete(fields.Channel);
+    if (attemptId) {
+      await pool.query("UPDATE dial_attempts SET status = 'ended', ended_at = NOW() WHERE id = ?", [attemptId]);
+    }
     await pool.query("UPDATE calls SET end_time = NOW(), disposition = 'ended' WHERE id = ?", [callId]);
     await logEvent(callId, 'ended', { interface: fields.Interface, reason: fields.Reason });
 
@@ -2436,13 +2499,32 @@ ami.on('AgentComplete', async (fields) => {
 
 ami.on('QueueCallerAbandon', async (fields) => {
   try {
-    const callId = queueCallChannels.get(fields.Channel);
-    if (!callId) return;
+    const found = await findQueueCall(fields.Channel);
+    if (!found) return;
+    const { callId, attemptId } = found;
     queueCallChannels.delete(fields.Channel);
     await pool.query("UPDATE calls SET end_time = NOW(), disposition = 'abandoned' WHERE id = ?", [callId]);
     await logEvent(callId, 'abandoned', {});
+    // Customer hung up while waiting for an agent.
+    if (attemptId) await finishAttempt(pool, attemptId, 'customer_hangup', null);
   } catch (err) {
     console.error('[AMI QueueCallerAbandon handling error]', err);
+  }
+});
+
+// Reported by the [dialer-answered] dialplan: no agent within the max
+// wait (abandoned), or answering machine detected.
+ami.on('UserEvent', async (fields) => {
+  try {
+    if (fields.UserEvent !== 'DialForgeDialer') return;
+    const attemptId = Number(fields.Attempt);
+    if (!attemptId || !['abandoned', 'machine'].includes(fields.Result)) return;
+    if (await finishAttempt(pool, attemptId, fields.Result, null)) {
+      const [[a]] = await pool.query('SELECT call_id FROM dial_attempts WHERE id = ?', [attemptId]);
+      if (a && a.call_id) await logEvent(a.call_id, fields.Result, { queueStatus: fields.QueueStatus || null });
+    }
+  } catch (err) {
+    console.error('[AMI UserEvent handling error]', err);
   }
 });
 

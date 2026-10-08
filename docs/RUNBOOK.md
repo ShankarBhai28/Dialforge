@@ -968,6 +968,48 @@ D7 — Progressive mode: the engine originates calls itself (ARI), answered call
 
 ---
 
+## Predictive Dialer D7 — Progressive mode (2026-10-08, dialforge-dev)
+
+### What & why
+The engine now **dials by itself**: for a running Progressive campaign it keeps `floor(idle agents × dial ratio)` calls going. Answered customers are handed to the campaign's queue; agents get a screen pop. Every attempt — reached or not — is logged in `dial_attempts`.
+
+### Call flow
+1. **Pacing tick (every 1 s)**: idle agents = Available in the queue **and not on a call** (open `calls` row on their extension). `to_dial = floor(idle × ratio) − in flight`, capped by campaign `max_channels`, the **trunk cap** (`DIALER_MAX_TRUNK_CHANNELS` in `.env`, default **4**) and 5 new calls per second.
+2. **Claim**: best ready hopper row (`FOR UPDATE SKIP LOCKED`), removed from the hopper + `dial_attempts` row + `leads.attempts+1`, all in one transaction. Last-moment DNC check.
+3. **Originate** via ARI app **`dialforge-dialer`** with channel id `dfd-<attemptId>`, campaign CLI, `ring_timeout_sec`. Our own extensions (e.g. a test lead "1002") are dialed directly; everything else via the trunk.
+4. **Not answered** → ARI `ChannelDestroyed` with a hangup cause → result `busy` (17/21), `no_answer` (16/18/19), `invalid` (1/3/22/28 → lead made final), `congestion` (34/38/41/42/44/58) or `failed`. Lead rescheduled with the campaign's *No Answer* retry delay.
+5. **Answered** → `calls` row created (with `channel_name`), attempt `answered`, then the channel continues in dialplan **`[dialer-answered]`** (`/etc/asterisk/extensions-dialer.conf`, included from `extensions.conf`): optional `AMD()`, then `Queue(<queue>,,,,<abandon_wait_sec>)`.
+6. **Agent takes it** → backend's AMI `AgentConnect` finds the call by channel name (the engine is a separate process) → attempt `connected`, agent recorded. Agent's browser auto-answers (use Auto Answer on dialer campaigns), asks `GET /agent/active-call` and **pops the lead**: form pre-filled + linked, outcome popup when the call ends.
+7. **No agent within `abandon_wait_sec`** → dialplan sends `UserEvent(DialForgeDialer … abandoned)`, plays a placeholder prompt (`tt-allbusy` — **record a proper message before live**), hangs up. Customer hangs up while waiting → `QueueCallerAbandon` → `customer_hangup`. Both count as abandoned; lead retried in 2 min.
+8. **AMD says machine** → `machine`, retried like No Answer.
+9. **Wrap-up**: after the agent saves the outcome in a progressive/predictive campaign, they go back to Available automatically after `wrapup_sec` (any manual status click cancels it).
+10. **Sweeper (every 5 s)**: attempts stuck in dialing/answered whose channel Asterisk no longer has are closed — protects pacing from a missed event or an engine restart.
+
+### Other changes
+- **Queues: `ringinuse = no`** added to all 4 existing stanzas and to every queue created/edited from now on — `Queue()` must never ring an agent who is already on a call.
+- `ari.js`: originate takes `timeout` + `channelId`; `getChannel()`; the event WebSocket **reconnects by itself** (previously a dropped connection silently stopped events until a restart — affects the backend too).
+- `dialer-common.js`: `finishAttempt()` — one place that records a result (first writer wins) and reschedules the lead, used by both processes.
+- Campaign setting **Max wait for agent (sec)** (`abandon_wait_sec`, default 5).
+- Dialer page: ringing/waiting, on calls, and **today's numbers** per campaign (dialed / answered / to agent / not reached / machine / **abandoned with %**, red above 3%).
+
+### Deploy
+Backup `~/backups/20261008-073034/` (DB, code, **`extensions.conf` + `queues.conf`**). Migration `migration-dial-attempts.sql`; `extensions-dialer.conf` copied to `/etc/asterisk` + `#include` line appended to `extensions.conf` + `dialplan reload`; `ringinuse = no` added + `queue reload all`; both services restarted.
+**Rollback**: stop campaigns; restore code + both `.conf` files from the backup, `dialplan reload`, `queue reload all`, restart both services; `DROP TABLE dial_attempts; ALTER TABLE calls DROP COLUMN channel_name, DROP COLUMN dial_attempt_id; ALTER TABLE campaigns DROP COLUMN abandon_wait_sec; ALTER TABLE dialer_status DROP COLUMN in_flight, DROP COLUMN active_calls;`
+
+### Verified
+- Pacing formula unit-tested (8 cases incl. trunk cap, campaign cap, per-tick cap, never negative); queue-stanza regex tested with and without `ringinuse`.
+- `dialplan show dialer-answered` correct; `ari show apps` lists `dialforge-app` + `dialforge-dialer`; services healthy; all campaigns still Manual/Stopped, 0 attempts.
+- **Not yet live-fire tested** — see checklist D7 (start with a test lead = your own extension, max channels 1).
+
+### Before live
+- Set `DIALER_MAX_TRUNK_CHANNELS` to the live trunk's real concurrent limit.
+- Replace the `tt-allbusy` placeholder with a recorded abandon message.
+
+### Next
+D8 — Predictive: ratio computed from live answer rate, lowered automatically when abandon % exceeds the campaign target.
+
+---
+
 ## How I'll keep this doc going
 
 I'll update this file after each meaningful step (not after every single command) — so it stays a fast, high-signal reference of *what exists and why*, not a full transcript. If you ever want the full command-by-command detail for something, ask and I'll pull it from the session.

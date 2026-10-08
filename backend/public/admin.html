@@ -495,12 +495,12 @@
 
     <div class="section" id="section-dialer">
       <div class="pagehead">
-        <div><h1>Dialer</h1><div class="sub">Start / pause / stop auto-dialing per campaign and watch the hopper. Step D5: the engine fills the hopper and shows how many calls it <i>would</i> place - no calls are made yet.</div></div>
+        <div><h1>Dialer</h1><div class="sub">Start / pause / stop auto-dialing per campaign. Preview: agents dial from the hopper. Progressive: the engine dials by itself (idle agents × ratio). <b>Abandon %</b> = answered customers who got no agent.</div></div>
         <div id="engineBadge" class="badge offline"><span class="bdot"></span> Engine: checking…</div>
       </div>
       <div class="card" style="padding: 0; overflow: auto;">
         <table id="dialerTable">
-          <thead><tr><th style="padding-left:18px;">Campaign</th><th>Mode</th><th>Dialer</th><th>Idle agents</th><th>Hopper</th><th>Would dial</th><th>Engine note</th><th>Actions</th></tr></thead>
+          <thead><tr><th style="padding-left:18px;">Campaign</th><th>Mode</th><th>Dialer</th><th>Idle agents</th><th>Hopper</th><th>Ringing / waiting</th><th>On calls</th><th>Today</th><th>Engine note</th><th>Actions</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -547,6 +547,7 @@
           <label class="ds-auto">Dial ratio <input id="cDialRatio" type="number" step="0.1" min="1" max="5" value="1"></label>
           <label class="ds-predictive">Max dial ratio <input id="cMaxDialRatio" type="number" step="0.1" min="1" max="5" value="2.5"></label>
           <label class="ds-predictive">Target abandon % <input id="cTargetAbandon" type="number" step="0.5" min="0" max="10" value="3"></label>
+          <label class="ds-auto">Max wait for agent (sec) <input id="cAbandonWait" type="number" min="2" max="30" value="5" title="An answered customer waits this long for a free agent, then hears a message and the call counts as abandoned"></label>
           <label class="ds-preview">Preview auto-dial (sec, blank = off) <input id="cPreviewAutodial" type="number" min="0" max="120"></label>
           <label>Ring timeout (sec) <input id="cRingTimeout" type="number" min="10" max="60" value="30"></label>
           <label>Max attempts / lead <input id="cMaxAttempts" type="number" min="1" max="20" value="3"></label>
@@ -1315,6 +1316,7 @@ const CAMPAIGN_SETTING_DEFAULTS = {
   dial_mode: 'manual', dial_ratio: 1, max_dial_ratio: 2.5, target_abandon_pct: 3, preview_autodial_sec: null,
   ring_timeout_sec: 30, max_attempts: 3, max_channels: 10, wrapup_sec: 10,
   call_window_start: '09:00:00', call_window_end: '21:00:00', timezone: 'Asia/Kolkata', amd_enabled: 0,
+  abandon_wait_sec: 5,
 };
 
 function fillCampaignSettings(c) {
@@ -1332,6 +1334,7 @@ function fillCampaignSettings(c) {
   document.getElementById('cWindowEnd').value = String(v.call_window_end).slice(0, 5);
   document.getElementById('cTimezone').value = v.timezone;
   document.getElementById('cAmd').checked = !!v.amd_enabled;
+  document.getElementById('cAbandonWait').value = v.abandon_wait_sec;
   syncDialModeFields();
 }
 
@@ -1351,6 +1354,7 @@ function campaignSettingsBody() {
     callWindowEnd: val('cWindowEnd'),
     timezone: val('cTimezone').trim(),
     amdEnabled: document.getElementById('cAmd').checked,
+    abandonWaitSec: val('cAbandonWait'),
   };
 }
 
@@ -1534,13 +1538,26 @@ async function loadDialer() {
       <td><span class="badge ${DIALER_STATE_BADGE[c.dialer_state] || 'offline'}"><span class="bdot"></span>${escapeHtml(c.dialer_state)}</span></td>
       <td>${hasStatus ? c.idle_agents : none}</td>
       <td>${hasStatus ? `${c.hopper_ready} ready${c.hopper_locked ? ` / ${c.hopper_locked} locked` : ''}` : none}</td>
-      <td>${hasStatus ? c.would_dial : none}</td>
+      <td>${hasStatus ? c.in_flight : none}</td>
+      <td>${hasStatus ? c.active_calls - c.in_flight : none}</td>
+      <td style="font-size:12px; white-space:nowrap;">${todayStats(c.today)}</td>
       <td style="max-width:280px;">${c.note ? escapeHtml(c.note) : none}</td>
       <td class="row-actions">${actions}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="8" style="text-align:center; color: var(--muted); padding: 20px;">No campaigns.</td></tr>';
+  }).join('') || '<tr><td colspan="10" style="text-align:center; color: var(--muted); padding: 20px;">No campaigns.</td></tr>';
 
   if (hopperCampaignId) openHopper(hopperCampaignId, true);
+}
+
+// Abandon % is over answered calls (the industry definition) - the number
+// to keep low; red above 3 %.
+function todayStats(t) {
+  if (!t || !t.attempts) return '<span class="muted-cell">no calls</span>';
+  const answered = Number(t.answered);
+  const abandonPct = answered ? (100 * Number(t.abandoned)) / answered : 0;
+  return `${t.attempts} dialed · ${answered} answered · ${t.connected} to agent<br>` +
+    `${t.not_reached} not reached${Number(t.machine) ? ` · ${t.machine} machine` : ''} · ` +
+    `<span style="${abandonPct > 3 ? 'color:#dc2626; font-weight:700;' : ''}">${t.abandoned} abandoned (${abandonPct.toFixed(1)}%)</span>`;
 }
 
 async function dialerAction(id, action) {

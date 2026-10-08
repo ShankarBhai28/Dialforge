@@ -463,6 +463,8 @@ let campaignDispositions = [];  // current campaign's dispositions (from server)
 let previewState = { enabled: false, lead: null, blocker: null, autodialSec: 0 };
 let previewCountdownTimer = null;
 let previewBusy = false;   // a next/skip/dial request is in flight
+let currentAgentStatus = null;
+let wrapupTimer = null;
 let leadsById = new Map();     // last loaded leads, for form pre-fill
 let agentForm = null;      // the current campaign's form definition (or null)
 let formLeadId = null;     // lead/call the form will be saved against -
@@ -577,11 +579,16 @@ async function connectExtension() {
       } else {
         // A genuine inbound call - whether it auto-answers or shows a real
         // Accept/Reject popup is set per-campaign by the admin.
+        const session = jssipSession;
+        session.on('accepted', () => screenPopDialerCall());
+        session.on('ended', () => {
+          if (activeLeadId) { showDispositionPopup(activeLeadId); activeLeadId = null; }
+        });
         fetch('/agent/call-policy').then((r) => r.json()).then(({ autoAnswer }) => {
           if (autoAnswer) {
-            jssipSession.answer({ mediaConstraints: { audio: true, video: false } });
+            session.answer({ mediaConstraints: { audio: true, video: false } });
           } else {
-            showIncomingCallPopup(jssipSession);
+            showIncomingCallPopup(session);
           }
         });
       }
@@ -658,6 +665,8 @@ function toggleStatusMenu() {
 }
 
 async function setStatus(status, reason) {
+  clearTimeout(wrapupTimer);
+  wrapupTimer = null;
   document.getElementById('statusMenu').style.display = 'none';
   if (status === 'available' && !currentQueueId) {
     // First time going Available this session - must pick a queue first.
@@ -812,6 +821,7 @@ async function submitDisposition(leadId, status, extra) {
   document.getElementById('dispositionPopup').style.display = 'none';
   loadLeads();
   loadCallbacks();
+  scheduleAutoAvailable();
 }
 
 async function loadCallbacks() {
@@ -853,6 +863,7 @@ async function loadStats() {
     currentQueueName = stats.currentQueueName || currentQueueName;
     renderStatusPill(stats.currentStatus, stats.currentReason, stats.currentQueueName);
   }
+  currentAgentStatus = stats.currentStatus;
   refreshPreview(stats.currentStatus);
 }
 
@@ -922,6 +933,44 @@ async function callLead(leadId, phone) {
     expectingOwnCallLeg = false;
   }
   setTimeout(() => { loadCalls(); loadStats(); }, 2000);
+}
+
+// --- Dialer calls (D7): screen pop + automatic wrap-up ---
+// A dialer call reaches the agent through the queue, so the browser only
+// knows "a call came in". Once answered, ask the server which lead it is
+// (the server learns it a moment later from Asterisk, hence the retries)
+// and load it like a click-to-call lead: form pre-filled and linked, and
+// the outcome popup when the call ends.
+async function screenPopDialerCall() {
+  for (let i = 0; i < 8; i++) {
+    const res = await fetch('/agent/active-call');
+    const call = res.ok ? await res.json() : null;
+    if (call) {
+      activeLeadId = call.lead_id;
+      leadsById.set(call.lead_id, { ...call, id: call.lead_id });
+      setFormContext(call.lead_id, call.call_id, call.name ? `${call.name} (${call.phone})` : `Lead ${call.phone}`);
+      prefillAgentForm(call.custom_data);
+      setStatusMsg(`Dialer call: ${call.name || ''} ${call.phone} · attempts ${call.attempts}${call.list_name ? ' · list ' + call.list_name : ''}`);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+// In auto-dial campaigns the agent goes back to Available by itself
+// wrapup_sec after saving the outcome - progressive/predictive only work
+// if agents return promptly. Any manual status change cancels it.
+async function scheduleAutoAvailable() {
+  clearTimeout(wrapupTimer);
+  const res = await fetch('/agent/campaign-info');
+  const info = res.ok ? await res.json() : null;
+  if (!info || !['progressive', 'predictive'].includes(info.dialMode)) return;
+  setStatusMsg(`Back to Available in ${info.wrapupSec}s…`);
+  wrapupTimer = setTimeout(async () => {
+    wrapupTimer = null;
+    await loadStats();
+    if (currentAgentStatus === 'acw' && currentQueueId) await postStatus('available', null);
+  }, info.wrapupSec * 1000);
 }
 
 // --- Preview mode (D6) ---

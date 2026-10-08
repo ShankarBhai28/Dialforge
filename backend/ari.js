@@ -22,11 +22,26 @@ async function ariRequest(method, path) {
   return res.status === 204 ? null : res.json();
 }
 
-function originate({ endpoint, app, appArgs, callerId }) {
+// timeout = seconds to ring before giving up; channelId lets the caller
+// pick the channel's id up front, so events about it can be matched to
+// our own record even before originate returns.
+function originate({ endpoint, app, appArgs, callerId, timeout, channelId }) {
   const params = new URLSearchParams({ endpoint, app });
   if (appArgs) params.set('appArgs', appArgs);
   if (callerId) params.set('callerId', callerId);
+  if (timeout) params.set('timeout', String(timeout));
+  if (channelId) params.set('channelId', channelId);
   return ariRequest('POST', `/channels?${params.toString()}`);
+}
+
+// null when the channel no longer exists.
+async function getChannel(channelId) {
+  try {
+    return await ariRequest('GET', `/channels/${encodeURIComponent(channelId)}`);
+  } catch (err) {
+    if (/ 404 /.test(err.message)) return null;
+    throw err;
+  }
 }
 
 function answer(channelId) {
@@ -74,21 +89,34 @@ async function isEndpointOnline(techResource) {
   }
 }
 
-function connectEvents(appName, onEvent) {
+// Reconnects by itself (e.g. after an Asterisk restart) - without this the
+// app silently stops receiving events until the Node process restarts.
+// onStateChange(true|false) lets callers know whether events are flowing.
+function connectEvents(appName, onEvent, onStateChange) {
   const wsUrl = `ws://${ARI_HOST}:${ARI_PORT}/ari/events?app=${appName}&api_key=${ARI_USER}:${ARI_PASS}`;
-  const ws = new WebSocket(wsUrl);
-  ws.on('open', () => console.log(`[ARI] app "${appName}" connected`));
-  ws.on('message', (data) => {
-    const event = JSON.parse(data.toString());
-    onEvent(event);
-  });
-  ws.on('error', (err) => console.error('[ARI] WebSocket error:', err));
-  ws.on('close', () => console.log('[ARI] WebSocket closed'));
-  return ws;
+  const open = () => {
+    const ws = new WebSocket(wsUrl);
+    ws.on('open', () => {
+      console.log(`[ARI] app "${appName}" connected`);
+      if (onStateChange) onStateChange(true);
+    });
+    ws.on('message', (data) => {
+      const event = JSON.parse(data.toString());
+      onEvent(event);
+    });
+    ws.on('error', (err) => console.error(`[ARI] "${appName}" WebSocket error:`, err.message));
+    ws.on('close', () => {
+      console.log(`[ARI] app "${appName}" disconnected - retrying in 3s`);
+      if (onStateChange) onStateChange(false);
+      setTimeout(open, 3000);
+    });
+  };
+  open();
 }
 
 module.exports = {
   originate,
+  getChannel,
   answer,
   hangup,
   createBridge,
