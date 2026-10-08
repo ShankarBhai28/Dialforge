@@ -72,25 +72,99 @@
 
   #whoami { font-size: 13px; opacity: 0.9; font-weight: 500; }
 
-  #layout { display: flex; gap: 20px; padding: 22px; max-width: 1400px; margin: 0 auto; }
-  #main { flex: 1; min-width: 0; }
-  #sidepanel {
-    width: 340px; background: var(--card); border-radius: 14px; border: 1px solid var(--border);
-    padding: 16px; height: fit-content; box-shadow: var(--shadow); position: sticky; top: 22px;
+  /* The agent screen fits the window: top bar, a slim stats strip, then
+     three columns (leads | workspace | dialpad + history) that each
+     scroll on their own - the page itself never scrolls. */
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; }
+  #topbar { flex-shrink: 0; }
+  #layout { flex: 1; min-height: 0; flex-direction: column; gap: 12px; padding: 12px 16px; }
+  #workgrid { flex: 1; min-height: 0; display: grid; grid-template-columns: 290px minmax(0, 1fr) 300px; gap: 14px; }
+  .panel {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow);
+    min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+  }
+  #workspace { overflow-y: auto; padding: 16px 18px; display: block; }
+  #workspace .card { box-shadow: none; margin-bottom: 14px; }
+  #sidepanel { padding: 14px; overflow-y: auto; display: block; }
+  #callLog { max-height: none !important; }
+
+  /* Leads column */
+  .ptabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .ptab {
+    flex: 1; padding: 11px 0; background: none; border: none; border-bottom: 2px solid transparent;
+    font-size: 13px; font-weight: 700; color: var(--muted); cursor: pointer; font-family: inherit;
+  }
+  .ptab.active { color: var(--primary-dark); border-bottom-color: var(--primary); }
+  .ptab .count { font-size: 11px; background: var(--bg); border-radius: 10px; padding: 1px 7px; margin-left: 4px; }
+  .ptab .count.due { background: #fee2e2; color: #b91c1c; }
+  .pbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .leads-tools { display: flex; gap: 6px; padding: 10px; flex-shrink: 0; }
+  .leads-tools input { flex: 1; margin: 0; min-width: 0; }
+  .leads-tools button, #addLeadBox button {
+    padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: white;
+    font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
+  }
+  #addLeadBox { display: none; padding: 0 10px 10px; gap: 6px; flex-direction: column; flex-shrink: 0; }
+  #addLeadBox input { margin: 0; }
+  #addLeadBox .row { display: flex; gap: 6px; }
+  #addLeadBox .row button { flex: 1; }
+  .scrolllist { flex: 1; min-height: 0; overflow-y: auto; }
+  .lead-item {
+    display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border);
+    cursor: pointer; transition: background 0.1s;
+  }
+  .lead-item:hover { background: #f8fafc; }
+  .lead-item.selected { background: #ccfbf1; box-shadow: inset 3px 0 0 var(--primary); }
+  .lead-item .li-main { flex: 1; min-width: 0; }
+  .lead-item .li-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lead-item .li-sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .lead-item .btn-call { padding: 5px 9px; font-size: 11px; }
+  .chip { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: var(--bg); color: var(--muted); }
+  .chip.new { background: #dbeafe; color: #1e40af; }
+  .chip.final { background: #dcfce7; color: #166534; }
+  .chip.dnc { background: #fee2e2; color: #b91c1c; }
+  .list-empty { padding: 20px 14px; font-size: 12.5px; color: var(--muted); text-align: center; }
+  #callbacksCard { border: none; box-shadow: none; padding: 6px 10px; margin: 0; }
+  #callbacksCard th, #callbacksCard td { padding: 7px 4px; font-size: 12px; }
+
+  /* Workspace */
+  #status { margin: 0 0 10px; min-height: 0; }
+  #status:empty { display: none; }
+  #workspaceEmpty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--muted); padding: 60px 20px; gap: 10px; }
+  #workspaceEmpty .big { font-size: 16px; font-weight: 700; color: var(--text); }
+  #workspaceEmpty button { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: white; font-family: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+  #leadDetail { display: none; border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; background: linear-gradient(135deg, #f0fdfa, #ffffff); }
+  #leadDetail .ld-top { display: flex; align-items: flex-start; gap: 12px; }
+  #leadDetail .ld-name { font-size: 19px; font-weight: 800; }
+  #leadDetail .ld-phone { font-size: 15px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px; }
+  #leadDetail .ld-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  #leadDetail .ld-close { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: white; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+  #leadDetail .ld-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  #leadDetail .ld-data { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px 14px; font-size: 12.5px; margin-top: 10px; }
+  #leadDetail .ld-data b { display: block; font-size: 11px; color: var(--muted); font-weight: 600; }
+  #noFormNote { display: none; font-size: 12.5px; color: var(--muted); padding: 4px 2px; }
+
+  /* Small screens: stack the columns and let the page scroll again. */
+  @media (max-width: 1100px) {
+    html, body { height: auto; }
+    #workgrid { grid-template-columns: 1fr; }
+    #leadsPanel { height: 380px; }
+    #sidepanel { max-height: none; }
   }
 
-  .tiles { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+  .tiles { display: flex; gap: 10px; flex-wrap: wrap; flex-shrink: 0; }
   .tile {
-    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
-    padding: 16px 18px; flex: 1; min-width: 155px; box-shadow: var(--shadow);
-    display: flex; align-items: center; gap: 14px; transition: transform 0.15s ease;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 8px 12px; flex: 1; min-width: 140px; box-shadow: var(--shadow);
+    display: flex; align-items: center; gap: 10px;
   }
-  .tile:hover { transform: translateY(-2px); }
   .tile .icon {
-    width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    width: 32px; height: 32px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
-  .tile .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; }
-  .tile .value { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .icon svg { width: 16px; height: 16px; }
+  .tile .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; }
+  .tile .value { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .tile.login .icon { background: #dcfce7; } .tile.login .value { color: var(--available); }
   .tile.talk .icon { background: #ccfbf1; } .tile.talk .value { color: var(--primary); }
   .tile.break .icon { background: #fef3c7; } .tile.break .value { color: var(--break); }
@@ -488,7 +562,6 @@
 </div>
 
 <div id="layout" style="display:none">
-  <div id="main">
     <div class="tiles">
       <div class="tile login">
         <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.2"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg></div>
@@ -512,19 +585,52 @@
       </div>
     </div>
 
+  <div id="workgrid">
+  <aside id="leadsPanel" class="panel">
+    <div class="ptabs">
+      <button class="ptab active" data-tab="leads" onclick="showLeadsTab('leads')">Leads <span class="count" id="leadsCount">0</span></button>
+      <button class="ptab" data-tab="callbacks" onclick="showLeadsTab('callbacks')">Callbacks <span class="count" id="callbacksCount">0</span></button>
+    </div>
+    <div class="pbody" id="tab-leads">
+      <div class="leads-tools">
+        <input id="leadSearch" placeholder="Search name or number" oninput="renderLeadList()">
+        <button onclick="toggleAddLead()" title="Add a lead">+ Add</button>
+      </div>
+      <div id="addLeadBox">
+        <input id="leadName" placeholder="Name (optional)">
+        <input id="leadPhone" placeholder="Phone / extension">
+        <div class="row"><button onclick="addLead()" style="background: var(--primary); color: white; border: none;">Add lead</button><button onclick="toggleAddLead()">Cancel</button></div>
+      </div>
+      <div class="scrolllist" id="leadList"></div>
+    </div>
+    <div class="pbody" id="tab-callbacks" style="display:none;">
+      <div class="scrolllist">
+        <div class="card" id="callbacksCard" >
+                <table id="callbacksTable">
+            <thead><tr><th>When</th><th>Lead</th><th>Note</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="list-empty" id="callbacksEmpty">No callbacks scheduled.</div>
+      </div>
+    </div>
+  </aside>
+
+  <main id="workspace" class="panel">
+    <div id="status"></div>
     <div class="card" id="previewCard" style="display:none;">
       <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Preview - Next Lead</h3>
       <div id="previewBody"></div>
     </div>
 
-    <div class="card" id="callbacksCard" style="display:none;">
-      <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> My Callbacks</h3>
-      <table id="callbacksTable">
-        <thead><tr><th>When</th><th>Lead</th><th>Note</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
+    <div id="workspaceEmpty">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.6"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM16 11h6M19 8v6"/></svg>
+      <div class="big">No customer selected</div>
+      <div>Click a lead on the left, or take a call - the customer's details and form open here.</div>
+      <button onclick="openBlankForm()">Open form without a lead</button>
     </div>
-
+    <div id="leadDetail"></div>
+    <div id="noFormNote">This campaign has no form - pick the outcome when the call ends.</div>
     <div class="card" id="formCard" style="display:none;">
       <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M14 3v4a1 1 0 001 1h4M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2zM9 13h6M9 17h6"/></svg> <span id="formTitle">Form</span></h3>
       <div id="formContext"></div>
@@ -534,27 +640,9 @@
       <div id="formMsg"></div>
     </div>
 
-    <div class="card">
-      <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M12.5 7a4 4 0 11-8 0 4 4 0 018 0zM20 8v6M23 11h-6"/></svg> Add Lead</h3>
-      <input id="leadName" placeholder="Name (optional)">
-      <input id="leadPhone" placeholder="Phone / extension">
-      <button class="btn-primary" onclick="addLead()">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
-        Add Lead
-      </button>
-      <div id="status"></div>
-    </div>
+  </main>
 
-    <div class="card">
-      <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.3"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg> Leads</h3>
-      <table id="leadsTable">
-        <thead><tr><th>Name</th><th>Phone</th><th>Status</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div id="sidepanel">
+  <aside id="sidepanel" class="panel">
     <div id="dialpadCard">
       <input id="dialDisplay" placeholder="Enter number">
       <div class="dialgrid">
@@ -586,6 +674,7 @@
       <div class="tab" data-filter="none" onclick="filterCalls('none', this)">No Answer</div>
     </div>
     <div id="callLog"></div>
+  </aside>
   </div>
 </div>
 
@@ -1047,9 +1136,14 @@ async function loadCallbacks() {
   const res = await fetch('/agent/callbacks');
   if (!res.ok) return;
   const rows = await res.json();
-  const card = document.getElementById('callbacksCard');
-  card.style.display = rows.length ? 'block' : 'none';
   const now = Date.now();
+  const due = rows.filter((r) => new Date(r.callback_at).getTime() <= now).length;
+  const count = document.getElementById('callbacksCount');
+  count.textContent = rows.length;
+  count.classList.toggle('due', due > 0);
+  count.title = due ? `${due} due now` : '';
+  document.getElementById('callbacksCard').style.display = rows.length ? 'block' : 'none';
+  document.getElementById('callbacksEmpty').style.display = rows.length ? 'none' : 'block';
   document.querySelector('#callbacksTable tbody').innerHTML = rows.map((r) => {
     const due = new Date(r.callback_at).getTime() <= now;
     return `<tr>
@@ -1086,26 +1180,112 @@ async function loadStats() {
   refreshPreview(stats.currentStatus);
 }
 
+let leadsList = [];
+
 async function loadLeads() {
   const res = await fetch('/leads');
   const leads = await res.json();
-  leadsById = new Map(leads.map((l) => [l.id, l]));
-  const tbody = document.querySelector('#leadsTable tbody');
-  tbody.innerHTML = '';
-  for (const lead of leads) {
-    const tr = document.createElement('tr');
-    const isDnc = isDncStatus(lead.status);
-    const callBtn = isDnc
-      ? `<span style="color: var(--muted); font-size:12px; font-weight:600;">Do Not Call</span>`
-      : `<button class="btn-call" onclick="callLead(${lead.id}, '${lead.phone}')">${PHONE_ICON} Call</button>`;
-    tr.innerHTML = `
-      <td>${lead.name || '—'}</td>
-      <td>${lead.phone}</td>
-      <td>${escapeHtml(lead.status === 'new' ? 'New' : dispositionLabel(lead.status))}</td>
-      <td>${callBtn}</td>
-    `;
-    tbody.appendChild(tr);
+  leadsList = leads;
+  // Keep screen-pop entries (dialer leads not in this list) for the workspace.
+  const popped = [...leadsById.values()].filter((l) => !leads.some((x) => x.id === l.id));
+  leadsById = new Map([...popped, ...leads].map((l) => [l.id, l]));
+  renderLeadList();
+  renderWorkspace();
+}
+
+function leadStatusChip(status) {
+  const label = status === 'new' ? 'New' : dispositionLabel(status);
+  const cls = status === 'new' ? 'new' : isDncStatus(status) ? 'dnc' : '';
+  return `<span class="chip ${cls}">${escapeHtml(label)}</span>`;
+}
+
+// Leads column: click a lead to open it (details + form) in the
+// workspace; the Call button dials it straight away.
+function renderLeadList() {
+  const q = document.getElementById('leadSearch').value.trim().toLowerCase();
+  const rows = leadsList.filter((l) => !q || (l.name || '').toLowerCase().includes(q) || String(l.phone).includes(q));
+  document.getElementById('leadsCount').textContent = leadsList.length;
+  const list = document.getElementById('leadList');
+  list.innerHTML = rows.length ? rows.map((lead) => {
+    const call = isDncStatus(lead.status)
+      ? ''
+      : `<button class="btn-call" onclick="event.stopPropagation(); callLead(${lead.id}, '${escapeHtml(lead.phone)}')">${PHONE_ICON} Call</button>`;
+    return `<div class="lead-item ${lead.id === formLeadId ? 'selected' : ''}" onclick="selectLead(${lead.id})">
+      <div class="li-main"><div class="li-name">${escapeHtml(lead.name || 'No name')}</div>
+        <div class="li-sub">${escapeHtml(lead.phone)} ${leadStatusChip(lead.status)}</div></div>
+      ${call}</div>`;
+  }).join('') : `<div class="list-empty">${q ? 'No leads match.' : 'No leads yet - use + Add.'}</div>`;
+}
+
+function showLeadsTab(tab) {
+  document.querySelectorAll('.ptab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  document.getElementById('tab-leads').style.display = tab === 'leads' ? 'flex' : 'none';
+  document.getElementById('tab-callbacks').style.display = tab === 'callbacks' ? 'flex' : 'none';
+}
+
+function toggleAddLead() {
+  const box = document.getElementById('addLeadBox');
+  const open = box.style.display !== 'flex';
+  box.style.display = open ? 'flex' : 'none';
+  if (open) document.getElementById('leadPhone').focus();
+}
+
+function selectLead(leadId) {
+  if (jssipSession && formLeadId && formLeadId !== leadId) {
+    setStatusMsg('Finish the current call before opening another lead.', true);
+    return;
   }
+  const lead = leadsById.get(leadId);
+  if (!lead) return;
+  setFormContext(lead.id, null, lead.name ? `${lead.name} (${lead.phone})` : `Lead ${lead.phone}`);
+  prefillAgentForm(lead.custom_data);
+  document.getElementById('formMsg').textContent = '';
+}
+
+let blankFormOpen = false;
+function openBlankForm() {
+  blankFormOpen = true;
+  renderWorkspace();
+}
+
+function closeLead() {
+  if (jssipSession) { setStatusMsg('The call is still live.', true); return; }
+  blankFormOpen = false;
+  clearAgentForm();
+}
+
+// Workspace: empty until a lead is opened or a call is up; then the
+// customer's details and the campaign form.
+function renderWorkspace() {
+  const lead = formLeadId ? leadsById.get(formLeadId) : null;
+  const show = !!formLeadId || !!jssipSession || blankFormOpen;
+  document.getElementById('workspaceEmpty').style.display = show ? 'none' : 'flex';
+  document.getElementById('formCard').style.display = show && agentForm ? 'block' : 'none';
+  document.getElementById('noFormNote').style.display = show && !agentForm ? 'block' : 'none';
+  const box = document.getElementById('leadDetail');
+  if (!show || (!lead && !formLeadId)) {
+    box.style.display = 'none';
+  } else {
+    const l = lead || { name: formContextText, phone: '' };
+    const formKeys = new Set(agentForm ? agentForm.fields.map((f) => f.field_key) : []);
+    const extra = Object.entries(l.custom_data || {}).filter(([k, v]) => !formKeys.has(k) && v != null && v !== '');
+    const call = l.phone && !isDncStatus(l.status) && !jssipSession
+      ? `<button class="btn-call" onclick="callLead(${l.id}, '${escapeHtml(l.phone)}')">${PHONE_ICON} Call</button>` : '';
+    box.innerHTML = `
+      <div class="ld-top">
+        <div><div class="ld-name">${escapeHtml(l.name || 'No name')}</div><div class="ld-phone">${escapeHtml(l.phone || '')}</div></div>
+        <div class="ld-actions">${call}<button class="ld-close" onclick="closeLead()" title="Close">✕</button></div>
+      </div>
+      <div class="ld-meta">
+        ${l.status ? `<span>Status ${leadStatusChip(l.status)}</span>` : ''}
+        ${l.attempts != null ? `<span>Attempts ${escapeHtml(l.attempts)}</span>` : ''}
+        ${l.list_name ? `<span>List ${escapeHtml(l.list_name)}</span>` : ''}
+        ${l.alt_phone ? `<span>Alt ${escapeHtml(l.alt_phone)}</span>` : ''}
+      </div>
+      ${extra.length ? `<div class="ld-data">${extra.map(([k, v]) => `<div><b>${escapeHtml(k)}</b>${escapeHtml(v)}</div>`).join('')}</div>` : ''}`;
+    box.style.display = 'block';
+  }
+  renderLeadList();
 }
 
 async function addLead() {
@@ -1195,6 +1375,7 @@ function inCallAttach(session) {
     xfer.poll = setInterval(refreshCallControl, 1500);
     if (inCall.info.callId) watchClick2CallAnswer(inCall.info.callId);
     renderInCall();
+    renderWorkspace();
   };
   session.on('accepted', started);
   session.on('confirmed', started);
@@ -1217,6 +1398,7 @@ function inCallDetach() {
   document.getElementById('icKeypad').style.display = 'none';
   document.getElementById('icDtmfSent').textContent = '';
   document.title = PAGE_TITLE;
+  setTimeout(renderWorkspace, 0);  // after jssipSession is cleared
 }
 
 // Click-to-call: the agent's own leg answers at once, then the customer
@@ -1621,11 +1803,11 @@ async function previewSkip() {
 async function loadAgentForm() {
   const res = await fetch('/agent/form');
   agentForm = res.ok ? await res.json() : null;
-  const card = document.getElementById('formCard');
-  if (!agentForm) { card.style.display = 'none'; return; }
-  document.getElementById('formTitle').textContent = agentForm.name;
-  renderAgentForm();
-  card.style.display = 'block';
+  if (agentForm) {
+    document.getElementById('formTitle').textContent = agentForm.name;
+    renderAgentForm();
+  }
+  renderWorkspace();
 }
 
 function escapeHtml(s) {
@@ -1661,6 +1843,7 @@ function setFormContext(leadId, callId, text) {
   formCallId = callId;
   formContextText = text || '';
   renderFormContext();
+  renderWorkspace();
 }
 
 function renderFormContext() {
@@ -1689,6 +1872,7 @@ function prefillAgentForm(data) {
 }
 
 function clearAgentForm() {
+  blankFormOpen = false;
   document.getElementById('formFields').reset();
   setFormContext(null, null, '');
   document.getElementById('formMsg').textContent = '';
