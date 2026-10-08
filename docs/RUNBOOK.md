@@ -1010,6 +1010,42 @@ D8 — Predictive: ratio computed from live answer rate, lowered automatically w
 
 ---
 
+## Predictive Dialer D8 — Predictive mode (2026-10-08, dialforge-dev)
+
+### What & why
+Progressive dials a fixed ratio. **Predictive learns it**: if 40% of calls are answered, dialing 1 / 0.4 = 2.5 lines per free agent keeps agents talking instead of waiting through rings and no-answers. The risk is answered customers with no free agent (**abandons**), so the ratio tunes itself against the campaign's **Target abandon %**.
+
+### The algorithm (engine, every 5 s; pacing still every 1 s)
+- **Answer rate** = answered ÷ finished attempts over the last **15 min** (needs ≥ 20 attempts; until then it uses the campaign's **Starting ratio** = the Dial ratio field — "learning" note on the Dialer page).
+- **Abandon %** = (abandoned + hung up waiting) ÷ answered over the last **30 min** (needs ≥ 10 answered).
+- **Adjust** factor (0.3 – 1.0), re-tuned at most every 30 s: abandon % > target → −0.1; abandon % < half the target → +0.05. Stored in `dialer_status.ratio_adjust`, so an engine restart keeps what it learned.
+- **Ratio** = (1 ÷ answer rate) × adjust, clamped to **1.0 … Max dial ratio**.
+- **Safety brake**: abandon % above **2 × target** → ratio forced to 1.0 (plain progressive) until it recovers.
+- Then the same pacing as D7: `floor(idle × ratio) − in flight`, capped by campaign channels, trunk cap and 5 new calls/s. Each attempt records `ratio_at_dial`.
+- Pure function `computePredictive()` — unit-tested on its own (learning, normal, back-off, 30-s rule, brake, max cap, 0 answers, recovery).
+
+### Known simplifications (fine for a pilot, improve later)
+- Doesn't predict agents *about to* finish a call (only counts agents already free) — a full predictive dialer also uses average talk time. Effect: slightly less aggressive than possible, never more.
+- Rates are per campaign, not per list/time-of-day.
+
+### What changed
+- DB (`migration-predictive.sql`): `dialer_status` + `current_ratio`, `answer_rate`, `abandon_pct`, `ratio_adjust`, `pacing_note`.
+- `dialer-engine.js`: predictive state + maths; hopper fill and pacing use the learned ratio.
+- Admin: Dialer page shows for predictive campaigns "now 2.1:1 · answer 45% · abandon 1.2% · adjust 0.9" (+ learning/brake notes); in Campaign settings the ratio field is labelled **Starting ratio (until learned)** in predictive mode.
+
+### Deploy / rollback
+Backup `~/backups/20261008-073418/`. Rollback: restore `server.js`, `dialer-engine.js`, `public/` from it, restart both services (the extra `dialer_status` columns can stay).
+
+### Verified
+- Predictive maths unit-tested (11 cases). Rates + sweeper SQL run cleanly on MySQL. Both services healthy, engine log clean, campaigns still Manual/Stopped.
+
+### Next (needs you)
+- D9 dashboard/reports: mostly covered by the Dialer page "Today" + `dial_attempts`; a downloadable attempts report can follow your feedback.
+- D10 load test with SIPp against a fake trunk on **DialForge_Testing** (adds cost/time — decide first).
+- D11 pilot on the **live dedicated trunk** with the "Before live" items from D7.
+
+---
+
 ## How I'll keep this doc going
 
 I'll update this file after each meaningful step (not after every single command) — so it stays a fast, high-signal reference of *what exists and why*, not a full transcript. If you ever want the full command-by-command detail for something, ask and I'll pull it from the session.

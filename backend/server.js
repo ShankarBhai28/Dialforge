@@ -1052,7 +1052,8 @@ app.get('/admin/dialer', requireRole('admin'), async (req, res) => {
   const [campaigns] = await pool.query(`
     SELECT c.id, c.name, c.status, c.dial_mode, c.dial_ratio, c.max_dial_ratio, c.dialer_state, c.dialer_state_changed_at,
       u.username AS changed_by, q.name AS queue_name,
-      s.hopper_ready, s.hopper_locked, s.idle_agents, s.would_dial, s.in_flight, s.active_calls, s.note, s.last_tick_at
+      s.hopper_ready, s.hopper_locked, s.idle_agents, s.would_dial, s.in_flight, s.active_calls, s.note, s.last_tick_at,
+      s.current_ratio, s.answer_rate, s.abandon_pct, s.ratio_adjust, s.pacing_note
     FROM campaigns c
     LEFT JOIN queues q ON q.id = c.queue_id
     LEFT JOIN users u ON u.id = c.dialer_state_changed_by

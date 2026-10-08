@@ -130,7 +130,7 @@ async function cleanHopper(c) {
 
 // Top up the hopper to its target size with the best next leads.
 async function fillHopper(c, idleAgents, counts) {
-  const ratio = Number(c.dial_mode === 'predictive' ? c.max_dial_ratio : c.dial_ratio) || 1;
+  const ratio = effectiveRatio(c) || 1;
   const want = Math.min(MAX_HOPPER, Math.max(MIN_HOPPER, Math.ceil(idleAgents * ratio * LEADS_PER_AGENT)));
   const need = want - (counts.ready + counts.locked);
   if (need <= 0) return 0;
@@ -181,12 +181,101 @@ async function fillHopper(c, idleAgents, counts) {
   return result.affectedRows;
 }
 
-// Progressive pacing: keep (idle agents x ratio) calls ringing, minus
-// what's already ringing or waiting for an agent, within the campaign's
-// and the trunk's channel limits. (D8 replaces the ratio for predictive
-// campaigns with one computed from live answer/abandon rates.)
-function callsToPlace(c, idle, attempts, trunkInUse) {
-  const wanted = Math.floor(idle * Number(c.dial_ratio)) - attempts.inFlight;
+// --- Predictive pacing (D8) ---
+// Progressive dials a fixed ratio. Predictive learns it: if only 40% of
+// calls are answered, dialing 1 / 0.4 = 2.5 lines per free agent keeps
+// agents busy. Dial too hard and answered customers find no free agent
+// (abandons), so a self-tuning factor (adjust) is lowered whenever the
+// abandon % goes over the campaign's target and slowly raised while it
+// stays well below. The result is always kept between 1.0 and the
+// campaign's max_dial_ratio.
+const ANSWER_WINDOW_MIN = 15;     // answer rate measured over the last 15 min
+const ABANDON_WINDOW_MIN = 30;    // abandon % over the last 30 min
+const MIN_ATTEMPTS_FOR_RATE = 20; // fewer than this -> not enough data, use the starting ratio
+const MIN_ANSWERED_FOR_ABANDON = 10;
+const ADJUST_EVERY_MS = 30000;    // re-tune at most every 30 s
+const ADJUST_MIN = 0.3;
+const ADJUST_MAX = 1.0;           // never dial more than 1/answer_rate
+const predictive = new Map();     // campaignId -> { ratio, answerRate, abandonPct, adjust, adjustedAt, note }
+
+async function campaignRates(campaignId) {
+  const [[r]] = await pool.query(
+    `SELECT
+       SUM(started_at > NOW() - INTERVAL ? MINUTE AND status = 'ended') AS attempts,
+       SUM(started_at > NOW() - INTERVAL ? MINUTE AND status = 'ended' AND answered_at IS NOT NULL) AS answered,
+       SUM(started_at > NOW() - INTERVAL ? MINUTE AND answered_at IS NOT NULL AND result IS NOT NULL) AS answered_long,
+       SUM(started_at > NOW() - INTERVAL ? MINUTE AND result IN ('abandoned', 'customer_hangup')) AS abandoned
+     FROM dial_attempts WHERE campaign_id = ? AND started_at > NOW() - INTERVAL ? MINUTE`,
+    [ANSWER_WINDOW_MIN, ANSWER_WINDOW_MIN, ABANDON_WINDOW_MIN, ABANDON_WINDOW_MIN, campaignId,
+      Math.max(ANSWER_WINDOW_MIN, ABANDON_WINDOW_MIN)]
+  );
+  return {
+    attempts: Number(r.attempts || 0), answered: Number(r.answered || 0),
+    answeredLong: Number(r.answered_long || 0), abandoned: Number(r.abandoned || 0),
+  };
+}
+
+// Pure function (unit-tested): previous state + fresh rates -> new state.
+function computePredictive(c, rates, prev, now) {
+  const start = Number(c.dial_ratio);
+  const max = Number(c.max_dial_ratio);
+  const target = Number(c.target_abandon_pct);
+  let adjust = prev ? prev.adjust : ADJUST_MAX;
+  let adjustedAt = prev ? prev.adjustedAt : 0;
+  const answerRate = rates.attempts >= MIN_ATTEMPTS_FOR_RATE ? rates.answered / rates.attempts : null;
+  const abandonPct = rates.answeredLong >= MIN_ANSWERED_FOR_ABANDON ? (100 * rates.abandoned) / rates.answeredLong : null;
+  let note;
+
+  if (abandonPct !== null && now - adjustedAt >= ADJUST_EVERY_MS) {
+    if (abandonPct > target) adjust = Math.max(ADJUST_MIN, adjust - 0.1);
+    else if (abandonPct < target / 2) adjust = Math.min(ADJUST_MAX, adjust + 0.05);
+    adjustedAt = now;
+  }
+
+  let ratio;
+  if (abandonPct !== null && abandonPct > 2 * target) {
+    ratio = 1;  // safety brake: way over target -> plain progressive until it recovers
+    note = `abandon ${abandonPct.toFixed(1)}% is over 2x target - holding at 1.0`;
+  } else if (answerRate === null) {
+    ratio = start;
+    note = `learning (${rates.attempts}/${MIN_ATTEMPTS_FOR_RATE} calls) - using starting ratio`;
+  } else if (answerRate === 0) {
+    ratio = max;
+    note = 'no answers in the window - at max ratio';
+  } else {
+    ratio = (1 / answerRate) * adjust;
+    note = null;
+  }
+  ratio = Math.round(Math.min(max, Math.max(1, ratio)) * 100) / 100;
+  return { ratio, answerRate, abandonPct, adjust: Math.round(adjust * 100) / 100, adjustedAt, note };
+}
+
+async function updatePredictive(c) {
+  if (c.dial_mode !== 'predictive') { predictive.delete(c.id); return null; }
+  let prev = predictive.get(c.id);
+  if (!prev) {
+    // Engine restarted: resume the learned adjust factor.
+    const [rows] = await pool.query('SELECT ratio_adjust FROM dialer_status WHERE campaign_id = ?', [c.id]);
+    if (rows[0] && rows[0].ratio_adjust != null) prev = { adjust: Number(rows[0].ratio_adjust), adjustedAt: 0 };
+  }
+  const state = computePredictive(c, await campaignRates(c.id), prev, Date.now());
+  predictive.set(c.id, state);
+  return state;
+}
+
+// The ratio pacing uses right now: progressive = fixed; predictive = learned.
+function effectiveRatio(c) {
+  if (c.dial_mode === 'predictive') {
+    const st = predictive.get(c.id);
+    return st ? st.ratio : Number(c.dial_ratio);
+  }
+  return Number(c.dial_ratio);
+}
+
+// Keep (idle agents x ratio) calls ringing, minus what's already ringing
+// or waiting for an agent, within the campaign's and the trunk's limits.
+function callsToPlace(c, idle, attempts, trunkInUse, ratio) {
+  const wanted = Math.floor(idle * ratio) - attempts.inFlight;
   return Math.max(0, Math.min(
     wanted,
     c.max_channels - attempts.active,
@@ -196,13 +285,22 @@ function callsToPlace(c, idle, attempts, trunkInUse) {
 }
 
 async function writeStatus(campaignId, s) {
+  const pv = s.predictive || {};
   await pool.query(
-    `INSERT INTO dialer_status (campaign_id, hopper_ready, hopper_locked, idle_agents, would_dial, in_flight, active_calls, note, last_tick_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `INSERT INTO dialer_status (campaign_id, hopper_ready, hopper_locked, idle_agents, would_dial, in_flight, active_calls, note,
+       current_ratio, answer_rate, abandon_pct, ratio_adjust, pacing_note, last_tick_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
      ON DUPLICATE KEY UPDATE hopper_ready = VALUES(hopper_ready), hopper_locked = VALUES(hopper_locked),
        idle_agents = VALUES(idle_agents), would_dial = VALUES(would_dial), in_flight = VALUES(in_flight),
-       active_calls = VALUES(active_calls), note = VALUES(note), last_tick_at = NOW()`,
-    [campaignId, s.ready || 0, s.locked || 0, s.idle || 0, s.wouldDial || 0, s.inFlight || 0, s.active || 0, s.note || null]
+       active_calls = VALUES(active_calls), note = VALUES(note), current_ratio = VALUES(current_ratio),
+       answer_rate = VALUES(answer_rate), abandon_pct = VALUES(abandon_pct),
+       ratio_adjust = COALESCE(VALUES(ratio_adjust), ratio_adjust), pacing_note = VALUES(pacing_note), last_tick_at = NOW()`,
+    [campaignId, s.ready || 0, s.locked || 0, s.idle || 0, s.wouldDial || 0, s.inFlight || 0, s.active || 0, s.note || null,
+      s.ratio == null ? null : s.ratio,
+      pv.answerRate == null ? null : Math.round(pv.answerRate * 10000) / 100,
+      pv.abandonPct == null ? null : Math.round(pv.abandonPct * 100) / 100,
+      pv.adjust == null ? null : pv.adjust,
+      pv.note || null]
   );
 }
 
@@ -231,9 +329,11 @@ async function processCampaign(c) {
   if (!note && isAutoDial(c) && !ariReady) note = 'not connected to Asterisk (ARI) - cannot dial';
   if (added) log(`campaign ${c.id}: added ${added} lead(s) to hopper (ready=${counts.ready})`);
   const attempts = await attemptCounts(c.id);
+  const pv = await updatePredictive(c);
+  const ratio = isAutoDial(c) ? effectiveRatio(c) : null;
   await writeStatus(c.id, {
-    ready: counts.ready, locked: counts.locked, idle, note,
-    wouldDial: !note && isAutoDial(c) ? callsToPlace(c, idle, attempts, await trunkChannelsInUse()) : 0,
+    ready: counts.ready, locked: counts.locked, idle, note, ratio, predictive: pv,
+    wouldDial: !note && isAutoDial(c) ? callsToPlace(c, idle, attempts, await trunkChannelsInUse(), ratio) : 0,
     inFlight: attempts.inFlight, active: attempts.active,
   });
 }
@@ -258,7 +358,7 @@ async function endpointFor(phone) {
 // Take the best ready lead off the hopper (SKIP LOCKED so the agents'
 // preview claims never block us) and create its dial_attempts row - both in
 // one transaction, so a lead can't be lost between the two.
-async function claimLeadForDialing(c) {
+async function claimLeadForDialing(c, ratio) {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -274,7 +374,7 @@ async function claimLeadForDialing(c) {
     await conn.query('DELETE FROM dial_hopper WHERE id = ?', [row.id]);
     const [ins] = await conn.query(
       'INSERT INTO dial_attempts (tenant_id, campaign_id, lead_id, phone, ratio_at_dial) VALUES (1, ?, ?, ?, ?)',
-      [c.id, row.lead_id, row.phone, c.dial_ratio]
+      [c.id, row.lead_id, row.phone, ratio]
     );
     await conn.query('UPDATE leads SET attempts = attempts + 1, last_attempt_at = NOW() WHERE id = ?', [row.lead_id]);
     await conn.commit();
@@ -287,8 +387,8 @@ async function claimLeadForDialing(c) {
   }
 }
 
-async function placeCall(c) {
-  const claimed = await claimLeadForDialing(c);
+async function placeCall(c, ratio) {
+  const claimed = await claimLeadForDialing(c, ratio);
   if (!claimed) return false;
   const channelId = `dfd-${claimed.attemptId}`;
   await pool.query('UPDATE dial_attempts SET channel_id = ? WHERE id = ?', [channelId, claimed.attemptId]);
@@ -326,9 +426,10 @@ async function paceTick() {
       if (!isWithinCallWindow(c)) continue;
       const idle = await countIdleAgents(c.queue_id);
       if (!idle) continue;
-      const n = callsToPlace(c, idle, await attemptCounts(c.id), await trunkChannelsInUse());
+      const ratio = effectiveRatio(c);
+      const n = callsToPlace(c, idle, await attemptCounts(c.id), await trunkChannelsInUse(), ratio);
       for (let i = 0; i < n; i++) {
-        if (!(await placeCall(c))) break;  // hopper empty
+        if (!(await placeCall(c, ratio))) break;  // hopper empty
       }
     }
   } catch (err) {

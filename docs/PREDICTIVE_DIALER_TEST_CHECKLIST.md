@@ -69,4 +69,13 @@ Start small: **test leads = your own extensions**, max channels **1**.
 - [ ] Only then, one real trunk test: a lead with **your own mobile**, max channels 1 → phone rings → answer → reaches the agent.
 - [ ] Dialer → **Stop**.
 
-<!-- D8 section is added when deployed. -->
+## D8 — Predictive
+Needs volume to learn (≥ 20 finished calls in 15 min) — with 1-2 test lines you'll mostly see the "learning" state. That's expected.
+- [ ] Campaign mode **Predictive**: Starting ratio 1.0, Max dial ratio 1.5, Target abandon 3, Max channels **2** → Save. Dialer → Start.
+- [ ] Dialer page shows "now 1:1 · learning (n/20 calls) - using starting ratio".
+- [ ] Several test leads (own extensions; some answered, some left ringing) → as attempts finish, the note counts up; once ≥ 20 it shows an answer % and a ratio between 1.0 and 1.5.
+- [ ] Force abandons (agent to Break while lines ring, answer them) → abandon % rises → within ~30 s **adjust** drops; above 6% (2× target) the note says "holding at 1.0".
+- [ ] Dialer → **Stop**. Campaigns back to the mode you want.
+
+## After testing
+- [ ] Tell Claude what failed (step + what you saw) — fixes go in before the live trunk.
