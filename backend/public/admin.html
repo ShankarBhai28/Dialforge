@@ -188,6 +188,10 @@
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 3v4a1 1 0 001 1h4M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2zM9 13h6M9 17h6"/></svg>
       Forms
     </div>
+    <div class="navitem" data-section="dialer" onclick="showSection('dialer', this)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      Dialer
+    </div>
     <div class="navitem" data-section="campaigns" onclick="showSection('campaigns', this)">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 3h18v4H3zM3 10h12v4H3zM3 17h7v4H3z"/></svg>
       Campaigns
@@ -489,6 +493,29 @@
       </div>
     </div>
 
+    <div class="section" id="section-dialer">
+      <div class="pagehead">
+        <div><h1>Dialer</h1><div class="sub">Start / pause / stop auto-dialing per campaign and watch the hopper. Step D5: the engine fills the hopper and shows how many calls it <i>would</i> place - no calls are made yet.</div></div>
+        <div id="engineBadge" class="badge offline"><span class="bdot"></span> Engine: checking…</div>
+      </div>
+      <div class="card" style="padding: 0; overflow: auto;">
+        <table id="dialerTable">
+          <thead><tr><th style="padding-left:18px;">Campaign</th><th>Mode</th><th>Dialer</th><th>Idle agents</th><th>Hopper</th><th>Would dial</th><th>Engine note</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="card" id="hopperCard" style="display:none; padding: 0; overflow: auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; padding: 18px 18px 0;">
+          <h3 style="margin:0;" id="hopperTitle">Hopper</h3>
+          <button class="refresh-btn" onclick="document.getElementById('hopperCard').style.display='none'; hopperCampaignId = null;">Close</button>
+        </div>
+        <table id="hopperTable" style="margin: 10px 0 0;">
+          <thead><tr><th style="padding-left:18px;">#</th><th>Lead</th><th>Phone</th><th>List</th><th>Callback</th><th>List prio</th><th>Lead prio</th><th>Attempts</th><th>Status</th><th>Queued</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="section" id="section-campaigns">
       <div class="pagehead">
         <div><h1>Campaigns</h1><div class="sub">A campaign references a queue, plus its outbound CLI and auto-answer behavior</div></div>
@@ -607,6 +634,10 @@
         <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 12px;">A list is a named batch of leads within a campaign (e.g. "October cold list") - a CSV import always lands in one of these, not loose into the campaign.</div>
         <input id="newListName" placeholder="List name">
         <select id="newListCampaign"></select>
+        <input id="newListPriority" type="number" min="-100" max="100" placeholder="Priority (0)" style="width:110px;" title="Higher priority lists are dialed first">
+        <label style="display:inline-flex; align-items:center; gap:6px; font-size:13px; margin-right:8px;">
+          <input type="checkbox" id="newListActive" checked style="width:auto; margin:0;"> Active for dialer
+        </label>
         <button class="btn-primary" id="listSubmitBtn" onclick="createList()">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
           Create List
@@ -617,7 +648,7 @@
       <div class="card" style="padding: 0; overflow: hidden;">
         <h3 style="padding: 18px 18px 0;">Lists</h3>
         <table id="listsTable" style="margin: 10px 0 0;">
-          <thead><tr><th style="padding-left:18px;">Name</th><th>Campaign</th><th>Leads</th><th>Created</th><th>Actions</th></tr></thead>
+          <thead><tr><th style="padding-left:18px;">Name</th><th>Campaign</th><th>Leads</th><th>Dialer</th><th>Priority</th><th>Created</th><th>Actions</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -772,6 +803,7 @@ function showSection(name, el) {
   el.classList.add('active');
 
   clearInterval(liveAgentsPoll);
+  clearInterval(dialerPoll);
   if (name === 'live') {
     loadLiveAgents();
     liveAgentsPoll = setInterval(loadLiveAgents, 5000);
@@ -791,6 +823,10 @@ function showSection(name, el) {
   }
   if (name === 'forms') {
     loadForms();
+  }
+  if (name === 'dialer') {
+    loadDialer();
+    dialerPoll = setInterval(loadDialer, 3000);
   }
   if (name === 'dnc') {
     loadDnc();
@@ -1468,6 +1504,81 @@ async function cancelCallback(id) {
   else alert('Cancel failed');
 }
 
+// --- Dialer control (D5) ---
+let dialerPoll = null;
+let hopperCampaignId = null;
+const DIALER_STATE_BADGE = { running: 'available', paused: 'break', stopped: 'offline' };
+
+async function loadDialer() {
+  const res = await fetch('/admin/dialer');
+  if (!res.ok) return;
+  const { engine, campaigns } = await res.json();
+  const badge = document.getElementById('engineBadge');
+  badge.className = 'badge ' + (engine.alive ? 'available' : 'offline');
+  badge.innerHTML = `<span class="bdot"></span> Engine: ${engine.alive ? 'running' : (engine.last_tick_at ? `DOWN (last seen ${fmt(engine.last_tick_at)})` : 'never started')}`;
+
+  const none = '<span class="muted-cell">—</span>';
+  document.querySelector('#dialerTable tbody').innerHTML = campaigns.map((c) => {
+    const mode = c.dial_mode + (c.dial_mode === 'progressive' ? ` ${Number(c.dial_ratio)}:1` : '') + (c.dial_mode === 'predictive' ? ` ≤${Number(c.max_dial_ratio)}:1` : '');
+    const hasStatus = c.last_tick_at != null;
+    const btn = (action, label, cls) => `<button class="btn-icon ${cls || ''}" onclick="dialerAction(${c.id}, '${action}')">${label}</button>`;
+    const actions = [
+      c.dialer_state !== 'running' ? btn('start', 'Start') : '',
+      c.dialer_state === 'running' ? btn('pause', 'Pause') : '',
+      c.dialer_state !== 'stopped' ? btn('stop', 'Stop', 'danger') : '',
+      `<button class="btn-icon" onclick="openHopper(${c.id})">Hopper</button>`,
+    ].join('');
+    return `<tr>
+      <td style="padding-left:18px; font-weight:600;">${escapeHtml(c.name)}${c.status !== 'active' ? ' <span class="muted-cell">(' + escapeHtml(c.status) + ')</span>' : ''}</td>
+      <td>${escapeHtml(mode)}</td>
+      <td><span class="badge ${DIALER_STATE_BADGE[c.dialer_state] || 'offline'}"><span class="bdot"></span>${escapeHtml(c.dialer_state)}</span></td>
+      <td>${hasStatus ? c.idle_agents : none}</td>
+      <td>${hasStatus ? `${c.hopper_ready} ready${c.hopper_locked ? ` / ${c.hopper_locked} locked` : ''}` : none}</td>
+      <td>${hasStatus ? c.would_dial : none}</td>
+      <td style="max-width:280px;">${c.note ? escapeHtml(c.note) : none}</td>
+      <td class="row-actions">${actions}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" style="text-align:center; color: var(--muted); padding: 20px;">No campaigns.</td></tr>';
+
+  if (hopperCampaignId) openHopper(hopperCampaignId, true);
+}
+
+async function dialerAction(id, action) {
+  if (action === 'stop' && !confirm('Stop this campaign? Its hopper will be emptied.')) return;
+  const res = await fetch(`/admin/campaigns/${id}/dialer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) alert(data.error || 'Failed');
+  loadDialer();
+}
+
+async function openHopper(id, quiet) {
+  hopperCampaignId = id;
+  const res = await fetch(`/admin/campaigns/${id}/hopper`);
+  const rows = await res.json();
+  const c = campaignsCache.find((x) => x.id === id);
+  document.getElementById('hopperTitle').textContent = `Hopper - ${c ? c.name : 'campaign ' + id} (${rows.length}${rows.length === 200 ? '+' : ''})`;
+  const none = '<span class="muted-cell">—</span>';
+  document.querySelector('#hopperTable tbody').innerHTML = rows.map((h, i) => `<tr>
+      <td style="padding-left:18px;">${i + 1}</td>
+      <td>${h.name ? escapeHtml(h.name) : none}</td>
+      <td>${escapeHtml(h.phone)}</td>
+      <td>${h.list_name ? escapeHtml(h.list_name) : none}</td>
+      <td>${h.is_callback ? 'Yes' + (h.reserved_for ? ` (${escapeHtml(h.reserved_for)})` : '') : ''}</td>
+      <td>${h.list_priority}</td>
+      <td>${h.lead_priority}</td>
+      <td>${h.attempts}</td>
+      <td>${escapeHtml(h.status)}</td>
+      <td>${fmt(h.inserted_at)}</td>
+    </tr>`).join('') || '<tr><td colspan="10" style="text-align:center; color: var(--muted); padding: 20px;">Hopper is empty.</td></tr>';
+  const card = document.getElementById('hopperCard');
+  card.style.display = 'block';
+  if (!quiet) card.scrollIntoView({ behavior: 'smooth' });
+}
+
 let teamsCache = [];
 let editingTeamId = null;
 
@@ -1600,6 +1711,8 @@ async function loadLists() {
       <td style="padding-left: 18px; font-weight: 600;">${l.name}</td>
       <td>${l.campaign_name || '<span class="muted-cell">—</span>'}</td>
       <td>${l.lead_count}</td>
+      <td>${l.is_active ? 'Active' : '<span class="muted-cell">Inactive</span>'}</td>
+      <td>${l.priority}</td>
       <td>${fmt(l.created_at)}</td>
       <td class="row-actions">
         <button class="btn-icon" onclick="editList(${l.id})">Edit</button>
@@ -1609,7 +1722,7 @@ async function loadLists() {
     tbody.appendChild(tr);
   }
   if (lists.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--muted); padding: 20px;">No lists yet - create one above.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--muted); padding: 20px;">No lists yet - create one above.</td></tr>';
   }
 
   const importSelect = document.getElementById('importList');
@@ -1624,6 +1737,8 @@ function editList(id) {
   editingListId = id;
   document.getElementById('newListName').value = l.name;
   document.getElementById('newListCampaign').value = l.campaign_id;
+  document.getElementById('newListPriority').value = l.priority;
+  document.getElementById('newListActive').checked = !!l.is_active;
   document.getElementById('listSubmitBtn').textContent = 'Save Changes';
   document.getElementById('listCancelBtn').style.display = 'inline-flex';
   document.getElementById('listStatus').textContent = '';
@@ -1632,6 +1747,8 @@ function editList(id) {
 function cancelListEdit() {
   editingListId = null;
   document.getElementById('newListName').value = '';
+  document.getElementById('newListPriority').value = '';
+  document.getElementById('newListActive').checked = true;
   document.getElementById('listSubmitBtn').textContent = 'Create List';
   document.getElementById('listCancelBtn').style.display = 'none';
   document.getElementById('listStatus').textContent = '';
@@ -1640,6 +1757,8 @@ function cancelListEdit() {
 async function createList() {
   const name = document.getElementById('newListName').value.trim();
   const campaignId = document.getElementById('newListCampaign').value || null;
+  const priority = document.getElementById('newListPriority').value;
+  const isActive = document.getElementById('newListActive').checked;
   const el = document.getElementById('listStatus');
   if (!name) { el.textContent = 'List name is required'; el.style.color = '#dc2626'; return; }
   if (!campaignId) { el.textContent = 'Create a campaign first'; el.style.color = '#dc2626'; return; }
@@ -1648,7 +1767,7 @@ async function createList() {
     const res = await fetch(`/admin/lists/${editingListId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, campaignId }),
+      body: JSON.stringify({ name, campaignId, priority, isActive }),
     });
     if (res.ok) {
       cancelListEdit();
@@ -1664,7 +1783,7 @@ async function createList() {
   const res = await fetch('/admin/lists', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, campaignId }),
+    body: JSON.stringify({ name, campaignId, priority, isActive }),
   });
   if (res.ok) {
     el.textContent = `Created list: ${name}`;

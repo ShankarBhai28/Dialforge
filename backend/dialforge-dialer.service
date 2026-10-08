@@ -1,0 +1,20 @@
+# Install: sudo cp dialforge-dialer.service /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable --now dialforge-dialer
+# Separate from dialforge-backend on purpose - see top of dialer-engine.js.
+[Unit]
+Description=DialForge dialer engine (hopper + pacing)
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/dialforge-backend
+ExecStart=/usr/bin/node dialer-engine.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/ubuntu/dialforge-backend/dialer.log
+StandardError=append:/home/ubuntu/dialforge-backend/dialer.log
+
+[Install]
+WantedBy=multi-user.target

@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
+const { normalizePhone, localTimeIn, isWithinCallWindow } = require('./dialer-common');
 const pool = require('./db');
 const ari = require('./ari');
 const ami = require('./ami');
@@ -485,16 +486,6 @@ app.delete('/admin/queues/:id', requireRole('admin'), async (req, res) => {
 // --- D3: phone normalisation, DNC, calling window, campaign dial settings,
 // per-campaign dispositions ---
 
-// One canonical form for comparing numbers (DNC lookups): digits only, and
-// an Indian number written as 91xxxxxxxxxx / 0xxxxxxxxxx reduced to its 10
-// digits, so "+91 98400 12345", "098400 12345" and "9840012345" all match.
-function normalizePhone(phone) {
-  const digits = String(phone || '').replace(/\D/g, '');
-  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
-  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
-  return digits;
-}
-
 async function isDnc(phone) {
   const normalized = normalizePhone(phone);
   if (!normalized) return false;
@@ -510,19 +501,6 @@ async function addDnc(phone, source, userId) {
     [normalized, source, userId || null]
   );
   return result.affectedRows > 0;
-}
-
-// Current wall-clock time in the campaign's timezone as "HH:MM:SS" - the
-// server itself runs in UTC, so this can't just use new Date().getHours().
-function localTimeIn(timezone) {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: timezone, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-  }).format(new Date());
-}
-
-function isWithinCallWindow(campaign) {
-  const now = localTimeIn(campaign.timezone || 'Asia/Kolkata');
-  return now >= campaign.call_window_start && now < campaign.call_window_end;
 }
 
 const DIAL_MODES = ['manual', 'preview', 'progressive', 'predictive'];
@@ -691,6 +669,9 @@ app.put('/admin/campaigns/:id', requireRole('admin'), async (req, res) => {
       status: status || 'active', form_id: formId || null, ...settings },
     req.params.id,
   ]);
+  if (settings.dial_mode === 'manual') {
+    await pool.query("UPDATE campaigns SET dialer_state = 'stopped' WHERE id = ? AND dialer_state <> 'stopped'", [req.params.id]);
+  }
   res.json({ id: Number(req.params.id), name });
 });
 
@@ -774,24 +755,36 @@ app.get('/admin/lists', requireRole('admin'), async (req, res) => {
   res.json(rows);
 });
 
+// is_active decides whether the dialer takes leads from a list;
+// priority orders lists within a campaign (higher first).
+function parseListPriority(v) {
+  const n = v === undefined || v === '' ? 0 : Number(v);
+  return Number.isInteger(n) && n >= -100 && n <= 100 ? n : null;
+}
+
 app.post('/admin/lists', requireRole('admin'), async (req, res) => {
-  const { name, campaignId } = req.body;
+  const { name, campaignId, isActive } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (!campaignId) return res.status(400).json({ error: 'campaignId is required' });
+  const priority = parseListPriority(req.body.priority);
+  if (priority === null) return res.status(400).json({ error: 'priority must be a whole number -100..100' });
   const [result] = await pool.query(
-    'INSERT INTO lists (tenant_id, campaign_id, name) VALUES (1, ?, ?)',
-    [campaignId, name]
+    'INSERT INTO lists (tenant_id, campaign_id, name, is_active, priority) VALUES (1, ?, ?, ?, ?)',
+    [campaignId, name, isActive === false ? 0 : 1, priority]
   );
   res.status(201).json({ id: result.insertId, name, campaignId });
 });
 
 app.put('/admin/lists/:id', requireRole('admin'), async (req, res) => {
-  const { name, campaignId } = req.body;
+  const { name, campaignId, isActive } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (!campaignId) return res.status(400).json({ error: 'campaignId is required' });
+  const priority = parseListPriority(req.body.priority);
+  if (priority === null) return res.status(400).json({ error: 'priority must be a whole number -100..100' });
   const [rows] = await pool.query('SELECT id FROM lists WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'list not found' });
-  await pool.query('UPDATE lists SET name = ?, campaign_id = ? WHERE id = ?', [name, campaignId, req.params.id]);
+  await pool.query('UPDATE lists SET name = ?, campaign_id = ?, is_active = ?, priority = ? WHERE id = ?',
+    [name, campaignId, isActive === false ? 0 : 1, priority, req.params.id]);
   res.json({ id: Number(req.params.id), name, campaignId });
 });
 
@@ -1014,6 +1007,64 @@ app.post('/agent/form-responses', requireAuth, async (req, res) => {
     [form.id, campaign.id, leadId || null, callId || null, req.session.user.id, JSON.stringify(data)]
   );
   res.status(201).json({ id: result.insertId });
+});
+
+// --- Admin: dialer control + live view (the engine itself is the
+// separate dialer-engine.js process; these only flip state / read status) ---
+app.post('/admin/campaigns/:id/dialer', requireRole('admin'), async (req, res) => {
+  const { action } = req.body;
+  const [rows] = await pool.query('SELECT * FROM campaigns WHERE id = ?', [req.params.id]);
+  const c = rows[0];
+  if (!c) return res.status(404).json({ error: 'campaign not found' });
+  const next = { start: 'running', pause: 'paused', stop: 'stopped' }[action];
+  if (!next) return res.status(400).json({ error: 'action must be start, pause or stop' });
+  if (action === 'start') {
+    if (c.dial_mode === 'manual') return res.status(400).json({ error: 'set a dial mode other than Manual first (Campaigns → Edit)' });
+    if (c.status !== 'active') return res.status(400).json({ error: 'campaign status must be Active' });
+    if (!c.queue_id) return res.status(400).json({ error: 'campaign needs a queue' });
+  }
+  if (action === 'pause' && c.dialer_state !== 'running') return res.status(400).json({ error: 'only a running campaign can be paused' });
+  await pool.query(
+    'UPDATE campaigns SET dialer_state = ?, dialer_state_changed_at = NOW(), dialer_state_changed_by = ? WHERE id = ?',
+    [next, req.session.user.id, c.id]
+  );
+  res.json({ status: 'ok', dialerState: next });
+});
+
+app.get('/admin/dialer', requireRole('admin'), async (req, res) => {
+  // Row 0 is the engine's heartbeat: no tick for 15s+ means it's down.
+  const [engineRows] = await pool.query(
+    'SELECT note AS engine_id, last_tick_at, TIMESTAMPDIFF(SECOND, last_tick_at, NOW()) AS age_sec FROM dialer_status WHERE campaign_id = 0'
+  );
+  const engine = engineRows[0];
+  const [campaigns] = await pool.query(`
+    SELECT c.id, c.name, c.status, c.dial_mode, c.dial_ratio, c.max_dial_ratio, c.dialer_state, c.dialer_state_changed_at,
+      u.username AS changed_by, q.name AS queue_name,
+      s.hopper_ready, s.hopper_locked, s.idle_agents, s.would_dial, s.note, s.last_tick_at
+    FROM campaigns c
+    LEFT JOIN queues q ON q.id = c.queue_id
+    LEFT JOIN users u ON u.id = c.dialer_state_changed_by
+    LEFT JOIN dialer_status s ON s.campaign_id = c.id
+    ORDER BY c.dialer_state = 'running' DESC, c.dialer_state = 'paused' DESC, c.name
+  `);
+  res.json({
+    engine: engine ? { ...engine, alive: engine.age_sec <= 15 } : { alive: false },
+    campaigns,
+  });
+});
+
+app.get('/admin/campaigns/:id/hopper', requireRole('admin'), async (req, res) => {
+  const [rows] = await pool.query(`
+    SELECT h.*, l.name, ls.name AS list_name, u.username AS reserved_for
+    FROM dial_hopper h
+    JOIN leads l ON l.id = h.lead_id
+    LEFT JOIN lists ls ON ls.id = h.list_id
+    LEFT JOIN users u ON u.id = h.reserved_user_id
+    WHERE h.campaign_id = ?
+    ORDER BY h.status = 'locked' DESC, h.is_callback DESC, h.list_priority DESC, h.lead_priority DESC, h.attempts, h.lead_id
+    LIMIT 200
+  `, [req.params.id]);
+  res.json(rows);
 });
 
 // --- Admin: per-campaign dispositions ---

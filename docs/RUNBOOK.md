@@ -898,6 +898,46 @@ D5 — dialer-engine service skeleton + hopper + Start/Pause/Stop per campaign.
 
 ---
 
+## Predictive Dialer D5 — Dialer engine + hopper (2026-10-08, dialforge-dev)
+
+### What & why
+The first piece of real dialer machinery: a **separate background service** that keeps a buffer (the **hopper**) of the next leads to dial for each running campaign, plus **Start / Pause / Stop** per campaign. **No calls are placed yet** — the engine shows how many it *would* dial (dry-run). Preview (D6) and auto-dialing (D7–D8) plug into this loop.
+
+### How it works
+- **`dialer-engine.js`** runs as its own systemd unit **`dialforge-dialer`** (log: `~/dialforge-backend/dialer.log`). Separate from the web backend so a problem in one never takes down the other; they only talk through MySQL.
+- **Single instance**: on start it takes a MySQL `GET_LOCK('dialforge_dialer_engine')`. A second copy exits immediately (tested). If the engine dies, MySQL releases the lock with its connection.
+- **Every 5 s**, for each running/paused campaign:
+  1. Count idle agents = open `agent_status_log` rows with status `available` in the campaign's queue.
+  2. **Clean** the hopper: drop leads that became final, rescheduled, moved campaign, used up `max_attempts`, list deactivated, or number added to DNC; unlock rows locked > 10 min.
+  3. **Fill** (only if running, mode ≠ manual, campaign active, has a queue, inside calling hours): target = max(20, idle agents × ratio × 10), capped at 500. Pick order: **due callbacks → list priority → lead priority → fewest attempts → oldest**. "Only me" callbacks are left for the agent unless the mode is Preview. DNC re-checked. `INSERT IGNORE` + `UNIQUE(lead_id)` = a lead can never be queued twice.
+  4. Write `dialer_status` (hopper counts, idle agents, would-dial, a plain-English note such as "outside calling hours" or "no dialable leads").
+  - Row `campaign_id = 0` is the engine heartbeat; the admin page shows the engine as DOWN if it hasn't ticked for 15 s.
+- **Stop** empties the hopper; **Pause** keeps it but stops filling. Switching a campaign to Manual stops it automatically.
+
+### What changed
+- **DB** (`backend/migration-dialer-hopper.sql`): `campaigns.dialer_state` (+ changed_at/by), `lists.is_active` + `lists.priority`, `dial_hopper`, `dialer_status`.
+- **Code**: new `dialer-engine.js`, `dialforge-dialer.service`, and `dialer-common.js` (phone normalisation + calling-hours logic moved here so the backend and the engine use the identical rules).
+- **Backend**: `POST /admin/campaigns/:id/dialer` (start/pause/stop, with checks: not manual, campaign active, has queue), `GET /admin/dialer`, `GET /admin/campaigns/:id/hopper`; lists accept active + priority.
+- **Admin UI**: new **Dialer** page (engine badge, per-campaign state, idle agents, hopper ready/locked, would-dial, engine note, Start/Pause/Stop, live hopper view; refreshes every 3 s). Lists have **Active for dialer** + **Priority**.
+
+### Deploy
+Backup `~/backups/20261008-071354/`. Copied files, migration, `sudo cp dialforge-dialer.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now dialforge-dialer`, restarted backend. (The `daemon-reload` also cleared the old "unit file changed on disk" warning.)
+**Rollback**: `sudo systemctl disable --now dialforge-dialer`, restore `server.js` + `public/` from backup, restart backend; `DROP TABLE dialer_status, dial_hopper; ALTER TABLE lists DROP COLUMN is_active, DROP COLUMN priority; ALTER TABLE campaigns DROP COLUMN dialer_state, DROP COLUMN dialer_state_changed_at, DROP COLUMN dialer_state_changed_by;`
+
+### Useful commands
+- `systemctl status dialforge-dialer` · `tail -f ~/dialforge-backend/dialer.log`
+- `sudo mysql dialforge_dev -e "SELECT * FROM dialer_status"`
+
+### Verified
+- Engine active, heartbeat updating every 5 s; second engine refused by the lock (exit 1).
+- Hopper selection SQL runs on real data and uses `idx_leads_dialable`. Current leads correctly not eligible (3 have no campaign, 2 are DNC/final).
+- **To do in the browser**: import a few leads into a list (D4) → set the campaign to Progressive (Campaigns → Edit) → Dialer → Start → hopper fills, note is empty, "would dial" = idle agents × ratio once an agent is Available in that queue → Pause/Stop behave as described.
+
+### Next
+D6 — Preview mode: the next hopper lead pops up on the agent's screen; agent clicks Dial (or auto-dial countdown).
+
+---
+
 ## How I'll keep this doc going
 
 I'll update this file after each meaningful step (not after every single command) — so it stays a fast, high-signal reference of *what exists and why*, not a full transcript. If you ever want the full command-by-command detail for something, ask and I'll pull it from the session.
