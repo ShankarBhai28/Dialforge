@@ -1210,3 +1210,16 @@ The user tested manual dialling on the new agent screen and reported a delay, wi
 - **Classic pages removed:** `backend/public/` (`admin.html`, `agent.html`, `login.html`, `index.html`) and every "Classic" link and placeholder in the app. `/`, `/index.html`, `/login.html`, `/admin.html` and `/agent.html` now 302 to the matching `/app` screen. The old pages are in git history and in the deploy backup.
 - Tests: 44 backend (3 click-to-call teardown, 1 redirects), 123 web (2 ICE timing, 2 call-failure messages).
 
+## TURN secured with expiring per-login credentials (2026-10-09)
+- **Why:** the old fixed TURN user and password were in the classic `agent.html`, and therefore in git.
+- **Change:**
+  - Both coturn instances (`/etc/turnserver.conf` on 3478, `/etc/turnserver-443.conf` on TLS 443) lost their `user=` line. They now have `use-auth-secret` + `static-auth-secret=<random 32 bytes>`.
+  - The same secret is `TURN_SECRET` in `.env`; `TURN_USERNAME` / `TURN_PASSWORD` were removed.
+  - `/agent/webrtc-config` returns username `<expiry>:agent<id>` with password `base64(HMAC-SHA1(secret, username))`. This is coturn's "TURN REST API"; nothing is stored. TTL is `TURN_TTL_SEC`, default 12 h.
+- **Verified on the server with `turnutils_uclient`:**
+  - a fresh credential allocates and relays on UDP 3478 and on TLS 443;
+  - the old fixed password and an expired credential are refused ("Cannot complete Allocation").
+- **Backup:** `~/backups/pre-turn-secret-20261009-151619/` (both coturn configs + `.env`).
+- **Rollback:** copy the two configs back to `/etc/`, restore `env.bak` to `~/dialforge-backend/.env`, then `sudo systemctl restart coturn coturn-443 dialforge-backend`.
+- **Rotating the secret later:** run `openssl rand -hex 32` and put the new value in both coturn configs and `.env` (`TURN_SECRET`). Restart coturn, coturn-443 and dialforge-backend. Agents get new credentials on their next connect.
+
