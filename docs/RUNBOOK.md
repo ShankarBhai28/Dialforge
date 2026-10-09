@@ -1100,3 +1100,13 @@ Backups `~/backups/pre-incall-20261008-100801/` and `~/backups/pre-xfer-20261008
 ## How I'll keep this doc going
 
 I'll update this file after each meaningful step (not after every single command) — so it stays a fast, high-signal reference of *what exists and why*, not a full transcript. If you ever want the full command-by-command detail for something, ask and I'll pull it from the session.
+
+## App rebuild — Stage 0: developer foundation (2026-10-09)
+Plan: `docs/APP_REBUILD_PLAN.md`. Branch `react-frontend`, cut from `predictive-dialer`. **Nothing deployed: this stage has no server changes.**
+- Tooling: repo-level `package.json` (`npm run check` = ESLint + Prettier check + tests), `.editorconfig`, and `.gitattributes`, which stores all text as LF and ends the CRLF/LF mix from Windows editors.
+- Backend and bot-service formatted with Prettier in their own commit. ASTs were compared before and after and are identical for every file, so there is no code change. That commit is listed in `.git-blame-ignore-revs`.
+- Lint found 3 real issues, all fixed with no behaviour change: a literal BOM character in the CSV-import regex (now `﻿`), an unused constant in bot-service, and an unused test helper.
+- Tests: `backend/tests/` with `node:test`. The offline checks used while building D9 and transfer became 20 permanent tests (11 call-control flows, 9 recycle rules). `--test-force-exit` is needed because call-control's blind-transfer fallback timer keeps the process alive.
+- CI: `.github/workflows/ci.yml` runs lint, format, syntax and tests on every push and PR. It only starts once the branch is pushed to GitHub.
+- Docs for developers: `README.md` (rewritten), `docs/ARCHITECTURE.md`, `docs/CONTRIBUTING.md`, `docs/adr/0001-0004`, PR template.
+- Key safety note for developers: never run a local backend against the shared Asterisk. Both would register ARI app `dialforge-app` and take each other's calls.

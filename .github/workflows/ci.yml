@@ -1,0 +1,35 @@
+# Runs on every push and pull request: the same checks as `npm run check`.
+name: CI
+
+on:
+  push:
+    branches: [main, predictive-dialer, react-frontend]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix backend
+      - name: Lint
+        run: npm run lint
+      - name: Formatting
+        run: npm run format:check
+      - name: Syntax
+        run: npm --prefix backend run check:syntax
+      - name: Tests
+        run: npm test
