@@ -132,7 +132,11 @@ function TeamDialog({ team, onOpenChange }: { team: Team | null; onOpenChange: (
                 legend="Agents"
                 items={users.data
                   ?.filter((u) => u.role === 'agent')
-                  .map((u) => ({ id: u.id, name: u.username, label: u.username }))}
+                  .map((u) => ({
+                    id: u.id,
+                    name: u.username,
+                    label: u.status === 'inactive' ? `${u.username} (inactive)` : u.username,
+                  }))}
                 selected={members}
                 onChange={setMembers}
                 loading={users.isPending}

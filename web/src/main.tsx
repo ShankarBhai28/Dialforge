@@ -5,6 +5,7 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@ta
 import { Toaster, toast } from 'sonner';
 import { ApiError } from '@/lib/api';
 import { meKey } from '@/features/auth/auth';
+import { stopRealtime } from '@/lib/realtime';
 import { routes } from '@/app/routes';
 import './index.css';
 
@@ -12,6 +13,7 @@ import './index.css';
 // every protected screen back to the login page.
 function onError(err: Error) {
   if (err instanceof ApiError && err.status === 401) {
+    stopRealtime(); // the session is gone; don't keep reconnecting /ws
     queryClient.setQueryData(meKey, null);
   }
 }

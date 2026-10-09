@@ -1,14 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { get, post } from '@/lib/api';
+import { get, post, put } from '@/lib/api';
 
 // GET /admin/users never selects password_hash, so there is nothing to hide here.
 export type User = {
   id: number;
   username: string;
   role: 'agent' | 'admin' | string;
+  /** inactive = can't log in (users are never deleted: calls and history point at them) */
+  status: 'active' | 'inactive';
   created_at: string;
+  extension_id: number | null;
   extension_name: string | null;
 };
+
+export type UserUpdate = { role: string; extensionId: number | null; status: 'active' | 'inactive' };
 
 // GET /admin/extensions (the server deliberately leaves out sip_password).
 export type Extension = { id: number; name: string; label: string | null };
@@ -35,5 +40,24 @@ export function useCreateUser() {
     mutationFn: (v: NewUser) => post<{ id: number; username: string; role: string }>('/admin/users', v),
     meta: { errorInline: true },
     onSuccess: () => qc.invalidateQueries({ queryKey: userKeys.all }),
+  });
+}
+
+/** Role / extension / active. Changing role or status ends that user's open sessions. */
+export function useUpdateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: UserUpdate & { id: number }) => put(`/admin/users/${id}`, body),
+    meta: { errorInline: true },
+    onSuccess: () => qc.invalidateQueries({ queryKey: userKeys.all }),
+  });
+}
+
+/** Admin sets a new password; the user is logged out everywhere. */
+export function useResetPassword() {
+  return useMutation({
+    mutationFn: ({ id, password }: { id: number; password: string }) =>
+      post(`/admin/users/${id}/password`, { password }),
+    meta: { errorInline: true },
   });
 }

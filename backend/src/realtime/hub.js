@@ -59,8 +59,18 @@ function publish(type, data, { toUserId = null } = {}) {
   }
 }
 
+/** Closes a user's live connections (their access was just revoked). */
+function disconnectUser(userId) {
+  for (const client of clients) {
+    if (client.user.id === Number(userId)) {
+      client.ws.close(4001, 'session ended');
+      clients.delete(client);
+    }
+  }
+}
+
 function connectedCount() {
   return clients.size;
 }
 
-module.exports = { attach, publish, connectedCount };
+module.exports = { attach, publish, disconnectUser, connectedCount };

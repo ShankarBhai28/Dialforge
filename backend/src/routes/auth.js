@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const pool = require('../../db');
 const { closeOpenStatus, syncQueueMembership } = require('../services/agents');
 const { releasePreviewLocks } = require('../services/preview');
+const { sessionUser } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -21,6 +22,9 @@ router.post('/auth/login', async (req, res) => {
   if (!user || !(await bcrypt.compare(password, user.password_hash))) {
     return res.status(401).json({ error: 'invalid username or password' });
   }
+  if (user.status === 'inactive') {
+    return res.status(403).json({ error: 'this account is disabled - ask your admin' });
+  }
 
   req.session.user = {
     id: user.id,
@@ -28,6 +32,8 @@ router.post('/auth/login', async (req, res) => {
     role: user.role,
     extensionId: user.extension_id,
     extensionName: user.extension_name,
+    // Sessions started before an admin revokes this user's access end (services/sessions.js).
+    loginAt: Date.now(),
   };
 
   // No auto-Available here anymore - an agent must pick a queue first
@@ -45,8 +51,9 @@ router.post('/auth/logout', async (req, res) => {
 });
 
 router.get('/auth/me', (req, res) => {
-  if (!req.session.user) return res.status(401).json({ error: 'not logged in' });
-  res.json(req.session.user);
+  const user = sessionUser(req);
+  if (!user) return res.status(401).json({ error: 'not logged in' });
+  res.json(user);
 });
 
 module.exports = router;
