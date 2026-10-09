@@ -1,8 +1,14 @@
 {
   "name": "dialforge-backend",
   "version": "1.0.0",
-  "description": "DialForge Phase 3 - backend API, MySQL, click-to-call via ARI",
+  "description": "DialForge backend - REST API, ARI/AMI call control, predictive dialer engine",
   "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dialer": "node dialer-engine.js",
+    "test": "node --test --test-force-exit \"tests/*.test.js\"",
+    "check:syntax": "node -e \"for (const f of require('fs').readdirSync('.').filter((f) => f.endsWith('.js'))) require('child_process').execFileSync(process.execPath, ['--check', f], { stdio: 'inherit' })\""
+  },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.5",

@@ -1,0 +1,13 @@
+node_modules/
+package-lock.json
+**/dist/
+Credentials-Dialforge/
+ui-reference-images/
+# Legacy pages - replaced screen by screen by web/ (see docs/APP_REBUILD_PLAN.md); not reformatted.
+backend/public/
+phase0/
+ari-hello-world/
+# Docs and SQL are written by hand.
+*.md
+*.sql
+*.conf

@@ -1,0 +1,12 @@
+# Store and check out text files with LF line endings on every OS.
+# (Windows editors that write CRLF were mixing both styles in the repo.)
+* text=auto eol=lf
+
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.xlsx binary
+*.pem  binary
+*.wav  binary
