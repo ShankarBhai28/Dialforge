@@ -97,5 +97,19 @@ Set up: two agents logged in and **Available** (e.g. agent04 on 1003 + agent1001
 - [ ] Blind to a number and don't answer -> after ~30 s the customer goes back to the campaign's queue.
 - [ ] Customer hangs up during a conference -> everyone dropped, agents to ACW.
 
+## New agent screen (`/app/agent`) — before agents switch to it
+Same setup as above: two agents in **two different browsers** (or one normal + one incognito), your mobile as the customer. Each agent logs in at `https://dialforge.ddnsfree.com:3000/app`.
+- [ ] Login as an agent → **Connect your line** → enter the extension → Connect → the workbench opens (tiles, leads, dialpad). Refresh the page (F5) → it reconnects by itself.
+- [ ] Second agent tries the **same** extension while the first is connected → refused with "in use by …". (Use a different extension each.)
+- [ ] Status pill → **Available** → queue picker → pick the queue → pill turns green "Available - <queue>". Break → Lunch → amber "Lunch".
+- [ ] Click a lead → details + form open in the middle → **Call** → your mobile rings (the browser line is answered by itself) → panel says "Ringing customer…" → answer the mobile → **Live call** + timer.
+- [ ] In the call: **Mute** (red warning; mobile can't hear you) → Unmute. **Hold** → mobile hears music → Resume. **Keypad** → tones heard.
+- [ ] Fill the form → **Save Form** → "Form saved." Hang up → **Call outcome** dialog → pick one → it closes. Try **Callback** once → pick a time → it appears under Callbacks.
+- [ ] Dialer campaign (progressive), Auto Answer **off**: a dialer call rings → **Incoming call** popup with ringtone + the customer's number → Accept → the lead pops up with the form pre-filled → hang up → outcome → back to **Available** by itself after the wrap-up time.
+- [ ] Auto Answer **on**: no popup, the call connects straight away.
+- [ ] Transfer: **Warm → Agent → the other agent → Call first** → customer hears music → the other agent sees "Transfer offered by a colleague" → **Complete transfer** → you're dropped; the other agent gets the outcome dialog when it ends. Repeat once with **Blind → Queue** and once with **Conference → Number**.
+- [ ] Audio check from a **different network** (e.g. a mobile hotspot): the new screen uses the TURN server; the classic screen never did.
+- [ ] Anything that behaves differently from the classic agent screen → note it.
+
 ## After testing
 - [ ] Tell Claude what failed (step + what you saw) — fixes go in before the live trunk.

@@ -32,6 +32,12 @@ web/src/
   test/                    setup + helpers (fakeApi, renderAt)
 ```
 
+## Agent screen (features/agent)
+- `softphone/softphone.ts`: the phone line (JsSIP behind a small interface; `softphone/jssip.ts` is the real SIP stack, `softphone/fakes.ts` the test double). It knows nothing about leads.
+- `controller.ts`: the call workflow. It decides what each ring means: our own click-to-call leg, a dialer/queue call, or a colleague's transfer. It also handles screen pop, the outcome dialog, auto-Available after wrap-up, and preview leads. It is plain TypeScript, so `controller.test.ts` drives it with the fake line.
+- Components read both through `useController()` / `usePhone()` (`AgentProvider.tsx`).
+- Never call JsSIP from a component. Add a method to the softphone or the controller, plus a test.
+
 ## How to move a classic screen into the app (the Stage 3 recipe)
 
 1. **Types + data hooks**: `features/<area>/api.ts`. Define the response types to match exactly what the backend returns, then one `useQuery` hook per GET and one `useMutation` per change. Copy the pattern in `features/dashboard/api.ts`.

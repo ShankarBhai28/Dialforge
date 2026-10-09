@@ -1178,3 +1178,17 @@ Plan: `docs/APP_REBUILD_PLAN.md`. Branch `react-frontend`, cut from `predictive-
   - Only `dialforge-backend` restarted; dialer code was unchanged, so the dialer was left running.
   - `/health` ok, `/app/` 200, admin APIs 401 without login.
 
+## App rebuild — Stage 4: agent screen in the React app (2026-10-09, deployed, awaiting real-call test)
+- `/app/agent`: connect line (auto-reconnect after refresh) → status menu, tiles, leads/callbacks, workspace (lead details + campaign form pre-filled from lead data), dialpad + call history, in-call panel (mute / hold / keypad / transfer / conference / consult controls), incoming-call popup with ringtone and title flash, queue picker, outcome dialog with callback scheduling.
+- Design: a **softphone** module (JsSIP wrapped, testable through a UA factory) plus one **call controller** porting the classic page's workflow. See FRONTEND.md "Agent screen".
+- Found while porting:
+  - The classic page put `pcConfig` in the JsSIP **UA** config, which JsSIP ignores, so its softphone never used STUN/TURN; it answered with `iceServers: []`. The new one passes ICE servers to each `answer()`.
+  - The TURN username and password were hardcoded in `agent.html`, so they are in git. The new screen gets them from `.env` through `GET /agent/webrtc-config`. Added `SIP_DOMAIN`, `WEBRTC_WS_URL`, `STUN_URLS`, `TURN_URLS`, `TURN_USERNAME` and `TURN_PASSWORD` to the server `.env`; backup at `~/backups/pre-webrtc-env-20261009-102616/env.bak`. Rotation is a follow-up.
+  - `/agent/extension-credentials` gave any agent any extension's SIP password. It now returns 409 when another agent holds that extension in an open session **and** it is registered in Asterisk, so a stale session doesn't lock it.
+- A bug caught by the new UI test before release: "remember the extension" ran in the connect screen, which unmounts on registration, so it never ran. It was moved to the parent.
+- Tests: 40 backend, 119 web (softphone 5, controller 12 call-flow cases, agent screen 5).
+- Deploy:
+  - `scripts/deploy-dev.sh`, backup `~/backups/pre-deploy-20261009-155623/`. The backend was restarted; the dialer was untouched.
+  - Server checks: `webrtc-config` resolves correctly (TURN credential masked), the new routes return 401 without login, `/app/agent` → 200.
+- **Not yet done:** real calls. The classic `/agent.html` remains what agents use until the checklist section "New agent screen" passes.
+
