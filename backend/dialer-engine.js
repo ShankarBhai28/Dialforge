@@ -26,14 +26,14 @@ const TRUNK_CALLER_ID = process.env.TRUNK_CALLER_ID || '8065098690';
 // Set DIALER_MAX_TRUNK_CHANNELS in .env to the provider's real number.
 const MAX_TRUNK_CHANNELS = Number(process.env.DIALER_MAX_TRUNK_CHANNELS || 4);
 const PACE_MS = 1000;
-const MAX_NEW_CALLS_PER_TICK = 5;  // smooths bursts (e.g. 10 agents freeing at once)
+const MAX_NEW_CALLS_PER_TICK = 5; // smooths bursts (e.g. 10 agents freeing at once)
 let ariReady = false;
 
 const TICK_MS = 5000;
-const MIN_HOPPER = 20;        // always keep at least this many leads ready
-const MAX_HOPPER = 500;       // never buffer more than this per campaign
-const LEADS_PER_AGENT = 10;   // buffer ~10 dials' worth per idle agent line
-const STALE_LOCK_MIN = 10;    // a locked row older than this goes back to ready
+const MIN_HOPPER = 20; // always keep at least this many leads ready
+const MAX_HOPPER = 500; // never buffer more than this per campaign
+const LEADS_PER_AGENT = 10; // buffer ~10 dials' worth per idle agent line
+const STALE_LOCK_MIN = 10; // a locked row older than this goes back to ready
 const ENGINE_ID = `engine-${process.pid}`;
 
 const log = (...args) => console.log(new Date().toISOString(), ...args);
@@ -72,7 +72,7 @@ async function countIdleAgents(queueId) {
          WHERE (c.from_extension = asl.extension_name OR c.transfer_ext = asl.extension_name) AND c.end_time IS NULL
            AND c.start_time > NOW() - INTERVAL 3 HOUR
        )`,
-    [queueId]
+    [queueId],
   );
   return row.n;
 }
@@ -82,7 +82,7 @@ async function attemptCounts(campaignId) {
     `SELECT SUM(status IN ('dialing', 'answered')) AS in_flight,
             SUM(status IN ('dialing', 'answered', 'connected')) AS active
      FROM dial_attempts WHERE campaign_id = ? AND status <> 'ended'`,
-    [campaignId]
+    [campaignId],
   );
   return { inFlight: Number(row.in_flight || 0), active: Number(row.active || 0) };
 }
@@ -94,7 +94,8 @@ async function trunkChannelsInUse() {
 
 async function hopperCounts(campaignId) {
   const [rows] = await pool.query(
-    'SELECT status, COUNT(*) AS n FROM dial_hopper WHERE campaign_id = ? GROUP BY status', [campaignId]
+    'SELECT status, COUNT(*) AS n FROM dial_hopper WHERE campaign_id = ? GROUP BY status',
+    [campaignId],
   );
   const get = (s) => (rows.find((r) => r.status === s) || { n: 0 }).n;
   return { ready: get('ready'), locked: get('locked') };
@@ -113,7 +114,7 @@ async function cleanHopper(c) {
   await pool.query(
     `UPDATE dial_hopper SET status = 'ready', locked_at = NULL, locked_by = NULL
      WHERE campaign_id = ? AND status = 'locked' AND locked_at < NOW() - INTERVAL ? MINUTE`,
-    [c.id, STALE_LOCK_MIN]
+    [c.id, STALE_LOCK_MIN],
   );
   const [stale] = await pool.query(
     `DELETE h FROM dial_hopper h
@@ -125,12 +126,12 @@ async function cleanHopper(c) {
        OR l.attempts >= ? OR (ls.id IS NOT NULL AND ls.is_active = 0)
        OR ${LEAD_HAS_OPEN_ATTEMPT}
      )`,
-    [c.id, c.max_attempts]
+    [c.id, c.max_attempts],
   );
   const [dnc] = await pool.query(
     `DELETE h FROM dial_hopper h JOIN dnc_numbers d ON d.tenant_id = 1 AND d.phone = h.phone
      WHERE h.campaign_id = ? AND h.status = 'ready'`,
-    [c.id]
+    [c.id],
   );
   const removed = stale.affectedRows + dnc.affectedRows;
   if (removed) log(`campaign ${c.id}: removed ${removed} no-longer-dialable lead(s) from hopper`);
@@ -159,7 +160,7 @@ async function fillHopper(c, idleAgents, counts) {
        AND NOT ${LEAD_HAS_OPEN_ATTEMPT}
      ORDER BY (cb.id IS NOT NULL) DESC, list_priority DESC, l.priority DESC, l.attempts ASC, l.id ASC
      LIMIT ?`,
-    [c.id, c.max_attempts, need * 2]
+    [c.id, c.max_attempts, need * 2],
   );
   if (candidates.length === 0) return 0;
 
@@ -176,8 +177,17 @@ async function fillHopper(c, idleAgents, counts) {
     // mode can guarantee. Auto-dial modes leave it on the agent's
     // My Callbacks list instead of handing it to whoever is free.
     if (lead.callback_user_id && c.dial_mode !== 'preview') continue;
-    rows.push([c.id, lead.id, lead.list_id, phone, lead.callback_id ? 1 : 0, lead.list_priority,
-      lead.priority, lead.attempts, lead.callback_user_id || null]);
+    rows.push([
+      c.id,
+      lead.id,
+      lead.list_id,
+      phone,
+      lead.callback_id ? 1 : 0,
+      lead.list_priority,
+      lead.priority,
+      lead.attempts,
+      lead.callback_user_id || null,
+    ]);
   }
   if (rows.length === 0) return 0;
   // INSERT IGNORE: the UNIQUE(lead_id) guard wins over any race.
@@ -185,7 +195,7 @@ async function fillHopper(c, idleAgents, counts) {
     `INSERT IGNORE INTO dial_hopper
        (campaign_id, lead_id, list_id, phone, is_callback, list_priority, lead_priority, attempts, reserved_user_id)
      VALUES ?`,
-    [rows]
+    [rows],
   );
   return result.affectedRows;
 }
@@ -198,14 +208,14 @@ async function fillHopper(c, idleAgents, counts) {
 // abandon % goes over the campaign's target and slowly raised while it
 // stays well below. The result is always kept between 1.0 and the
 // campaign's max_dial_ratio.
-const ANSWER_WINDOW_MIN = 15;     // answer rate measured over the last 15 min
-const ABANDON_WINDOW_MIN = 30;    // abandon % over the last 30 min
+const ANSWER_WINDOW_MIN = 15; // answer rate measured over the last 15 min
+const ABANDON_WINDOW_MIN = 30; // abandon % over the last 30 min
 const MIN_ATTEMPTS_FOR_RATE = 20; // fewer than this -> not enough data, use the starting ratio
 const MIN_ANSWERED_FOR_ABANDON = 10;
-const ADJUST_EVERY_MS = 30000;    // re-tune at most every 30 s
+const ADJUST_EVERY_MS = 30000; // re-tune at most every 30 s
 const ADJUST_MIN = 0.3;
-const ADJUST_MAX = 1.0;           // never dial more than 1/answer_rate
-const predictive = new Map();     // campaignId -> { ratio, answerRate, abandonPct, adjust, adjustedAt, note }
+const ADJUST_MAX = 1.0; // never dial more than 1/answer_rate
+const predictive = new Map(); // campaignId -> { ratio, answerRate, abandonPct, adjust, adjustedAt, note }
 
 async function campaignRates(campaignId) {
   const [[r]] = await pool.query(
@@ -215,12 +225,20 @@ async function campaignRates(campaignId) {
        SUM(started_at > NOW() - INTERVAL ? MINUTE AND answered_at IS NOT NULL AND result IS NOT NULL) AS answered_long,
        SUM(started_at > NOW() - INTERVAL ? MINUTE AND result IN ('abandoned', 'customer_hangup')) AS abandoned
      FROM dial_attempts WHERE campaign_id = ? AND started_at > NOW() - INTERVAL ? MINUTE`,
-    [ANSWER_WINDOW_MIN, ANSWER_WINDOW_MIN, ABANDON_WINDOW_MIN, ABANDON_WINDOW_MIN, campaignId,
-      Math.max(ANSWER_WINDOW_MIN, ABANDON_WINDOW_MIN)]
+    [
+      ANSWER_WINDOW_MIN,
+      ANSWER_WINDOW_MIN,
+      ABANDON_WINDOW_MIN,
+      ABANDON_WINDOW_MIN,
+      campaignId,
+      Math.max(ANSWER_WINDOW_MIN, ABANDON_WINDOW_MIN),
+    ],
   );
   return {
-    attempts: Number(r.attempts || 0), answered: Number(r.answered || 0),
-    answeredLong: Number(r.answered_long || 0), abandoned: Number(r.abandoned || 0),
+    attempts: Number(r.attempts || 0),
+    answered: Number(r.answered || 0),
+    answeredLong: Number(r.answered_long || 0),
+    abandoned: Number(r.abandoned || 0),
   };
 }
 
@@ -232,7 +250,8 @@ function computePredictive(c, rates, prev, now) {
   let adjust = prev ? prev.adjust : ADJUST_MAX;
   let adjustedAt = prev ? prev.adjustedAt : 0;
   const answerRate = rates.attempts >= MIN_ATTEMPTS_FOR_RATE ? rates.answered / rates.attempts : null;
-  const abandonPct = rates.answeredLong >= MIN_ANSWERED_FOR_ABANDON ? (100 * rates.abandoned) / rates.answeredLong : null;
+  const abandonPct =
+    rates.answeredLong >= MIN_ANSWERED_FOR_ABANDON ? (100 * rates.abandoned) / rates.answeredLong : null;
   let note;
 
   if (abandonPct !== null && now - adjustedAt >= ADJUST_EVERY_MS) {
@@ -243,7 +262,7 @@ function computePredictive(c, rates, prev, now) {
 
   let ratio;
   if (abandonPct !== null && abandonPct > 2 * target) {
-    ratio = 1;  // safety brake: way over target -> plain progressive until it recovers
+    ratio = 1; // safety brake: way over target -> plain progressive until it recovers
     note = `abandon ${abandonPct.toFixed(1)}% is over 2x target - holding at 1.0`;
   } else if (answerRate === null) {
     ratio = start;
@@ -260,7 +279,10 @@ function computePredictive(c, rates, prev, now) {
 }
 
 async function updatePredictive(c) {
-  if (c.dial_mode !== 'predictive') { predictive.delete(c.id); return null; }
+  if (c.dial_mode !== 'predictive') {
+    predictive.delete(c.id);
+    return null;
+  }
   let prev = predictive.get(c.id);
   if (!prev) {
     // Engine restarted: resume the learned adjust factor.
@@ -285,12 +307,10 @@ function effectiveRatio(c) {
 // or waiting for an agent, within the campaign's and the trunk's limits.
 function callsToPlace(c, idle, attempts, trunkInUse, ratio) {
   const wanted = Math.floor(idle * ratio) - attempts.inFlight;
-  return Math.max(0, Math.min(
-    wanted,
-    c.max_channels - attempts.active,
-    MAX_TRUNK_CHANNELS - trunkInUse,
-    MAX_NEW_CALLS_PER_TICK,
-  ));
+  return Math.max(
+    0,
+    Math.min(wanted, c.max_channels - attempts.active, MAX_TRUNK_CHANNELS - trunkInUse, MAX_NEW_CALLS_PER_TICK),
+  );
 }
 
 async function writeStatus(campaignId, s) {
@@ -304,12 +324,21 @@ async function writeStatus(campaignId, s) {
        active_calls = VALUES(active_calls), note = VALUES(note), current_ratio = VALUES(current_ratio),
        answer_rate = VALUES(answer_rate), abandon_pct = VALUES(abandon_pct),
        ratio_adjust = COALESCE(VALUES(ratio_adjust), ratio_adjust), pacing_note = VALUES(pacing_note), last_tick_at = NOW()`,
-    [campaignId, s.ready || 0, s.locked || 0, s.idle || 0, s.wouldDial || 0, s.inFlight || 0, s.active || 0, s.note || null,
+    [
+      campaignId,
+      s.ready || 0,
+      s.locked || 0,
+      s.idle || 0,
+      s.wouldDial || 0,
+      s.inFlight || 0,
+      s.active || 0,
+      s.note || null,
       s.ratio == null ? null : s.ratio,
       pv.answerRate == null ? null : Math.round(pv.answerRate * 10000) / 100,
       pv.abandonPct == null ? null : Math.round(pv.abandonPct * 100) / 100,
       pv.adjust == null ? null : pv.adjust,
-      pv.note || null]
+      pv.note || null,
+    ],
   );
 }
 
@@ -330,20 +359,28 @@ async function processCampaign(c) {
   else if (c.dial_mode === 'manual') note = 'manual mode - the dialer is not used';
   else if (!c.queue_id) note = 'campaign has no queue';
   else if (c.dialer_state === 'paused') note = 'paused by admin';
-  else if (!isWithinCallWindow(c)) note = `outside calling hours (${c.call_window_start.slice(0, 5)}-${c.call_window_end.slice(0, 5)} ${c.timezone})`;
+  else if (!isWithinCallWindow(c))
+    note = `outside calling hours (${c.call_window_start.slice(0, 5)}-${c.call_window_end.slice(0, 5)} ${c.timezone})`;
   else added = await fillHopper(c, idle, await hopperCounts(c.id));
 
   const counts = await hopperCounts(c.id);
-  if (!note && counts.ready === 0) note = 'no dialable leads - check active lists and retry/callback times, or recycle a list (Leads -> Recycle)';
+  if (!note && counts.ready === 0)
+    note = 'no dialable leads - check active lists and retry/callback times, or recycle a list (Leads -> Recycle)';
   if (!note && isAutoDial(c) && !ariReady) note = 'not connected to Asterisk (ARI) - cannot dial';
   if (added) log(`campaign ${c.id}: added ${added} lead(s) to hopper (ready=${counts.ready})`);
   const attempts = await attemptCounts(c.id);
   const pv = await updatePredictive(c);
   const ratio = isAutoDial(c) ? effectiveRatio(c) : null;
   await writeStatus(c.id, {
-    ready: counts.ready, locked: counts.locked, idle, note, ratio, predictive: pv,
+    ready: counts.ready,
+    locked: counts.locked,
+    idle,
+    note,
+    ratio,
+    predictive: pv,
     wouldDial: !note && isAutoDial(c) ? callsToPlace(c, idle, attempts, await trunkChannelsInUse(), ratio) : 0,
-    inFlight: attempts.inFlight, active: attempts.active,
+    inFlight: attempts.inFlight,
+    active: attempts.active,
   });
 }
 
@@ -351,10 +388,22 @@ const isAutoDial = (c) => c.dial_mode === 'progressive' || c.dial_mode === 'pred
 
 // --- Placing calls ---
 const HANGUP_CAUSE_RESULT = {
-  17: 'busy', 21: 'busy',                      // user busy, call rejected
-  18: 'no_answer', 19: 'no_answer', 16: 'no_answer', 0: 'no_answer',
-  1: 'invalid', 3: 'invalid', 22: 'invalid', 28: 'invalid',  // unallocated / no route / number changed / invalid format
-  34: 'congestion', 38: 'congestion', 41: 'congestion', 42: 'congestion', 44: 'congestion', 58: 'congestion',
+  17: 'busy',
+  21: 'busy', // user busy, call rejected
+  18: 'no_answer',
+  19: 'no_answer',
+  16: 'no_answer',
+  0: 'no_answer',
+  1: 'invalid',
+  3: 'invalid',
+  22: 'invalid',
+  28: 'invalid', // unallocated / no route / number changed / invalid format
+  34: 'congestion',
+  38: 'congestion',
+  41: 'congestion',
+  42: 'congestion',
+  44: 'congestion',
+  58: 'congestion',
 };
 
 // Our own extensions (test leads like 1002) are dialed directly, everything
@@ -378,14 +427,17 @@ async function claimLeadForDialing(c, ratio) {
          AND NOT ${LEAD_HAS_OPEN_ATTEMPT}
        ORDER BY h.is_callback DESC, h.list_priority DESC, h.lead_priority DESC, h.attempts, h.lead_id
        LIMIT 1 FOR UPDATE SKIP LOCKED`,
-      [c.id]
+      [c.id],
     );
-    if (!rows[0]) { await conn.rollback(); return null; }
+    if (!rows[0]) {
+      await conn.rollback();
+      return null;
+    }
     const row = rows[0];
     await conn.query('DELETE FROM dial_hopper WHERE id = ?', [row.id]);
     const [ins] = await conn.query(
       'INSERT INTO dial_attempts (tenant_id, campaign_id, lead_id, phone, ratio_at_dial) VALUES (1, ?, ?, ?, ?)',
-      [c.id, row.lead_id, row.phone, ratio]
+      [c.id, row.lead_id, row.phone, ratio],
     );
     await conn.query('UPDATE leads SET attempts = attempts + 1, last_attempt_at = NOW() WHERE id = ?', [row.lead_id]);
     await conn.commit();
@@ -405,8 +457,13 @@ async function placeCall(c, ratio) {
   await pool.query('UPDATE dial_attempts SET channel_id = ? WHERE id = ?', [channelId, claimed.attemptId]);
   try {
     // Last-moment DNC check: the number may have been added since it was queued.
-    const [dnc] = await pool.query('SELECT 1 FROM dnc_numbers WHERE tenant_id = 1 AND phone = ?', [normalizePhone(claimed.phone)]);
-    if (dnc.length) { await finishAttempt(pool, claimed.attemptId, 'failed', null); return true; }
+    const [dnc] = await pool.query('SELECT 1 FROM dnc_numbers WHERE tenant_id = 1 AND phone = ?', [
+      normalizePhone(claimed.phone),
+    ]);
+    if (dnc.length) {
+      await finishAttempt(pool, claimed.attemptId, 'failed', null);
+      return true;
+    }
     await ari.originate({
       endpoint: await endpointFor(claimed.phone),
       app: DIALER_APP,
@@ -431,7 +488,7 @@ async function paceTick() {
     const [campaigns] = await pool.query(
       `SELECT c.* FROM campaigns c
        WHERE c.dialer_state = 'running' AND c.status = 'active' AND c.queue_id IS NOT NULL
-         AND c.dial_mode IN ('progressive', 'predictive')`
+         AND c.dial_mode IN ('progressive', 'predictive')`,
     );
     for (const c of campaigns) {
       if (!isWithinCallWindow(c)) continue;
@@ -440,7 +497,7 @@ async function paceTick() {
       const ratio = effectiveRatio(c);
       const n = callsToPlace(c, idle, await attemptCounts(c.id), await trunkChannelsInUse(), ratio);
       for (let i = 0; i < n; i++) {
-        if (!(await placeCall(c, ratio))) break;  // hopper empty
+        if (!(await placeCall(c, ratio))) break; // hopper empty
       }
     }
   } catch (err) {
@@ -460,17 +517,21 @@ async function onAriEvent(event) {
         `SELECT a.*, c.abandon_wait_sec, c.amd_enabled, c.auto_answer, q.asterisk_name, l.name AS lead_name
          FROM dial_attempts a JOIN campaigns c ON c.id = a.campaign_id JOIN queues q ON q.id = c.queue_id
          LEFT JOIN leads l ON l.id = a.lead_id
-         WHERE a.id = ?`, [attemptId]
+         WHERE a.id = ?`,
+        [attemptId],
       );
-      if (!a) { await ari.hangup(event.channel.id).catch(() => {}); return; }
+      if (!a) {
+        await ari.hangup(event.channel.id).catch(() => {});
+        return;
+      }
       const [call] = await pool.query(
         `INSERT INTO calls (tenant_id, lead_id, direction, to_number, campaign_id, auto_answer, answer_time, channel_name, dial_attempt_id)
          VALUES (1, ?, 'outbound', ?, ?, ?, NOW(), ?, ?)`,
-        [a.lead_id, a.phone, a.campaign_id, a.auto_answer, event.channel.name, attemptId]
+        [a.lead_id, a.phone, a.campaign_id, a.auto_answer, event.channel.name, attemptId],
       );
       await pool.query(
         "UPDATE dial_attempts SET status = 'answered', answered_at = NOW(), channel_name = ?, call_id = ? WHERE id = ?",
-        [event.channel.name, call.insertId, attemptId]
+        [event.channel.name, call.insertId, attemptId],
       );
       await ari.setChannelVar(event.channel.id, 'QUEUENAME', a.asterisk_name);
       await ari.setChannelVar(event.channel.id, 'DIALER_ATTEMPT_ID', String(attemptId));
@@ -479,7 +540,9 @@ async function onAriEvent(event) {
       // What the agent's phone shows when the queue rings it: the customer
       // (the channel still carries our own outbound caller ID otherwise).
       await ari.setChannelVar(event.channel.id, 'CALLERID(num)', a.phone).catch(() => {});
-      await ari.setChannelVar(event.channel.id, 'CALLERID(name)', (a.lead_name || '').replace(/["<>]/g, '').slice(0, 40)).catch(() => {});
+      await ari
+        .setChannelVar(event.channel.id, 'CALLERID(name)', (a.lead_name || '').replace(/["<>]/g, '').slice(0, 40))
+        .catch(() => {});
       await ari.continueInDialplan(event.channel.id, { context: 'dialer-answered', extension: 's', priority: 1 });
       log(`attempt ${attemptId}: answered -> queue ${a.asterisk_name}`);
     } else if (event.type === 'ChannelDestroyed' && event.channel.id.startsWith('dfd-')) {
@@ -508,10 +571,10 @@ async function sweepStuckAttempts() {
        (a.status = 'dialing' AND a.started_at < NOW() - INTERVAL (c.ring_timeout_sec + 30) SECOND)
        OR (a.status = 'answered' AND a.answered_at < NOW() - INTERVAL (c.abandon_wait_sec + 60) SECOND)
        OR (a.status = 'connected' AND a.connected_at < NOW() - INTERVAL 4 HOUR)
-     )`
+     )`,
   );
   for (const a of rows) {
-    if (a.channel_id && (await ari.getChannel(a.channel_id).catch(() => 'unknown'))) continue;  // still up
+    if (a.channel_id && (await ari.getChannel(a.channel_id).catch(() => 'unknown'))) continue; // still up
     const result = { dialing: 'no_answer', answered: 'customer_hangup', connected: 'connected' }[a.status];
     if (a.status === 'connected') {
       await pool.query("UPDATE dial_attempts SET status = 'ended', ended_at = NOW() WHERE id = ?", [a.id]);
@@ -524,7 +587,7 @@ async function sweepStuckAttempts() {
 
 let ticking = false;
 async function tick() {
-  if (ticking) return;  // never overlap two ticks if one runs long
+  if (ticking) return; // never overlap two ticks if one runs long
   ticking = true;
   try {
     await writeStatus(0, { note: ENGINE_ID });
@@ -535,7 +598,7 @@ async function tick() {
       `SELECT * FROM campaigns
        WHERE dialer_state IN ('running', 'paused')
           OR id IN (SELECT DISTINCT campaign_id FROM dial_hopper)
-          OR id IN (SELECT campaign_id FROM dialer_status WHERE campaign_id > 0)`
+          OR id IN (SELECT campaign_id FROM dialer_status WHERE campaign_id > 0)`,
     );
     for (const c of campaigns) {
       try {
@@ -553,8 +616,12 @@ async function tick() {
 
 async function main() {
   await acquireSingleInstanceLock();
-  log(`dialer engine started (${ENGINE_ID}), tick every ${TICK_MS / 1000}s, pacing every ${PACE_MS / 1000}s, trunk cap ${MAX_TRUNK_CHANNELS}`);
-  ari.connectEvents(DIALER_APP, onAriEvent, (up) => { ariReady = up; });
+  log(
+    `dialer engine started (${ENGINE_ID}), tick every ${TICK_MS / 1000}s, pacing every ${PACE_MS / 1000}s, trunk cap ${MAX_TRUNK_CHANNELS}`,
+  );
+  ari.connectEvents(DIALER_APP, onAriEvent, (up) => {
+    ariReady = up;
+  });
   await tick();
   const timer = setInterval(tick, TICK_MS);
   const paceTimer = setInterval(paceTick, PACE_MS);

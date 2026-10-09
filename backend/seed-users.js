@@ -30,7 +30,7 @@ async function seed() {
     const hash = await bcrypt.hash(acc.password, 10);
     await pool.query(
       'INSERT INTO users (tenant_id, username, password_hash, role, extension_id) VALUES (1, ?, ?, ?, ?)',
-      [acc.username, hash, acc.role, acc.extensionId]
+      [acc.username, hash, acc.role, acc.extensionId],
     );
     console.log(`Created ${acc.role} account: ${acc.username}`);
   }

@@ -27,9 +27,11 @@ function connect() {
   socket.setEncoding('utf8');
 
   socket.on('connect', () => {
-    sendAction('Login', { Username: AMI_USER, Secret: AMI_PASS }).then(() => {
-      loggedIn = true;
-    }).catch((err) => console.error('[AMI] login failed:', err.message));
+    sendAction('Login', { Username: AMI_USER, Secret: AMI_PASS })
+      .then(() => {
+        loggedIn = true;
+      })
+      .catch((err) => console.error('[AMI] login failed:', err.message));
   });
 
   socket.on('data', (chunk) => {
@@ -123,7 +125,10 @@ function redirect(channel, { context, exten, priority = 1 }, extra) {
   const params = { Channel: channel, Context: context, Exten: exten, Priority: priority };
   if (extra) {
     Object.assign(params, {
-      ExtraChannel: extra.channel, ExtraContext: extra.context, ExtraExten: extra.exten, ExtraPriority: extra.priority || 1,
+      ExtraChannel: extra.channel,
+      ExtraContext: extra.context,
+      ExtraExten: extra.exten,
+      ExtraPriority: extra.priority || 1,
     });
   }
   return action('Redirect', params);

@@ -22,7 +22,7 @@ let lastLogTime = Date.now();
 // regardless of the actual audio bandwidth; Asterisk's default ptime is
 // 20ms, so 48000 * 0.020 = 960 timestamp units per packet.
 const OPUS_CLOCK_RATE = 48000;
-const TIMESTAMP_STEP = 960;
+const TIMESTAMP_STEP = (OPUS_CLOCK_RATE * 20) / 1000; // 960
 const echoSsrc = Math.floor(Math.random() * 0xffffffff);
 let echoSeq = Math.floor(Math.random() * 0xffff);
 let echoTimestamp = Math.floor(Math.random() * 0xffffffff);
@@ -48,7 +48,7 @@ udpServer.on('message', (msg, rinfo) => {
   const now = Date.now();
   if (now - lastLogTime > 2000) {
     console.log(
-      `[audio] ${packetCount} packets received so far, ${byteCount} bytes total (last packet ${msg.length} bytes from ${rinfo.address}:${rinfo.port})`
+      `[audio] ${packetCount} packets received so far, ${byteCount} bytes total (last packet ${msg.length} bytes from ${rinfo.address}:${rinfo.port})`,
     );
     lastLogTime = now;
   }
@@ -99,7 +99,8 @@ ari.connectEvents(APP_NAME, async (event) => {
       // Prove the return-audio path using ARI's own play mechanism instead
       // of raw RTP - this is what the real bot will use for TTS playback.
       setTimeout(() => {
-        ari.playToBridge(bridge.id, 'sound:hello-world')
+        ari
+          .playToBridge(bridge.id, 'sound:hello-world')
           .then(() => console.log(`[play] triggered on bridge=${bridge.id}`))
           .catch((err) => console.error('[play] error:', err));
       }, 3000);

@@ -23,13 +23,15 @@
 const RING_TIMEOUT_SEC = 30;
 const ADOPT_TIMEOUT_MS = 6000;
 
-let d = null;  // dependencies from server.js (pool, ari, ami, helpers)
-const calls = new Map();         // callId -> state
-const channelCall = new Map();   // channelId -> callId (every channel we manage)
-const adopting = new Map();      // callId -> { cust, agent, resolve, reject, timer }
+let d = null; // dependencies from server.js (pool, ari, ami, helpers)
+const calls = new Map(); // callId -> state
+const channelCall = new Map(); // channelId -> callId (every channel we manage)
+const adopting = new Map(); // callId -> { cust, agent, resolve, reject, timer }
 let partySeq = 0;
 
-function init(deps) { d = deps; }
+function init(deps) {
+  d = deps;
+}
 
 // Queue events (AgentComplete etc.) must ignore calls we've taken over -
 // taking control breaks the Queue() bridge, which looks like a call end.
@@ -49,7 +51,7 @@ async function currentCallId(ext) {
   const [rows] = await d.pool.query(
     `SELECT id FROM calls WHERE from_extension = ? AND end_time IS NULL
        AND start_time > NOW() - INTERVAL 3 HOUR ORDER BY id DESC LIMIT 1`,
-    [ext]
+    [ext],
   );
   return rows[0] ? rows[0].id : null;
 }
@@ -82,7 +84,8 @@ async function takeControl(ext) {
   const callId = await currentCallId(ext);
   if (!callId) throw httpError(409, 'you are not on a call');
   const [[row]] = await d.pool.query(
-    'SELECT id, to_number, campaign_id, dial_attempt_id, channel_name, agent_channel FROM calls WHERE id = ?', [callId]
+    'SELECT id, to_number, campaign_id, dial_attempt_id, channel_name, agent_channel FROM calls WHERE id = ?',
+    [callId],
   );
 
   const c2c = d.activeCalls.get(callId);
@@ -92,13 +95,19 @@ async function takeControl(ext) {
     d.activeCalls.delete(callId);
     const ch = await d.ari.getChannel(c2c.destChannelId);
     return newState(callId, row, {
-      bridgeId: c2c.bridgeId, customer: c2c.destChannelId, customerName: ch ? ch.name : null,
-      agentChannel: c2c.agentChannelId, agentExt: ext,
+      bridgeId: c2c.bridgeId,
+      customer: c2c.destChannelId,
+      customerName: ch ? ch.name : null,
+      agentChannel: c2c.agentChannelId,
+      agentExt: ext,
     });
   }
 
   if (!row.channel_name || !row.agent_channel) {
-    throw httpError(409, 'this call can\'t be transferred (its channels are unknown - was it answered before the last restart?)');
+    throw httpError(
+      409,
+      "this call can't be transferred (its channels are unknown - was it answered before the last restart?)",
+    );
   }
   const ready = new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -109,12 +118,16 @@ async function takeControl(ext) {
   });
   try {
     await d.ami.redirect(
-      row.channel_name, { context: 'df-control', exten: `cus${callId}` },
-      { channel: row.agent_channel, context: 'df-control', exten: `agt${callId}` }
+      row.channel_name,
+      { context: 'df-control', exten: `cus${callId}` },
+      { channel: row.agent_channel, context: 'df-control', exten: `agt${callId}` },
     );
   } catch (err) {
     const a = adopting.get(callId);
-    if (a) { clearTimeout(a.timer); adopting.delete(callId); }
+    if (a) {
+      clearTimeout(a.timer);
+      adopting.delete(callId);
+    }
     throw httpError(502, 'could not take over the call: ' + err.message);
   }
   await d.logEvent(callId, 'control_taken', { by: ext });
@@ -125,8 +138,14 @@ async function onAdoptStart(event) {
   const callId = Number(event.args[1]);
   const leg = event.args[2];
   const a = adopting.get(callId);
-  if (!a) { await quiet(d.ari.hangup(event.channel.id)); return; }
-  if (leg === 'cust') { a.cust = event.channel.id; a.custName = event.channel.name; } else a.agent = event.channel.id;
+  if (!a) {
+    await quiet(d.ari.hangup(event.channel.id));
+    return;
+  }
+  if (leg === 'cust') {
+    a.cust = event.channel.id;
+    a.custName = event.channel.name;
+  } else a.agent = event.channel.id;
   if (!a.cust || !a.agent) return;
   clearTimeout(a.timer);
   adopting.delete(callId);
@@ -134,9 +153,15 @@ async function onAdoptStart(event) {
     const bridge = await d.ari.createBridge();
     await d.ari.addChannelToBridge(bridge.id, a.cust);
     await d.ari.addChannelToBridge(bridge.id, a.agent);
-    a.resolve(newState(callId, a.row, {
-      bridgeId: bridge.id, customer: a.cust, customerName: a.custName, agentChannel: a.agent, agentExt: a.ext,
-    }));
+    a.resolve(
+      newState(callId, a.row, {
+        bridgeId: bridge.id,
+        customer: a.cust,
+        customerName: a.custName,
+        agentChannel: a.agent,
+        agentExt: a.ext,
+      }),
+    );
   } catch (err) {
     a.reject(httpError(502, 'could not re-bridge the call: ' + err.message));
   }
@@ -148,8 +173,9 @@ async function resolveTarget(st, { targetType, target }, mode, me) {
   if (targetType === 'agent') {
     const agent = await agentByUserId(Number(target));
     if (!agent) throw httpError(404, 'that agent is not logged in');
-    if (agent.ext === me) throw httpError(400, 'you can\'t transfer to yourself');
-    if (!(await d.ari.isEndpointOnline(`PJSIP/${agent.ext}`))) throw httpError(409, `${agent.username}'s phone is not connected`);
+    if (agent.ext === me) throw httpError(400, "you can't transfer to yourself");
+    if (!(await d.ari.isEndpointOnline(`PJSIP/${agent.ext}`)))
+      throw httpError(409, `${agent.username}'s phone is not connected`);
     if (agent.busy) throw httpError(409, `${agent.username} is on another call`);
     return agentTarget(st, agent, agent.username);
   }
@@ -157,7 +183,8 @@ async function resolveTarget(st, { targetType, target }, mode, me) {
     const [[q]] = await d.pool.query(
       `SELECT q.id, q.name, q.asterisk_name, c.id AS campaign_id FROM queues q
        JOIN campaigns c ON c.queue_id = q.id
-       WHERE q.id = ? AND q.status = 'active' LIMIT 1`, [Number(target)]
+       WHERE q.id = ? AND q.status = 'active' LIMIT 1`,
+      [Number(target)],
     );
     if (!q) throw httpError(404, 'queue not found');
     if (mode === 'blind') return { kind: 'queue', queue: q, label: q.name };
@@ -180,7 +207,13 @@ async function resolveTarget(st, { targetType, target }, mode, me) {
 
 function agentTarget(st, agent, label) {
   // The receiving agent sees the customer's number as the caller.
-  return { kind: 'agent', ext: agent.ext, endpoint: `PJSIP/${agent.ext}`, callerId: `"Transfer" <${st.customerNumber || ''}>`, label };
+  return {
+    kind: 'agent',
+    ext: agent.ext,
+    endpoint: `PJSIP/${agent.ext}`,
+    callerId: `"Transfer" <${st.customerNumber || ''}>`,
+    label,
+  };
 }
 
 // Logged-in agents (an open, non-offline status row) and whether they're
@@ -194,7 +227,7 @@ async function listAgents(excludeExt) {
      WHERE asl.ended_at IS NULL AND asl.status <> 'offline' AND asl.extension_name IS NOT NULL
        AND u.role = 'agent' AND asl.extension_name <> ?
      ORDER BY u.username`,
-    [excludeExt || '']
+    [excludeExt || ''],
   );
   return rows.map((r) => ({ ...r, busy: !!Number(r.busy) }));
 }
@@ -206,13 +239,24 @@ async function agentByUserId(userId) {
 // --- Dialing a new party into the call ---
 async function dialParty(st, target, role) {
   const channelId = `dfx-${st.callId}-${++partySeq}`;
-  st.parties.set(channelId, { id: channelId, label: target.label, kind: target.kind, ext: target.ext || null, state: 'ringing', role });
+  st.parties.set(channelId, {
+    id: channelId,
+    label: target.label,
+    kind: target.kind,
+    ext: target.ext || null,
+    state: 'ringing',
+    role,
+  });
   channelCall.set(channelId, st.callId);
   if (target.ext) await d.pool.query('UPDATE calls SET transfer_ext = ? WHERE id = ?', [target.ext, st.callId]);
   try {
     await d.ari.originate({
-      endpoint: target.endpoint, app: d.APP_NAME, appArgs: `xfer,${st.callId}`,
-      callerId: target.callerId, timeout: RING_TIMEOUT_SEC, channelId,
+      endpoint: target.endpoint,
+      app: d.APP_NAME,
+      appArgs: `xfer,${st.callId}`,
+      callerId: target.callerId,
+      timeout: RING_TIMEOUT_SEC,
+      channelId,
     });
   } catch (err) {
     st.parties.delete(channelId);
@@ -260,7 +304,10 @@ async function onPartyStart(event) {
   const callId = Number(event.args[1]);
   const st = calls.get(callId);
   const p = st && st.parties.get(event.channel.id);
-  if (!p) { await quiet(d.ari.hangup(event.channel.id)); return; }
+  if (!p) {
+    await quiet(d.ari.hangup(event.channel.id));
+    return;
+  }
   p.state = 'up';
   await d.logEvent(callId, 'party_answered', { role: p.role, label: p.label });
   if (p.role === 'blind') {
@@ -271,7 +318,7 @@ async function onPartyStart(event) {
   } else {
     await stopRingback(st);
     await d.ari.addChannelToBridge(st.bridgeId, p.id);
-    if (p.role === 'conference') p.role = 'member';  // warm stays 'warm' until complete/merge
+    if (p.role === 'conference') p.role = 'member'; // warm stays 'warm' until complete/merge
   }
 }
 
@@ -393,20 +440,30 @@ async function dropPartyChannel(st, p, reason) {
 
 async function afterPartyGone(st, p, reason) {
   await d.logEvent(st.callId, 'party_left', { label: p.label, role: p.role, reason });
-  if (p.ext) await d.pool.query('UPDATE calls SET transfer_ext = NULL WHERE id = ? AND transfer_ext = ?', [st.callId, p.ext]);
+  if (p.ext)
+    await d.pool.query('UPDATE calls SET transfer_ext = NULL WHERE id = ? AND transfer_ext = ?', [st.callId, p.ext]);
   if (p.state === 'ringing') await stopRingback(st);
 
-  if (p.role === 'warm') { await unparkCustomer(st); return; }  // back to the customer
+  if (p.role === 'warm') {
+    await unparkCustomer(st);
+    return;
+  } // back to the customer
   if (p.role === 'blind') {
     // Nobody answered the blind transfer: put the customer back in the
     // campaign's own queue rather than leaving them on hold music.
     await quiet(d.ari.stopBridgeMoh(st.bridgeId));
     const [[q]] = await d.pool.query(
       `SELECT q.id, q.name, q.asterisk_name, c.id AS campaign_id FROM campaigns c JOIN queues q ON q.id = c.queue_id WHERE c.id = ?`,
-      [st.campaignId || 0]
+      [st.campaignId || 0],
     );
-    if (q && !st.agent) { await blindToQueue(st, q); return; }
-    if (!st.agent) { await endCall(st, 'transfer_failed'); return; }
+    if (q && !st.agent) {
+      await blindToQueue(st, q);
+      return;
+    }
+    if (!st.agent) {
+      await endCall(st, 'transfer_failed');
+      return;
+    }
     return;
   }
   if (p.kind === 'agent' && p.ext === st.ownerExt) await afterCallWork(p.ext);
@@ -443,13 +500,17 @@ async function promoteToController(st, p) {
   st.ownerExt = p.ext;
   const userId = await d.findAgentIdByExtension(p.ext);
   await d.pool.query('UPDATE calls SET from_extension = ?, transfer_ext = NULL WHERE id = ?', [p.ext, st.callId]);
-  if (st.attemptId) await d.pool.query('UPDATE dial_attempts SET agent_user_id = ? WHERE id = ?', [userId, st.attemptId]);
+  if (st.attemptId)
+    await d.pool.query('UPDATE dial_attempts SET agent_user_id = ? WHERE id = ?', [userId, st.attemptId]);
   await d.logEvent(st.callId, 'transferred', { to: p.ext });
 }
 
 async function blindToQueue(st, q) {
   await agentLeavesQuietly(st);
-  for (const p of st.parties.values()) { channelCall.delete(p.id); await quiet(d.ari.hangup(p.id)); }
+  for (const p of st.parties.values()) {
+    channelCall.delete(p.id);
+    await quiet(d.ari.hangup(p.id));
+  }
   calls.delete(st.callId);
   channelCall.delete(st.customer);
   if (st.holdBridgeId) await quiet(d.ari.removeChannelFromBridge(st.holdBridgeId, st.customer));
@@ -461,7 +522,7 @@ async function blindToQueue(st, q) {
   if (st.customerName) d.queueCallChannels.set(st.customerName, st.callId);
   await d.pool.query(
     'UPDATE calls SET from_extension = NULL, agent_channel = NULL, transfer_ext = NULL, campaign_id = ? WHERE id = ?',
-    [q.campaign_id, st.callId]
+    [q.campaign_id, st.callId],
   );
   await d.ari.setChannelVar(st.customer, 'QUEUENAME', q.asterisk_name);
   await d.ari.continueInDialplan(st.customer, { context: 'queue-dispatch', extension: 's', priority: 1 });
@@ -490,8 +551,14 @@ async function endCall(st, reason) {
   for (const c of channels) await quiet(d.ari.hangup(c));
   await quiet(d.ari.destroyBridge(st.bridgeId));
   if (st.holdBridgeId) await quiet(d.ari.destroyBridge(st.holdBridgeId));
-  await d.pool.query("UPDATE calls SET end_time = NOW(), disposition = 'ended', transfer_ext = NULL WHERE id = ? AND end_time IS NULL", [st.callId]);
-  if (st.attemptId) await d.pool.query("UPDATE dial_attempts SET status = 'ended', ended_at = COALESCE(ended_at, NOW()) WHERE id = ?", [st.attemptId]);
+  await d.pool.query(
+    "UPDATE calls SET end_time = NOW(), disposition = 'ended', transfer_ext = NULL WHERE id = ? AND end_time IS NULL",
+    [st.callId],
+  );
+  if (st.attemptId)
+    await d.pool.query("UPDATE dial_attempts SET status = 'ended', ended_at = COALESCE(ended_at, NOW()) WHERE id = ?", [
+      st.attemptId,
+    ]);
   await d.logEvent(st.callId, 'ended', { reason });
   for (const ext of agentExts) await afterCallWork(ext);
 }
@@ -508,12 +575,15 @@ async function onChannelGone(channelId) {
   channelCall.delete(channelId);
   const st = calls.get(callId);
   if (!st) return true;
-  if (channelId === st.customer) { await endCall(st, 'customer_hangup'); return true; }
+  if (channelId === st.customer) {
+    await endCall(st, 'customer_hangup');
+    return true;
+  }
   if (st.agent && channelId === st.agent.channelId) {
     const c = consultOf(st);
     if (c) {
       // Agent hung up during a warm transfer = complete it.
-      channelCall.set(channelId, callId);  // agentLeaves expects to remove it
+      channelCall.set(channelId, callId); // agentLeaves expects to remove it
       await stopRingback(st);
       await unparkCustomer(st);
       c.role = c.state === 'up' ? 'member' : 'blind';
@@ -538,8 +608,14 @@ async function onChannelGone(channelId) {
 async function onAriEvent(event) {
   if (event.type === 'StasisStart') {
     const tag = event.args && event.args[0];
-    if (tag === 'adopt') { await onAdoptStart(event); return true; }
-    if (tag === 'xfer') { await onPartyStart(event); return true; }
+    if (tag === 'adopt') {
+      await onAdoptStart(event);
+      return true;
+    }
+    if (tag === 'xfer') {
+      await onPartyStart(event);
+      return true;
+    }
     return false;
   }
   if (event.type === 'StasisEnd' || event.type === 'ChannelDestroyed') {
@@ -556,7 +632,13 @@ function viewFor(me) {
     controlled: true,
     callId: st.callId,
     customerOnHold: !!st.holdBridgeId,
-    parties: [...st.parties.values()].map((p) => ({ id: p.id, label: p.label, kind: p.kind, state: p.state, role: p.role })),
+    parties: [...st.parties.values()].map((p) => ({
+      id: p.id,
+      label: p.label,
+      kind: p.kind,
+      state: p.state,
+      role: p.role,
+    })),
   };
 }
 
@@ -564,12 +646,19 @@ async function transferTargets(me) {
   const agents = await listAgents(me);
   const [queues] = await d.pool.query(
     `SELECT q.id, q.name, c.name AS campaign_name FROM queues q JOIN campaigns c ON c.queue_id = q.id
-     WHERE q.status = 'active' AND c.status = 'active' ORDER BY q.name`
+     WHERE q.status = 'active' AND c.status = 'active' ORDER BY q.name`,
   );
   return {
-    agents: agents.map((a) => ({ userId: a.userId, username: a.username, ext: a.ext, status: a.busy ? 'on a call' : a.status })),
+    agents: agents.map((a) => ({
+      userId: a.userId,
+      username: a.username,
+      ext: a.ext,
+      status: a.busy ? 'on a call' : a.status,
+    })),
     queues: queues.map((q) => ({
-      id: q.id, name: q.name, campaign: q.campaign_name,
+      id: q.id,
+      name: q.name,
+      campaign: q.campaign_name,
       freeAgents: agents.filter((a) => a.queueId === q.id && !a.busy && a.status === 'available').length,
     })),
   };
@@ -582,6 +671,15 @@ function httpError(status, message) {
 }
 
 module.exports = {
-  init, isControlled, onAriEvent, viewFor, transferTargets,
-  transfer, completeTransfer, merge, cancelConsult, dropParty, leave,
+  init,
+  isControlled,
+  onAriEvent,
+  viewFor,
+  transferTargets,
+  transfer,
+  completeTransfer,
+  merge,
+  cancelConsult,
+  dropParty,
+  leave,
 };

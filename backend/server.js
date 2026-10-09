@@ -9,7 +9,12 @@ const path = require('path');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const {
-  normalizePhone, localTimeIn, isWithinCallWindow, finishAttempt, DEFAULT_RECYCLE_RULES, getRecycleRules,
+  normalizePhone,
+  localTimeIn,
+  isWithinCallWindow,
+  finishAttempt,
+  DEFAULT_RECYCLE_RULES,
+  getRecycleRules,
 } = require('./dialer-common');
 const pool = require('./db');
 const ari = require('./ari');
@@ -22,7 +27,9 @@ const callControl = require('./call-control');
 const REQUIRED_ENV_VARS = ['DB_PASSWORD', 'ARI_PASS', 'AMI_PASS', 'SESSION_SECRET'];
 const missingEnvVars = REQUIRED_ENV_VARS.filter((name) => !process.env[name]);
 if (missingEnvVars.length > 0) {
-  console.error(`Missing required environment variable(s): ${missingEnvVars.join(', ')}. Copy .env.example to .env and fill in real values.`);
+  console.error(
+    `Missing required environment variable(s): ${missingEnvVars.join(', ')}. Copy .env.example to .env and fill in real values.`,
+  );
   process.exit(1);
 }
 
@@ -65,7 +72,11 @@ function parseCsvLine(line) {
 const QUEUES_CONF_PATH = process.env.QUEUES_CONF_PATH || '/etc/asterisk/queues.conf';
 
 function slugify(name) {
-  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 // Safety net: an uncaught error in any async route handler otherwise
@@ -93,7 +104,7 @@ app.use(
     resave: false,
     saveUninitialized: false,
     cookie: { maxAge: 8 * 60 * 60 * 1000, secure: true }, // 8 hour login, HTTPS-only cookie
-  })
+  }),
 );
 
 function requireAuth(req, res, next) {
@@ -132,10 +143,11 @@ async function resolveDestination(toNumber, campaignCallerId) {
 }
 
 async function logEvent(callId, eventType, payload) {
-  await pool.query(
-    'INSERT INTO call_events (call_id, event_type, payload) VALUES (?, ?, ?)',
-    [callId, eventType, payload ? JSON.stringify(payload) : null]
-  );
+  await pool.query('INSERT INTO call_events (call_id, event_type, payload) VALUES (?, ?, ?)', [
+    callId,
+    eventType,
+    payload ? JSON.stringify(payload) : null,
+  ]);
 }
 
 app.get('/health', async (req, res) => {
@@ -156,7 +168,7 @@ app.post('/auth/login', async (req, res) => {
     `SELECT users.*, extensions.name AS extension_name
      FROM users LEFT JOIN extensions ON users.extension_id = extensions.id
      WHERE username = ?`,
-    [username]
+    [username],
   );
   const user = rows[0];
   if (!user || !(await bcrypt.compare(password, user.password_hash))) {
@@ -192,10 +204,7 @@ app.get('/auth/me', (req, res) => {
 
 // --- Agent status tracking (available / break / acw) ---
 async function closeOpenStatus(userId) {
-  await pool.query(
-    'UPDATE agent_status_log SET ended_at = NOW() WHERE user_id = ? AND ended_at IS NULL',
-    [userId]
-  );
+  await pool.query('UPDATE agent_status_log SET ended_at = NOW() WHERE user_id = ? AND ended_at IS NULL', [userId]);
 }
 
 // Which queue is this agent nominally working this session? (the most
@@ -205,7 +214,7 @@ async function closeOpenStatus(userId) {
 async function findCurrentQueueAsteriskName(userId) {
   const [rows] = await pool.query(
     'SELECT queue_id FROM agent_status_log WHERE user_id = ? AND queue_id IS NOT NULL ORDER BY id DESC LIMIT 1',
-    [userId]
+    [userId],
   );
   if (!rows[0]) return null;
   const [queueRows] = await pool.query('SELECT asterisk_name FROM queues WHERE id = ?', [rows[0].queue_id]);
@@ -221,7 +230,7 @@ async function findCurrentCampaign(userId) {
   if (!asteriskName) return null;
   const [rows] = await pool.query(
     `SELECT c.* FROM campaigns c JOIN queues q ON q.id = c.queue_id WHERE q.asterisk_name = ? LIMIT 1`,
-    [asteriskName]
+    [asteriskName],
   );
   return rows[0] || null;
 }
@@ -261,11 +270,13 @@ async function setAgentStatus(userId, status, reason, queueId, extensionName) {
     const [c] = await pool.query('SELECT id FROM campaigns WHERE queue_id = ? LIMIT 1', [queueId]);
     keepCampaignId = c[0] ? c[0].id : null;
   }
-  await releasePreviewLocks(userId, keepCampaignId).catch((err) => console.error('[preview release failed]', err.message));
+  await releasePreviewLocks(userId, keepCampaignId).catch((err) =>
+    console.error('[preview release failed]', err.message),
+  );
   await closeOpenStatus(userId);
   await pool.query(
     'INSERT INTO agent_status_log (user_id, status, reason, queue_id, extension_name) VALUES (?, ?, ?, ?, ?)',
-    [userId, status, reason || null, queueId || null, extensionName || null]
+    [userId, status, reason || null, queueId || null, extensionName || null],
   );
   await syncQueueMembership(userId, extensionName, status, queueId);
 }
@@ -278,7 +289,7 @@ async function setAgentStatus(userId, status, reason, queueId, extensionName) {
 async function findAgentIdByExtension(extensionName) {
   const [rows] = await pool.query(
     'SELECT user_id FROM agent_status_log WHERE extension_name = ? ORDER BY id DESC LIMIT 1',
-    [extensionName]
+    [extensionName],
   );
   return rows[0] ? rows[0].user_id : null;
 }
@@ -297,7 +308,7 @@ app.post('/agent/status', requireAuth, async (req, res) => {
   if (status === 'available') {
     const allowed = await findAgentQueues(req.session.user.id);
     if (!allowed.some((q) => q.id === Number(queueId))) {
-      return res.status(403).json({ error: 'this queue is not in any of your teams\' campaigns' });
+      return res.status(403).json({ error: "this queue is not in any of your teams' campaigns" });
     }
   }
   await setAgentStatus(
@@ -305,7 +316,7 @@ app.post('/agent/status', requireAuth, async (req, res) => {
     status,
     status === 'break' ? reason : null,
     queueId,
-    req.session.user.extensionName
+    req.session.user.extensionName,
   );
   res.json({ status: 'ok' });
 });
@@ -323,7 +334,7 @@ app.get('/agent/call-policy', requireAuth, async (req, res) => {
   const [rows] = await pool.query(
     `SELECT c.auto_answer FROM campaigns c JOIN queues q ON q.id = c.queue_id
      WHERE q.asterisk_name = ? LIMIT 1`,
-    [asteriskName]
+    [asteriskName],
   );
   res.json({ autoAnswer: rows[0] ? !!rows[0].auto_answer : false });
 });
@@ -352,7 +363,8 @@ app.get('/queues', requireAuth, async (req, res) => {
 // DISTINCT because an agent in two teams sharing a campaign would
 // otherwise see that queue twice.
 async function findAgentQueues(userId) {
-  const [rows] = await pool.query(`
+  const [rows] = await pool.query(
+    `
     SELECT DISTINCT q.id, q.name, c.name AS campaign_name
     FROM team_members tm
     JOIN teams t ON t.id = tm.team_id AND t.status = 'active'
@@ -361,7 +373,9 @@ async function findAgentQueues(userId) {
     JOIN queues q ON q.id = c.queue_id AND q.status = 'active'
     WHERE tm.user_id = ?
     ORDER BY c.name, q.name
-  `, [userId]);
+  `,
+    [userId],
+  );
   return rows;
 }
 
@@ -385,7 +399,15 @@ app.post('/admin/queues', requireRole('admin'), async (req, res) => {
   const [result] = await pool.query(
     `INSERT INTO queues (tenant_id, name, asterisk_name, ring_strategy, wait_timeout, announce, retry, timeout_restart)
      VALUES (1, ?, ?, ?, ?, ?, ?, ?)`,
-    [name, asteriskName, ringStrategy || 'ringall', waitTimeout || 30, announce || 'no', retry || 1, timeoutRestart || 'yes']
+    [
+      name,
+      asteriskName,
+      ringStrategy || 'ringall',
+      waitTimeout || 30,
+      announce || 'no',
+      retry || 1,
+      timeoutRestart || 'yes',
+    ],
   );
 
   // Make it real in Asterisk, not just a database row - this is what
@@ -413,7 +435,7 @@ app.post('/admin/queues', requireRole('admin'), async (req, res) => {
 // produces [a-z0-9_], never a regex metacharacter.
 function queueStanzaRegex(asteriskName) {
   return new RegExp(
-    `\\n?\\[${asteriskName}\\]\\nstrategy = [^\\n]*\\ntimeout = [^\\n]*\\nretry = [^\\n]*\\ntimeoutrestart = [^\\n]*\\nannounce-frequency = [^\\n]*\\n(?:ringinuse = [^\\n]*\\n)?`
+    `\\n?\\[${asteriskName}\\]\\nstrategy = [^\\n]*\\ntimeout = [^\\n]*\\nretry = [^\\n]*\\ntimeoutrestart = [^\\n]*\\nannounce-frequency = [^\\n]*\\n(?:ringinuse = [^\\n]*\\n)?`,
   );
 }
 
@@ -436,7 +458,7 @@ app.put('/admin/queues/:id', requireRole('admin'), async (req, res) => {
 
   await pool.query(
     'UPDATE queues SET ring_strategy = ?, wait_timeout = ?, announce = ?, retry = ?, timeout_restart = ? WHERE id = ?',
-    [updated.ringStrategy, updated.waitTimeout, updated.announce, updated.retry, updated.timeoutRestart, req.params.id]
+    [updated.ringStrategy, updated.waitTimeout, updated.announce, updated.retry, updated.timeoutRestart, req.params.id],
   );
 
   const announceFrequency = updated.announce === 'yes' ? 30 : 0;
@@ -474,7 +496,9 @@ app.delete('/admin/queues/:id', requireRole('admin'), async (req, res) => {
   // real usage history is never actually deletable. That's correct (don't
   // lose history), but it needs the same clear-error treatment as the
   // campaign check above instead of surfacing as a raw FK error.
-  const [statusLogRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM agent_status_log WHERE queue_id = ?', [req.params.id]);
+  const [statusLogRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM agent_status_log WHERE queue_id = ?', [
+    req.params.id,
+  ]);
   if (statusLogRefs[0].cnt > 0) {
     return res.status(409).json({
       error: `Cannot delete - ${statusLogRefs[0].cnt} historical agent status record(s) reference this queue.`,
@@ -490,7 +514,9 @@ app.delete('/admin/queues/:id', requireRole('admin'), async (req, res) => {
     await ami.queueReload();
   } catch (err) {
     console.error('[Queue config removal failed]', err.message);
-    return res.status(500).json({ error: 'queue deleted from DB but Asterisk config could not be updated: ' + err.message });
+    return res
+      .status(500)
+      .json({ error: 'queue deleted from DB but Asterisk config could not be updated: ' + err.message });
   }
 
   res.json({ status: 'ok' });
@@ -511,7 +537,7 @@ async function addDnc(phone, source, userId) {
   if (!normalized) return false;
   const [result] = await pool.query(
     'INSERT IGNORE INTO dnc_numbers (tenant_id, phone, source, created_by) VALUES (1, ?, ?, ?)',
-    [normalized, source, userId || null]
+    [normalized, source, userId || null],
   );
   return result.affectedRows > 0;
 }
@@ -541,16 +567,22 @@ function parseCampaignSettings(body) {
   const inRange = (v, lo, hi) => Number.isFinite(v) && v >= lo && v <= hi;
   if (!DIAL_MODES.includes(s.dial_mode)) return { error: 'unknown dial mode' };
   if (!inRange(s.dial_ratio, 1, 5)) return { error: 'dial ratio must be between 1 and 5' };
-  if (!inRange(s.max_dial_ratio, s.dial_ratio, 5)) return { error: 'max dial ratio must be between the dial ratio and 5' };
+  if (!inRange(s.max_dial_ratio, s.dial_ratio, 5))
+    return { error: 'max dial ratio must be between the dial ratio and 5' };
   if (!inRange(s.target_abandon_pct, 0, 10)) return { error: 'target abandon % must be between 0 and 10' };
   if (!inRange(s.ring_timeout_sec, 10, 60)) return { error: 'ring timeout must be 10-60 seconds' };
-  if (!inRange(s.max_attempts, 1, 20) || !Number.isInteger(s.max_attempts)) return { error: 'max attempts must be a whole number 1-20' };
-  if (!inRange(s.max_channels, 1, 200) || !Number.isInteger(s.max_channels)) return { error: 'max channels must be a whole number 1-200' };
-  if (s.preview_autodial_sec !== null && !inRange(s.preview_autodial_sec, 0, 120)) return { error: 'preview auto-dial must be 0-120 seconds' };
+  if (!inRange(s.max_attempts, 1, 20) || !Number.isInteger(s.max_attempts))
+    return { error: 'max attempts must be a whole number 1-20' };
+  if (!inRange(s.max_channels, 1, 200) || !Number.isInteger(s.max_channels))
+    return { error: 'max channels must be a whole number 1-200' };
+  if (s.preview_autodial_sec !== null && !inRange(s.preview_autodial_sec, 0, 120))
+    return { error: 'preview auto-dial must be 0-120 seconds' };
   if (!inRange(s.wrapup_sec, 0, 600)) return { error: 'wrap-up must be 0-600 seconds' };
-  if (!inRange(s.abandon_wait_sec, 2, 30) || !Number.isInteger(s.abandon_wait_sec)) return { error: 'max wait for an agent must be 2-30 seconds' };
+  if (!inRange(s.abandon_wait_sec, 2, 30) || !Number.isInteger(s.abandon_wait_sec))
+    return { error: 'max wait for an agent must be 2-30 seconds' };
   const timeRe = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
-  if (!timeRe.test(s.call_window_start) || !timeRe.test(s.call_window_end)) return { error: 'calling window times must be HH:MM' };
+  if (!timeRe.test(s.call_window_start) || !timeRe.test(s.call_window_end))
+    return { error: 'calling window times must be HH:MM' };
   if (s.call_window_start.length === 5) s.call_window_start += ':00';
   if (s.call_window_end.length === 5) s.call_window_end += ':00';
   if (s.call_window_start >= s.call_window_end) return { error: 'calling window start must be before its end' };
@@ -577,7 +609,7 @@ async function getDispositions(campaignId) {
   if (!campaignId) return DEFAULT_DISPOSITIONS;
   const [rows] = await pool.query(
     'SELECT code, label, is_final, retry_after_min, marks_dnc, is_callback FROM campaign_dispositions WHERE campaign_id = ? ORDER BY sort_order, id',
-    [campaignId]
+    [campaignId],
   );
   return rows;
 }
@@ -589,7 +621,8 @@ function validateDispositions(list) {
   for (const d of list) {
     const code = String(d.code || '').trim();
     const label = String(d.label || '').trim();
-    if (!/^[a-z][a-z0-9_]{0,29}$/.test(code)) return { error: `code "${code}" must be lowercase letters, digits, underscores, starting with a letter` };
+    if (!/^[a-z][a-z0-9_]{0,29}$/.test(code))
+      return { error: `code "${code}" must be lowercase letters, digits, underscores, starting with a letter` };
     if (code === 'new') return { error: '"new" is reserved for leads not yet called' };
     if (seen.has(code)) return { error: `code "${code}" is used twice` };
     seen.add(code);
@@ -601,10 +634,18 @@ function validateDispositions(list) {
     const isFinal = d.isFinal ? 1 : 0;
     const isCallback = d.isCallback ? 1 : 0;
     const marksDnc = d.marksDnc ? 1 : 0;
-    if (isFinal && (retry !== null || isCallback)) return { error: `"${label}": a final disposition can't also retry or schedule a callback` };
+    if (isFinal && (retry !== null || isCallback))
+      return { error: `"${label}": a final disposition can't also retry or schedule a callback` };
     if (marksDnc && !isFinal) return { error: `"${label}": Do-Not-Call dispositions must also be final` };
     if (isCallback && retry !== null) return { error: `"${label}": pick either callback or retry, not both` };
-    cleaned.push({ code, label, is_final: isFinal, retry_after_min: retry, marks_dnc: marksDnc, is_callback: isCallback });
+    cleaned.push({
+      code,
+      label,
+      is_final: isFinal,
+      retry_after_min: retry,
+      marks_dnc: marksDnc,
+      is_callback: isCallback,
+    });
   }
   return { dispositions: cleaned };
 }
@@ -615,7 +656,7 @@ async function replaceDispositions(conn, campaignId, list) {
     await conn.query(
       `INSERT INTO campaign_dispositions (campaign_id, code, label, is_final, retry_after_min, marks_dnc, is_callback, sort_order)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [campaignId, d.code, d.label, d.is_final, d.retry_after_min, d.marks_dnc, d.is_callback, i]
+      [campaignId, d.code, d.label, d.is_final, d.retry_after_min, d.marks_dnc, d.is_callback, i],
     );
   }
 }
@@ -652,11 +693,17 @@ app.post('/admin/campaigns', requireRole('admin'), async (req, res) => {
   let result;
   try {
     await conn.beginTransaction();
-    [result] = await conn.query(
-      'INSERT INTO campaigns SET ?',
-      [{ tenant_id: 1, name, queue_id: queueId || null, outbound_caller_id: outboundCallerId || null,
-        auto_answer: autoAnswer ? 1 : 0, form_id: formId || null, ...settings }]
-    );
+    [result] = await conn.query('INSERT INTO campaigns SET ?', [
+      {
+        tenant_id: 1,
+        name,
+        queue_id: queueId || null,
+        outbound_caller_id: outboundCallerId || null,
+        auto_answer: autoAnswer ? 1 : 0,
+        form_id: formId || null,
+        ...settings,
+      },
+    ]);
     await replaceDispositions(conn, result.insertId, DEFAULT_DISPOSITIONS);
     await conn.commit();
   } catch (err) {
@@ -680,12 +727,21 @@ app.put('/admin/campaigns/:id', requireRole('admin'), async (req, res) => {
   if (error) return res.status(400).json({ error });
 
   await pool.query('UPDATE campaigns SET ? WHERE id = ?', [
-    { name, queue_id: queueId || null, outbound_caller_id: outboundCallerId || null, auto_answer: autoAnswer ? 1 : 0,
-      status: status || 'active', form_id: formId || null, ...settings },
+    {
+      name,
+      queue_id: queueId || null,
+      outbound_caller_id: outboundCallerId || null,
+      auto_answer: autoAnswer ? 1 : 0,
+      status: status || 'active',
+      form_id: formId || null,
+      ...settings,
+    },
     req.params.id,
   ]);
   if (settings.dial_mode === 'manual') {
-    await pool.query("UPDATE campaigns SET dialer_state = 'stopped' WHERE id = ? AND dialer_state <> 'stopped'", [req.params.id]);
+    await pool.query("UPDATE campaigns SET dialer_state = 'stopped' WHERE id = ? AND dialer_state <> 'stopped'", [
+      req.params.id,
+    ]);
   }
   res.json({ id: Number(req.params.id), name });
 });
@@ -700,8 +756,12 @@ app.delete('/admin/campaigns/:id', requireRole('admin'), async (req, res) => {
   const [didRefs] = await pool.query('SELECT number FROM dids WHERE campaign_id = ?', [req.params.id]);
   const [leadRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM leads WHERE campaign_id = ?', [req.params.id]);
   const [callRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM calls WHERE campaign_id = ?', [req.params.id]);
-  const [responseRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM form_responses WHERE campaign_id = ?', [req.params.id]);
-  const [callbackRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM callbacks WHERE campaign_id = ?', [req.params.id]);
+  const [responseRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM form_responses WHERE campaign_id = ?', [
+    req.params.id,
+  ]);
+  const [callbackRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM callbacks WHERE campaign_id = ?', [
+    req.params.id,
+  ]);
 
   const blockers = [];
   if (didRefs.length) blockers.push(`${didRefs.length} DID number(s) (${didRefs.map((d) => d.number).join(', ')})`);
@@ -710,7 +770,9 @@ app.delete('/admin/campaigns/:id', requireRole('admin'), async (req, res) => {
   if (responseRefs[0].cnt > 0) blockers.push(`${responseRefs[0].cnt} form response(s)`);
   if (callbackRefs[0].cnt > 0) blockers.push(`${callbackRefs[0].cnt} callback(s)`);
   if (blockers.length) {
-    return res.status(409).json({ error: `Cannot delete - still referenced by ${blockers.join(' and ')}. Reassign or remove them first.` });
+    return res
+      .status(409)
+      .json({ error: `Cannot delete - still referenced by ${blockers.join(' and ')}. Reassign or remove them first.` });
   }
 
   // Its settings rows go with it - a leftover team mapping would point at
@@ -742,7 +804,7 @@ app.post('/admin/dids', requireRole('admin'), async (req, res) => {
   await pool.query(
     `INSERT INTO dids (tenant_id, number, campaign_id) VALUES (1, ?, ?)
      ON DUPLICATE KEY UPDATE campaign_id = VALUES(campaign_id)`,
-    [number, campaignId || null]
+    [number, campaignId || null],
   );
   res.status(201).json({ number, campaignId: campaignId || null });
 });
@@ -793,7 +855,7 @@ app.post('/admin/lists', requireRole('admin'), async (req, res) => {
   if (priority === null) return res.status(400).json({ error: 'priority must be a whole number -100..100' });
   const [result] = await pool.query(
     'INSERT INTO lists (tenant_id, campaign_id, name, is_active, priority) VALUES (1, ?, ?, ?, ?)',
-    [campaignId, name, isActive === false ? 0 : 1, priority]
+    [campaignId, name, isActive === false ? 0 : 1, priority],
   );
   res.status(201).json({ id: result.insertId, name, campaignId });
 });
@@ -806,8 +868,13 @@ app.put('/admin/lists/:id', requireRole('admin'), async (req, res) => {
   if (priority === null) return res.status(400).json({ error: 'priority must be a whole number -100..100' });
   const [rows] = await pool.query('SELECT id FROM lists WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'list not found' });
-  await pool.query('UPDATE lists SET name = ?, campaign_id = ?, is_active = ?, priority = ? WHERE id = ?',
-    [name, campaignId, isActive === false ? 0 : 1, priority, req.params.id]);
+  await pool.query('UPDATE lists SET name = ?, campaign_id = ?, is_active = ?, priority = ? WHERE id = ?', [
+    name,
+    campaignId,
+    isActive === false ? 0 : 1,
+    priority,
+    req.params.id,
+  ]);
   res.json({ id: Number(req.params.id), name, campaignId });
 });
 
@@ -816,7 +883,9 @@ app.delete('/admin/lists/:id', requireRole('admin'), async (req, res) => {
   if (!rows[0]) return res.status(404).json({ error: 'list not found' });
   const [leadRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM leads WHERE list_id = ?', [req.params.id]);
   if (leadRefs[0].cnt > 0) {
-    return res.status(409).json({ error: `Cannot delete - ${leadRefs[0].cnt} lead(s) still belong to this list. Reassign or remove them first.` });
+    return res.status(409).json({
+      error: `Cannot delete - ${leadRefs[0].cnt} lead(s) still belong to this list. Reassign or remove them first.`,
+    });
   }
   await pool.query('DELETE FROM lists WHERE id = ?', [req.params.id]);
   res.json({ status: 'ok' });
@@ -826,8 +895,11 @@ app.delete('/admin/lists/:id', requireRole('admin'), async (req, res) => {
 // Automatic: per-campaign rules for when the dialer redials after an
 // unsuccessful call (applied in dialer-common.js finishAttempt).
 const RECYCLE_RULE_LABELS = {
-  no_answer: 'No answer', busy: 'Busy', machine: 'Answering machine',
-  congestion: 'Network error', abandoned: 'Abandoned',
+  no_answer: 'No answer',
+  busy: 'Busy',
+  machine: 'Answering machine',
+  congestion: 'Network error',
+  abandoned: 'Abandoned',
 };
 
 app.get('/admin/campaigns/:id/recycle-rules', requireRole('admin'), async (req, res) => {
@@ -859,7 +931,7 @@ app.put('/admin/campaigns/:id/recycle-rules', requireRole('admin'), async (req, 
   await pool.query(
     `INSERT INTO campaign_recycle_rules (campaign_id, result, enabled, delay_min, max_tries) VALUES ?
      ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), delay_min = VALUES(delay_min), max_tries = VALUES(max_tries)`,
-    [values]
+    [values],
   );
   res.json({ status: 'ok' });
 });
@@ -873,7 +945,7 @@ async function listWithCampaign(listId) {
   const [rows] = await pool.query(
     `SELECT ls.id, ls.name, ls.campaign_id, COALESCE(c.max_attempts, 3) AS max_attempts
      FROM lists ls LEFT JOIN campaigns c ON c.id = ls.campaign_id WHERE ls.id = ?`,
-    [listId]
+    [listId],
   );
   return rows[0] || null;
 }
@@ -889,20 +961,24 @@ app.get('/admin/lists/:id/recycle', requireRole('admin'), async (req, res) => {
        SUM(is_final = 0 AND attempts < ? AND next_call_at > NOW()) AS scheduled,
        SUM(is_final = 1 OR attempts >= ?) AS done
      FROM leads WHERE list_id = ? GROUP BY status ORDER BY total DESC`,
-    [list.max_attempts, list.max_attempts, list.max_attempts, list.id]
+    [list.max_attempts, list.max_attempts, list.max_attempts, list.id],
   );
   const labels = Object.fromEntries((await getDispositions(list.campaign_id)).map((d) => [d.code, d.label]));
   const [history] = await pool.query(
     `SELECT r.statuses, r.reset_attempts, r.leads_recycled, r.created_at, u.username
      FROM recycle_log r LEFT JOIN users u ON u.id = r.user_id
      WHERE r.list_id = ? ORDER BY r.id DESC LIMIT 5`,
-    [list.id]
+    [list.id],
   );
   res.json({
     list: { id: list.id, name: list.name, maxAttempts: list.max_attempts },
     statuses: statuses.map((s) => ({
-      status: s.status, label: labels[s.status] || null, total: Number(s.total),
-      dialable: Number(s.dialable), scheduled: Number(s.scheduled), done: Number(s.done),
+      status: s.status,
+      label: labels[s.status] || null,
+      total: Number(s.total),
+      dialable: Number(s.dialable),
+      scheduled: Number(s.scheduled),
+      done: Number(s.done),
       recyclable: !NEVER_RECYCLE.includes(s.status),
     })),
     history,
@@ -913,7 +989,11 @@ app.post('/admin/lists/:id/recycle', requireRole('admin'), async (req, res) => {
   const list = await listWithCampaign(req.params.id);
   if (!list) return res.status(404).json({ error: 'list not found' });
   const { statuses, resetAttempts } = req.body;
-  if (!Array.isArray(statuses) || statuses.length === 0 || !statuses.every((s) => typeof s === 'string' && s.length <= 30)) {
+  if (
+    !Array.isArray(statuses) ||
+    statuses.length === 0 ||
+    !statuses.every((s) => typeof s === 'string' && s.length <= 30)
+  ) {
     return res.status(400).json({ error: 'pick at least one status to recycle' });
   }
   if (statuses.some((s) => NEVER_RECYCLE.includes(s))) {
@@ -923,12 +1003,14 @@ app.post('/admin/lists/:id/recycle', requireRole('admin'), async (req, res) => {
     `SELECT l.id, l.phone,
        EXISTS (SELECT 1 FROM dial_attempts da WHERE da.lead_id = l.id AND da.status <> 'ended') AS on_call
      FROM leads l WHERE l.list_id = ? AND l.status IN (?)`,
-    [list.id, statuses]
+    [list.id, statuses],
   );
   const phones = [...new Set(candidates.map((c) => normalizePhone(c.phone)))];
   const dnc = new Set();
   for (let i = 0; i < phones.length; i += 1000) {
-    const [rows] = await pool.query('SELECT phone FROM dnc_numbers WHERE tenant_id = 1 AND phone IN (?)', [phones.slice(i, i + 1000)]);
+    const [rows] = await pool.query('SELECT phone FROM dnc_numbers WHERE tenant_id = 1 AND phone IN (?)', [
+      phones.slice(i, i + 1000),
+    ]);
     rows.forEach((r) => dnc.add(r.phone));
   }
   const ids = [];
@@ -943,12 +1025,12 @@ app.post('/admin/lists/:id/recycle', requireRole('admin'), async (req, res) => {
     await pool.query(
       `UPDATE leads SET is_final = 0, next_call_at = NULL, recycled_at = NOW(),
          attempts = IF(?, 0, attempts) WHERE id IN (?)`,
-      [resetAttempts ? 1 : 0, ids.slice(i, i + 1000)]
+      [resetAttempts ? 1 : 0, ids.slice(i, i + 1000)],
     );
   }
   await pool.query(
     'INSERT INTO recycle_log (list_id, user_id, statuses, reset_attempts, leads_recycled) VALUES (?, ?, ?, ?, ?)',
-    [list.id, req.session.user.id, statuses.join(', ').slice(0, 500), resetAttempts ? 1 : 0, ids.length]
+    [list.id, req.session.user.id, statuses.join(', ').slice(0, 500), resetAttempts ? 1 : 0, ids.length],
   );
   res.json({ recycled: ids.length, skippedDnc, skippedOnCall });
 });
@@ -968,7 +1050,9 @@ function validateFormFields(fields) {
     const key = String(f.fieldKey || '').trim();
     const label = String(f.label || '').trim();
     if (!/^[a-z][a-z0-9_]{0,49}$/.test(key)) {
-      return { error: `field ${i + 1}: key "${key}" must be lowercase letters, digits, underscores, starting with a letter` };
+      return {
+        error: `field ${i + 1}: key "${key}" must be lowercase letters, digits, underscores, starting with a letter`,
+      };
     }
     if (seen.has(key)) return { error: `field key "${key}" is used twice` };
     seen.add(key);
@@ -987,23 +1071,25 @@ function validateFormFields(fields) {
 async function loadFormsWithFields(whereSql = '', params = []) {
   const [forms] = await pool.query(`SELECT * FROM forms ${whereSql} ORDER BY id DESC`, params);
   if (forms.length === 0) return [];
-  const [fields] = await pool.query(
-    'SELECT * FROM form_fields WHERE form_id IN (?) ORDER BY sort_order, id', [forms.map((f) => f.id)]
-  );
+  const [fields] = await pool.query('SELECT * FROM form_fields WHERE form_id IN (?) ORDER BY sort_order, id', [
+    forms.map((f) => f.id),
+  ]);
   return forms.map((form) => ({ ...form, fields: fields.filter((f) => f.form_id === form.id) }));
 }
 
 app.get('/admin/forms', requireRole('admin'), async (req, res) => {
   const forms = await loadFormsWithFields();
   const [usage] = await pool.query(
-    'SELECT form_id, GROUP_CONCAT(name ORDER BY name SEPARATOR \', \') AS campaigns FROM campaigns WHERE form_id IS NOT NULL GROUP BY form_id'
+    "SELECT form_id, GROUP_CONCAT(name ORDER BY name SEPARATOR ', ') AS campaigns FROM campaigns WHERE form_id IS NOT NULL GROUP BY form_id",
   );
   const [counts] = await pool.query('SELECT form_id, COUNT(*) AS cnt FROM form_responses GROUP BY form_id');
-  res.json(forms.map((f) => ({
-    ...f,
-    campaigns: (usage.find((u) => u.form_id === f.id) || {}).campaigns || null,
-    response_count: (counts.find((c) => c.form_id === f.id) || {}).cnt || 0,
-  })));
+  res.json(
+    forms.map((f) => ({
+      ...f,
+      campaigns: (usage.find((u) => u.form_id === f.id) || {}).campaigns || null,
+      response_count: (counts.find((c) => c.form_id === f.id) || {}).cnt || 0,
+    })),
+  );
 });
 
 // Create and edit replace the whole field list in one transaction. Old
@@ -1013,18 +1099,24 @@ async function saveForm(formId, { name, description, status, fields }) {
   try {
     await conn.beginTransaction();
     if (formId) {
-      await conn.query('UPDATE forms SET name = ?, description = ?, status = ? WHERE id = ?',
-        [name, description || null, status || 'active', formId]);
+      await conn.query('UPDATE forms SET name = ?, description = ?, status = ? WHERE id = ?', [
+        name,
+        description || null,
+        status || 'active',
+        formId,
+      ]);
       await conn.query('DELETE FROM form_fields WHERE form_id = ?', [formId]);
     } else {
-      const [result] = await conn.query('INSERT INTO forms (tenant_id, name, description, status) VALUES (1, ?, ?, ?)',
-        [name, description || null, status || 'active']);
+      const [result] = await conn.query(
+        'INSERT INTO forms (tenant_id, name, description, status) VALUES (1, ?, ?, ?)',
+        [name, description || null, status || 'active'],
+      );
       formId = result.insertId;
     }
     for (const f of fields) {
       await conn.query(
         'INSERT INTO form_fields (form_id, field_key, label, field_type, options, is_required, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [formId, f.key, f.label, f.type, f.options ? JSON.stringify(f.options) : null, f.required, f.order]
+        [formId, f.key, f.label, f.type, f.options ? JSON.stringify(f.options) : null, f.required, f.order],
       );
     }
     await conn.commit();
@@ -1047,7 +1139,9 @@ async function handleFormSave(req, res, formId) {
   if (formId && req.body.status === 'inactive') {
     const [refs] = await pool.query('SELECT name FROM campaigns WHERE form_id = ?', [formId]);
     if (refs.length) {
-      return res.status(409).json({ error: `Cannot deactivate - used by campaign(s): ${refs.map((r) => r.name).join(', ')}. Pick another form for them first.` });
+      return res.status(409).json({
+        error: `Cannot deactivate - used by campaign(s): ${refs.map((r) => r.name).join(', ')}. Pick another form for them first.`,
+      });
     }
   }
   try {
@@ -1078,13 +1172,15 @@ app.delete('/admin/forms/:id', requireRole('admin'), async (req, res) => {
   const blockers = [];
   if (campRefs.length) blockers.push(`campaign(s) ${campRefs.map((c) => c.name).join(', ')}`);
   if (respRefs[0].cnt > 0) blockers.push(`${respRefs[0].cnt} saved response(s) - set it Inactive instead`);
-  if (blockers.length) return res.status(409).json({ error: `Cannot delete - still referenced by ${blockers.join(' and ')}.` });
+  if (blockers.length)
+    return res.status(409).json({ error: `Cannot delete - still referenced by ${blockers.join(' and ')}.` });
   await pool.query('DELETE FROM forms WHERE id = ?', [req.params.id]);
   res.json({ status: 'ok' });
 });
 
 app.get('/admin/forms/:id/responses', requireRole('admin'), async (req, res) => {
-  const [rows] = await pool.query(`
+  const [rows] = await pool.query(
+    `
     SELECT r.id, r.data, r.created_at, r.lead_id, r.call_id, u.username, c.name AS campaign_name, l.phone AS lead_phone
     FROM form_responses r
     JOIN users u ON u.id = r.user_id
@@ -1092,7 +1188,9 @@ app.get('/admin/forms/:id/responses', requireRole('admin'), async (req, res) => 
     LEFT JOIN leads l ON l.id = r.lead_id
     WHERE r.form_id = ?
     ORDER BY r.id DESC LIMIT 200
-  `, [req.params.id]);
+  `,
+    [req.params.id],
+  );
   res.json(rows);
 });
 
@@ -1100,7 +1198,7 @@ app.get('/admin/forms/:id/responses', requireRole('admin'), async (req, res) => 
 app.get('/agent/form', requireAuth, async (req, res) => {
   const campaign = await findCurrentCampaign(req.session.user.id);
   if (!campaign || !campaign.form_id) return res.json(null);
-  const [form] = await loadFormsWithFields('WHERE id = ? AND status = \'active\'', [campaign.form_id]);
+  const [form] = await loadFormsWithFields("WHERE id = ? AND status = 'active'", [campaign.form_id]);
   res.json(form || null);
 });
 
@@ -1125,10 +1223,13 @@ function validateFormData(fields, data) {
       continue;
     }
     if (f.field_type === 'number' && !Number.isFinite(Number(v))) return { error: `"${f.label}" must be a number` };
-    if (f.field_type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return { error: `"${f.label}" must be an email` };
-    if (f.field_type === 'phone' && !/^\+?[0-9]{6,15}$/.test(v)) return { error: `"${f.label}" must be a phone number` };
+    if (f.field_type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))
+      return { error: `"${f.label}" must be an email` };
+    if (f.field_type === 'phone' && !/^\+?[0-9]{6,15}$/.test(v))
+      return { error: `"${f.label}" must be a phone number` };
     if (f.field_type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return { error: `"${f.label}" must be a date` };
-    if (['dropdown', 'radio'].includes(f.field_type) && !options.includes(v)) return { error: `"${f.label}" has an invalid choice` };
+    if (['dropdown', 'radio'].includes(f.field_type) && !options.includes(v))
+      return { error: `"${f.label}" has an invalid choice` };
     clean[f.field_key] = f.field_type === 'number' ? Number(v) : v;
   }
   return { data: clean };
@@ -1138,7 +1239,7 @@ app.post('/agent/form-responses', requireAuth, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const campaign = await findCurrentCampaign(req.session.user.id);
   if (!campaign || !campaign.form_id) return res.status(400).json({ error: 'your current campaign has no form' });
-  const [form] = await loadFormsWithFields('WHERE id = ? AND status = \'active\'', [campaign.form_id]);
+  const [form] = await loadFormsWithFields("WHERE id = ? AND status = 'active'", [campaign.form_id]);
   if (!form) return res.status(400).json({ error: 'your current campaign has no active form' });
 
   const { leadId, callId } = req.body;
@@ -1150,7 +1251,10 @@ app.post('/agent/form-responses', requireAuth, async (req, res) => {
     if (!leads[0]) return res.status(400).json({ error: 'that lead is not in your current campaign' });
   }
   if (callId) {
-    const [calls] = await pool.query('SELECT id FROM calls WHERE id = ? AND from_extension = ?', [callId, req.session.user.extensionName]);
+    const [calls] = await pool.query('SELECT id FROM calls WHERE id = ? AND from_extension = ?', [
+      callId,
+      req.session.user.extensionName,
+    ]);
     if (!calls[0]) return res.status(400).json({ error: 'that call is not yours' });
   }
 
@@ -1158,7 +1262,7 @@ app.post('/agent/form-responses', requireAuth, async (req, res) => {
   if (error) return res.status(400).json({ error });
   const [result] = await pool.query(
     'INSERT INTO form_responses (tenant_id, form_id, campaign_id, lead_id, call_id, user_id, data) VALUES (1, ?, ?, ?, ?, ?, ?)',
-    [form.id, campaign.id, leadId || null, callId || null, req.session.user.id, JSON.stringify(data)]
+    [form.id, campaign.id, leadId || null, callId || null, req.session.user.id, JSON.stringify(data)],
   );
   res.status(201).json({ id: result.insertId });
 });
@@ -1173,14 +1277,16 @@ app.post('/admin/campaigns/:id/dialer', requireRole('admin'), async (req, res) =
   const next = { start: 'running', pause: 'paused', stop: 'stopped' }[action];
   if (!next) return res.status(400).json({ error: 'action must be start, pause or stop' });
   if (action === 'start') {
-    if (c.dial_mode === 'manual') return res.status(400).json({ error: 'set a dial mode other than Manual first (Campaigns → Edit)' });
+    if (c.dial_mode === 'manual')
+      return res.status(400).json({ error: 'set a dial mode other than Manual first (Campaigns → Edit)' });
     if (c.status !== 'active') return res.status(400).json({ error: 'campaign status must be Active' });
     if (!c.queue_id) return res.status(400).json({ error: 'campaign needs a queue' });
   }
-  if (action === 'pause' && c.dialer_state !== 'running') return res.status(400).json({ error: 'only a running campaign can be paused' });
+  if (action === 'pause' && c.dialer_state !== 'running')
+    return res.status(400).json({ error: 'only a running campaign can be paused' });
   await pool.query(
     'UPDATE campaigns SET dialer_state = ?, dialer_state_changed_at = NOW(), dialer_state_changed_by = ? WHERE id = ?',
-    [next, req.session.user.id, c.id]
+    [next, req.session.user.id, c.id],
   );
   res.json({ status: 'ok', dialerState: next });
 });
@@ -1188,7 +1294,7 @@ app.post('/admin/campaigns/:id/dialer', requireRole('admin'), async (req, res) =
 app.get('/admin/dialer', requireRole('admin'), async (req, res) => {
   // Row 0 is the engine's heartbeat: no tick for 15s+ means it's down.
   const [engineRows] = await pool.query(
-    'SELECT note AS engine_id, last_tick_at, TIMESTAMPDIFF(SECOND, last_tick_at, NOW()) AS age_sec FROM dialer_status WHERE campaign_id = 0'
+    'SELECT note AS engine_id, last_tick_at, TIMESTAMPDIFF(SECOND, last_tick_at, NOW()) AS age_sec FROM dialer_status WHERE campaign_id = 0',
   );
   const engine = engineRows[0];
   const [campaigns] = await pool.query(`
@@ -1221,7 +1327,8 @@ app.get('/admin/dialer', requireRole('admin'), async (req, res) => {
 });
 
 app.get('/admin/campaigns/:id/hopper', requireRole('admin'), async (req, res) => {
-  const [rows] = await pool.query(`
+  const [rows] = await pool.query(
+    `
     SELECT h.*, l.name, ls.name AS list_name, u.username AS reserved_for
     FROM dial_hopper h
     JOIN leads l ON l.id = h.lead_id
@@ -1230,7 +1337,9 @@ app.get('/admin/campaigns/:id/hopper', requireRole('admin'), async (req, res) =>
     WHERE h.campaign_id = ?
     ORDER BY h.status = 'locked' DESC, h.is_callback DESC, h.list_priority DESC, h.lead_priority DESC, h.attempts, h.lead_id
     LIMIT 200
-  `, [req.params.id]);
+  `,
+    [req.params.id],
+  );
   res.json(rows);
 });
 
@@ -1239,7 +1348,8 @@ app.get('/admin/campaigns/:id/hopper', requireRole('admin'), async (req, res) =>
 // only sees "a call came in"; this tells it which lead it is.
 app.get('/agent/active-call', requireAuth, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
-  const [rows] = await pool.query(`
+  const [rows] = await pool.query(
+    `
     SELECT c.id AS call_id, c.lead_id, l.name, l.phone, l.alt_phone, l.status, l.attempts, l.custom_data, ls.name AS list_name,
       (c.from_extension = ?) AS owner, (c.dial_attempt_id IS NOT NULL) AS from_dialer
     FROM calls c
@@ -1248,7 +1358,9 @@ app.get('/agent/active-call', requireAuth, async (req, res) => {
     WHERE (c.from_extension = ? OR c.transfer_ext = ?) AND c.end_time IS NULL
       AND c.start_time > NOW() - INTERVAL 3 HOUR
     ORDER BY c.id DESC LIMIT 1
-  `, [req.session.user.extensionName, req.session.user.extensionName, req.session.user.extensionName]);
+  `,
+    [req.session.user.extensionName, req.session.user.extensionName, req.session.user.extensionName],
+  );
   const row = rows[0];
   res.json(row ? { ...row, owner: !!Number(row.owner), from_dialer: !!Number(row.from_dialer) } : null);
 });
@@ -1268,29 +1380,63 @@ function callControlRoute(fn) {
   };
 }
 
-app.get('/agent/transfer-targets', requireAuth, callControlRoute((ext) => callControl.transferTargets(ext)));
-app.get('/agent/call/control', requireAuth, callControlRoute(async (ext) => callControl.viewFor(ext)));
-app.post('/agent/call/transfer', requireAuth, callControlRoute((ext, req) => callControl.transfer(ext, req.body || {})));
-app.post('/agent/call/complete', requireAuth, callControlRoute((ext) => callControl.completeTransfer(ext)));
-app.post('/agent/call/merge', requireAuth, callControlRoute((ext) => callControl.merge(ext)));
-app.post('/agent/call/cancel', requireAuth, callControlRoute((ext) => callControl.cancelConsult(ext)));
-app.post('/agent/call/drop', requireAuth, callControlRoute((ext, req) => callControl.dropParty(ext, String((req.body || {}).partyId || ''))));
-app.post('/agent/call/leave', requireAuth, callControlRoute((ext) => callControl.leave(ext)));
+app.get(
+  '/agent/transfer-targets',
+  requireAuth,
+  callControlRoute((ext) => callControl.transferTargets(ext)),
+);
+app.get(
+  '/agent/call/control',
+  requireAuth,
+  callControlRoute(async (ext) => callControl.viewFor(ext)),
+);
+app.post(
+  '/agent/call/transfer',
+  requireAuth,
+  callControlRoute((ext, req) => callControl.transfer(ext, req.body || {})),
+);
+app.post(
+  '/agent/call/complete',
+  requireAuth,
+  callControlRoute((ext) => callControl.completeTransfer(ext)),
+);
+app.post(
+  '/agent/call/merge',
+  requireAuth,
+  callControlRoute((ext) => callControl.merge(ext)),
+);
+app.post(
+  '/agent/call/cancel',
+  requireAuth,
+  callControlRoute((ext) => callControl.cancelConsult(ext)),
+);
+app.post(
+  '/agent/call/drop',
+  requireAuth,
+  callControlRoute((ext, req) => callControl.dropParty(ext, String((req.body || {}).partyId || ''))),
+);
+app.post(
+  '/agent/call/leave',
+  requireAuth,
+  callControlRoute((ext) => callControl.leave(ext)),
+);
 
 // In-call panel: has the customer on the agent's click-to-call answered
 // yet? (The agent's own leg answers first, so the browser can't tell.)
 app.get('/agent/call-state/:callId', requireAuth, async (req, res) => {
-  const [rows] = await pool.query(
-    'SELECT answer_time, end_time FROM calls WHERE id = ? AND from_extension = ?',
-    [req.params.callId, req.session.user.extensionName]
-  );
+  const [rows] = await pool.query('SELECT answer_time, end_time FROM calls WHERE id = ? AND from_extension = ?', [
+    req.params.callId,
+    req.session.user.extensionName,
+  ]);
   if (!rows[0]) return res.status(404).json({ error: 'call not found' });
   res.json({ answered: !!rows[0].answer_time, ended: !!rows[0].end_time });
 });
 
 app.get('/agent/campaign-info', requireAuth, async (req, res) => {
   const c = await findCurrentCampaign(req.session.user.id);
-  res.json(c ? { id: c.id, name: c.name, dialMode: c.dial_mode, wrapupSec: c.wrapup_sec, dialerState: c.dialer_state } : null);
+  res.json(
+    c ? { id: c.id, name: c.name, dialMode: c.dial_mode, wrapupSec: c.wrapup_sec, dialerState: c.dialer_state } : null,
+  );
 });
 
 // --- Agent: Preview mode (D6) ---
@@ -1301,7 +1447,8 @@ const previewLockOwner = (userId) => `user:${userId}`;
 
 async function currentAgentStatus(userId) {
   const [rows] = await pool.query(
-    'SELECT status FROM agent_status_log WHERE user_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1', [userId]
+    'SELECT status FROM agent_status_log WHERE user_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1',
+    [userId],
   );
   return rows[0] ? rows[0].status : 'offline';
 }
@@ -1313,19 +1460,22 @@ async function releasePreviewLocks(userId, keepCampaignId) {
   await pool.query(
     `UPDATE dial_hopper SET status = 'ready', locked_at = NULL, locked_by = NULL
      WHERE locked_by = ? AND (? IS NULL OR campaign_id <> ?)`,
-    [previewLockOwner(userId), keepCampaignId || null, keepCampaignId || null]
+    [previewLockOwner(userId), keepCampaignId || null, keepCampaignId || null],
   );
 }
 
 async function previewLeadDetails(hopperRow) {
-  const [rows] = await pool.query(`
+  const [rows] = await pool.query(
+    `
     SELECT l.id, l.name, l.phone, l.alt_phone, l.status, l.attempts, l.custom_data, ls.name AS list_name,
       cb.callback_at, cb.note AS callback_note
     FROM leads l
     LEFT JOIN lists ls ON ls.id = l.list_id
     LEFT JOIN callbacks cb ON cb.lead_id = l.id AND cb.status = 'pending'
     WHERE l.id = ?
-  `, [hopperRow.lead_id]);
+  `,
+    [hopperRow.lead_id],
+  );
   return rows[0] ? { ...rows[0], is_callback: !!hopperRow.is_callback } : null;
 }
 
@@ -1343,8 +1493,10 @@ app.get('/agent/preview', requireAuth, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const campaign = await findCurrentCampaign(req.session.user.id);
   if (!campaign || campaign.dial_mode !== 'preview') return res.json({ enabled: false });
-  const [held] = await pool.query('SELECT * FROM dial_hopper WHERE locked_by = ? AND campaign_id = ? LIMIT 1',
-    [previewLockOwner(req.session.user.id), campaign.id]);
+  const [held] = await pool.query('SELECT * FROM dial_hopper WHERE locked_by = ? AND campaign_id = ? LIMIT 1', [
+    previewLockOwner(req.session.user.id),
+    campaign.id,
+  ]);
   res.json({
     enabled: true,
     blocker: await previewBlocker(req.session.user.id, campaign),
@@ -1362,7 +1514,10 @@ app.post('/agent/preview/next', requireAuth, async (req, res) => {
 
   const owner = previewLockOwner(userId);
   // Already holding one (e.g. page refresh) - give the same lead back.
-  const [held] = await pool.query('SELECT * FROM dial_hopper WHERE locked_by = ? AND campaign_id = ? LIMIT 1', [owner, campaign.id]);
+  const [held] = await pool.query('SELECT * FROM dial_hopper WHERE locked_by = ? AND campaign_id = ? LIMIT 1', [
+    owner,
+    campaign.id,
+  ]);
   if (held[0]) return res.json({ lead: await previewLeadDetails(held[0]) });
 
   // FOR UPDATE SKIP LOCKED: two agents asking at the same moment each get
@@ -1371,16 +1526,22 @@ app.post('/agent/preview/next', requireAuth, async (req, res) => {
   let row = null;
   try {
     await conn.beginTransaction();
-    const [rows] = await conn.query(`
+    const [rows] = await conn.query(
+      `
       SELECT * FROM dial_hopper
       WHERE campaign_id = ? AND status = 'ready' AND (reserved_user_id IS NULL OR reserved_user_id = ?)
       ORDER BY (reserved_user_id = ?) DESC, is_callback DESC, list_priority DESC, lead_priority DESC, attempts, lead_id
       LIMIT 1
       FOR UPDATE SKIP LOCKED
-    `, [campaign.id, userId, userId]);
+    `,
+      [campaign.id, userId, userId],
+    );
     row = rows[0] || null;
     if (row) {
-      await conn.query("UPDATE dial_hopper SET status = 'locked', locked_at = NOW(), locked_by = ? WHERE id = ?", [owner, row.id]);
+      await conn.query("UPDATE dial_hopper SET status = 'locked', locked_at = NOW(), locked_by = ? WHERE id = ?", [
+        owner,
+        row.id,
+      ]);
     }
     await conn.commit();
   } catch (err) {
@@ -1397,7 +1558,9 @@ app.post('/agent/preview/next', requireAuth, async (req, res) => {
 // Skip: lead leaves the hopper and isn't offered again for 15 minutes.
 app.post('/agent/preview/skip', requireAuth, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
-  const [held] = await pool.query('SELECT id, lead_id FROM dial_hopper WHERE locked_by = ?', [previewLockOwner(req.session.user.id)]);
+  const [held] = await pool.query('SELECT id, lead_id FROM dial_hopper WHERE locked_by = ?', [
+    previewLockOwner(req.session.user.id),
+  ]);
   if (!held[0]) return res.status(404).json({ error: 'you have no preview lead' });
   await pool.query('DELETE FROM dial_hopper WHERE id = ?', [held[0].id]);
   await pool.query('UPDATE leads SET next_call_at = NOW() + INTERVAL 15 MINUTE WHERE id = ?', [held[0].lead_id]);
@@ -1442,7 +1605,8 @@ app.get('/agent/dispositions', requireAuth, async (req, res) => {
 app.get('/agent/callbacks', requireAuth, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const campaign = await findCurrentCampaign(req.session.user.id);
-  const [rows] = await pool.query(`
+  const [rows] = await pool.query(
+    `
     SELECT cb.id, cb.lead_id, cb.callback_at, cb.note, cb.user_id, l.name, l.phone, c.name AS campaign_name
     FROM callbacks cb
     JOIN leads l ON l.id = cb.lead_id
@@ -1451,7 +1615,9 @@ app.get('/agent/callbacks', requireAuth, async (req, res) => {
       AND (cb.user_id = ? OR (cb.user_id IS NULL AND cb.campaign_id = ?))
     ORDER BY cb.callback_at
     LIMIT 100
-  `, [req.session.user.id, campaign ? campaign.id : -1]);
+  `,
+    [req.session.user.id, campaign ? campaign.id : -1],
+  );
   res.json(rows);
 });
 
@@ -1471,7 +1637,9 @@ app.get('/admin/callbacks', requireRole('admin'), async (req, res) => {
 });
 
 app.post('/admin/callbacks/:id/cancel', requireRole('admin'), async (req, res) => {
-  const [result] = await pool.query("UPDATE callbacks SET status = 'cancelled' WHERE id = ? AND status = 'pending'", [req.params.id]);
+  const [result] = await pool.query("UPDATE callbacks SET status = 'cancelled' WHERE id = ? AND status = 'pending'", [
+    req.params.id,
+  ]);
   if (!result.affectedRows) return res.status(404).json({ error: 'no pending callback with that id' });
   res.json({ status: 'ok' });
 });
@@ -1479,19 +1647,25 @@ app.post('/admin/callbacks/:id/cancel', requireRole('admin'), async (req, res) =
 // --- Admin: DNC list ---
 app.get('/admin/dnc', requireRole('admin'), async (req, res) => {
   const q = normalizePhone(req.query.q || '');
-  const [rows] = await pool.query(`
+  const [rows] = await pool.query(
+    `
     SELECT d.id, d.phone, d.source, d.created_at, u.username AS created_by_name
     FROM dnc_numbers d LEFT JOIN users u ON u.id = d.created_by
     WHERE d.tenant_id = 1 ${q ? 'AND d.phone LIKE ?' : ''}
     ORDER BY d.id DESC LIMIT 500
-  `, q ? [`%${q}%`] : []);
+  `,
+    q ? [`%${q}%`] : [],
+  );
   const [count] = await pool.query('SELECT COUNT(*) AS cnt FROM dnc_numbers WHERE tenant_id = 1');
   res.json({ total: count[0].cnt, rows });
 });
 
 // Bulk add: one number per line (or comma-separated).
 app.post('/admin/dnc', requireRole('admin'), async (req, res) => {
-  const entries = String(req.body.phones || '').split(/[\n,]+/).map((p) => p.trim()).filter(Boolean);
+  const entries = String(req.body.phones || '')
+    .split(/[\n,]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (entries.length === 0) return res.status(400).json({ error: 'enter at least one number' });
   if (entries.length > 5000) return res.status(400).json({ error: 'max 5000 numbers per add' });
   let added = 0;
@@ -1499,7 +1673,10 @@ app.post('/admin/dnc', requireRole('admin'), async (req, res) => {
   let invalid = 0;
   for (const p of entries) {
     const n = normalizePhone(p);
-    if (n.length < 3 || n.length > 15) { invalid++; continue; }
+    if (n.length < 3 || n.length > 15) {
+      invalid++;
+      continue;
+    }
     if (await addDnc(n, 'manual', req.session.user.id)) added++;
     else existing++;
   }
@@ -1518,16 +1695,18 @@ app.delete('/admin/dnc/:id', requireRole('admin'), async (req, res) => {
 app.get('/admin/teams', requireRole('admin'), async (req, res) => {
   const [teams] = await pool.query('SELECT * FROM teams ORDER BY id DESC');
   const [members] = await pool.query(
-    'SELECT tm.team_id, u.id, u.username FROM team_members tm JOIN users u ON u.id = tm.user_id ORDER BY u.username'
+    'SELECT tm.team_id, u.id, u.username FROM team_members tm JOIN users u ON u.id = tm.user_id ORDER BY u.username',
   );
   const [campaigns] = await pool.query(
-    'SELECT tc.team_id, c.id, c.name FROM team_campaigns tc JOIN campaigns c ON c.id = tc.campaign_id ORDER BY c.name'
+    'SELECT tc.team_id, c.id, c.name FROM team_campaigns tc JOIN campaigns c ON c.id = tc.campaign_id ORDER BY c.name',
   );
-  res.json(teams.map((t) => ({
-    ...t,
-    members: members.filter((m) => m.team_id === t.id).map(({ id, username }) => ({ id, username })),
-    campaigns: campaigns.filter((c) => c.team_id === t.id).map(({ id, name }) => ({ id, name })),
-  })));
+  res.json(
+    teams.map((t) => ({
+      ...t,
+      members: members.filter((m) => m.team_id === t.id).map(({ id, username }) => ({ id, username })),
+      campaigns: campaigns.filter((c) => c.team_id === t.id).map(({ id, name }) => ({ id, name })),
+    })),
+  );
 });
 
 // Create and edit both replace the full member/campaign sets inside one
@@ -1541,9 +1720,10 @@ async function saveTeam(teamId, { name, status, memberIds, campaignIds }) {
       await conn.query('DELETE FROM team_members WHERE team_id = ?', [teamId]);
       await conn.query('DELETE FROM team_campaigns WHERE team_id = ?', [teamId]);
     } else {
-      const [result] = await conn.query(
-        'INSERT INTO teams (tenant_id, name, status) VALUES (1, ?, ?)', [name, status || 'active']
-      );
+      const [result] = await conn.query('INSERT INTO teams (tenant_id, name, status) VALUES (1, ?, ?)', [
+        name,
+        status || 'active',
+      ]);
       teamId = result.insertId;
     }
     for (const userId of memberIds || []) {
@@ -1605,7 +1785,7 @@ app.get('/agent/stats', requireAuth, async (req, res) => {
   const [loginRows] = await pool.query(
     `SELECT MIN(started_at) AS first_login FROM agent_status_log
      WHERE user_id = ? AND DATE(started_at) = CURDATE()`,
-    [userId]
+    [userId],
   );
   const loginSeconds = loginRows[0].first_login
     ? Math.floor((Date.now() - new Date(loginRows[0].first_login).getTime()) / 1000)
@@ -1616,7 +1796,7 @@ app.get('/agent/stats', requireAuth, async (req, res) => {
       `SELECT COALESCE(SUM(TIMESTAMPDIFF(SECOND, started_at, COALESCE(ended_at, NOW()))), 0) AS secs
        FROM agent_status_log
        WHERE user_id = ? AND status = ? AND DATE(started_at) = CURDATE()`,
-      [userId, status]
+      [userId, status],
     );
     // MySQL returns SUM()/COALESCE() results as strings via mysql2, not numbers.
     return Number(rows[0].secs);
@@ -1629,7 +1809,7 @@ app.get('/agent/stats', requireAuth, async (req, res) => {
     `SELECT COALESCE(SUM(TIMESTAMPDIFF(SECOND, answer_time, COALESCE(end_time, NOW()))), 0) AS secs
      FROM calls
      WHERE from_extension = ? AND answer_time IS NOT NULL AND DATE(start_time) = CURDATE()`,
-    [req.session.user.extensionName]
+    [req.session.user.extensionName],
   );
   const talkSeconds = Number(talkRows[0].secs);
 
@@ -1644,7 +1824,7 @@ app.get('/agent/stats', requireAuth, async (req, res) => {
      LEFT JOIN queues q ON q.id = asl.queue_id
      WHERE asl.user_id = ? AND asl.ended_at IS NULL
      ORDER BY asl.id DESC LIMIT 1`,
-    [userId]
+    [userId],
   );
   const current = currentRows[0] || null;
 
@@ -1664,10 +1844,9 @@ app.get('/agent/stats', requireAuth, async (req, res) => {
 // The extension an agent connects with is a per-session device choice
 // (like picking a desk phone for a shift), not tied to their login account.
 app.get('/agent/extension-credentials/:extension', requireAuth, async (req, res) => {
-  const [rows] = await pool.query(
-    'SELECT id, name, sip_password FROM extensions WHERE name = ?',
-    [req.params.extension]
-  );
+  const [rows] = await pool.query('SELECT id, name, sip_password FROM extensions WHERE name = ?', [
+    req.params.extension,
+  ]);
   if (!rows[0] || !rows[0].sip_password) {
     return res.status(404).json({ error: 'unknown extension' });
   }
@@ -1695,10 +1874,9 @@ app.get('/leads', requireAuth, async (req, res) => {
   }
   const campaign = await findCurrentCampaign(req.session.user.id);
   if (!campaign) return res.json([]);
-  const [rows] = await pool.query(
-    'SELECT * FROM leads WHERE campaign_id = ? ORDER BY id DESC LIMIT 100',
-    [campaign.id]
-  );
+  const [rows] = await pool.query('SELECT * FROM leads WHERE campaign_id = ? ORDER BY id DESC LIMIT 100', [
+    campaign.id,
+  ]);
   res.json(rows);
 });
 
@@ -1710,10 +1888,11 @@ app.post('/leads', requireAuth, async (req, res) => {
     const campaign = await findCurrentCampaign(req.session.user.id);
     campaignId = campaign ? campaign.id : null;
   }
-  const [result] = await pool.query(
-    'INSERT INTO leads (tenant_id, phone, name, campaign_id) VALUES (1, ?, ?, ?)',
-    [phone, name || null, campaignId]
-  );
+  const [result] = await pool.query('INSERT INTO leads (tenant_id, phone, name, campaign_id) VALUES (1, ?, ?, ?)', [
+    phone,
+    name || null,
+    campaignId,
+  ]);
   const [rows] = await pool.query('SELECT * FROM leads WHERE id = ?', [result.insertId]);
   res.status(201).json(rows[0]);
 });
@@ -1735,15 +1914,18 @@ app.post('/leads/:id/disposition', requireAuth, async (req, res) => {
   }
   const dispositions = await getDispositions(lead.campaign_id);
   const d = dispositions.find((x) => x.code === status);
-  if (!d) return res.status(400).json({ error: `status must be one of: ${dispositions.map((x) => x.code).join(', ')}` });
+  if (!d)
+    return res.status(400).json({ error: `status must be one of: ${dispositions.map((x) => x.code).join(', ')}` });
 
   let nextCallAt = null;
   let when = null;
   if (d.is_callback) {
     when = new Date(callbackAt);
-    if (!callbackAt || Number.isNaN(when.getTime())) return res.status(400).json({ error: 'pick a callback date and time' });
+    if (!callbackAt || Number.isNaN(when.getTime()))
+      return res.status(400).json({ error: 'pick a callback date and time' });
     if (when < new Date(Date.now() - 60 * 1000)) return res.status(400).json({ error: 'callback time is in the past' });
-    if (when > new Date(Date.now() + 90 * 24 * 3600 * 1000)) return res.status(400).json({ error: 'callback must be within 90 days' });
+    if (when > new Date(Date.now() + 90 * 24 * 3600 * 1000))
+      return res.status(400).json({ error: 'callback must be within 90 days' });
     nextCallAt = when;
   } else if (d.retry_after_min) {
     nextCallAt = new Date(Date.now() + d.retry_after_min * 60 * 1000);
@@ -1752,16 +1934,26 @@ app.post('/leads/:id/disposition', requireAuth, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    await conn.query(
-      'UPDATE leads SET status = ?, updated_by = ?, is_final = ?, next_call_at = ? WHERE id = ?',
-      [d.code, req.session.user.id, d.is_final ? 1 : 0, nextCallAt, lead.id]
-    );
+    await conn.query('UPDATE leads SET status = ?, updated_by = ?, is_final = ?, next_call_at = ? WHERE id = ?', [
+      d.code,
+      req.session.user.id,
+      d.is_final ? 1 : 0,
+      nextCallAt,
+      lead.id,
+    ]);
     // Any earlier pending callback for this lead is now handled.
     await conn.query("UPDATE callbacks SET status = 'done' WHERE lead_id = ? AND status = 'pending'", [lead.id]);
     if (d.is_callback) {
       await conn.query(
         'INSERT INTO callbacks (tenant_id, lead_id, campaign_id, user_id, callback_at, note, created_by) VALUES (1, ?, ?, ?, ?, ?, ?)',
-        [lead.id, lead.campaign_id, callbackMine ? req.session.user.id : null, when, note ? String(note).slice(0, 255) : null, req.session.user.id]
+        [
+          lead.id,
+          lead.campaign_id,
+          callbackMine ? req.session.user.id : null,
+          when,
+          note ? String(note).slice(0, 255) : null,
+          req.session.user.id,
+        ],
       );
     }
     await conn.commit();
@@ -1785,14 +1977,15 @@ app.put('/admin/leads/:id', requireRole('admin'), async (req, res) => {
   }
   if (status && status !== 'new') {
     const codes = (await getDispositions(campaignId || null)).map((x) => x.code);
-    if (!codes.includes(status)) return res.status(400).json({ error: `status must be new or one of: ${codes.join(', ')}` });
+    if (!codes.includes(status))
+      return res.status(400).json({ error: `status must be new or one of: ${codes.join(', ')}` });
   }
   const [rows] = await pool.query('SELECT id FROM leads WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'lead not found' });
 
   await pool.query(
     'UPDATE leads SET name = ?, phone = ?, campaign_id = ?, list_id = ?, status = COALESCE(?, status), updated_by = ? WHERE id = ?',
-    [name || null, phone, campaignId || null, listId || null, status || null, req.session.user.id, req.params.id]
+    [name || null, phone, campaignId || null, listId || null, status || null, req.session.user.id, req.params.id],
   );
   res.json({ status: 'ok' });
 });
@@ -1805,9 +1998,13 @@ app.delete('/admin/leads/:id', requireRole('admin'), async (req, res) => {
   if (callRefs[0].cnt > 0) {
     return res.status(409).json({ error: `Cannot delete - ${callRefs[0].cnt} call record(s) reference this lead.` });
   }
-  const [responseRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM form_responses WHERE lead_id = ?', [req.params.id]);
+  const [responseRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM form_responses WHERE lead_id = ?', [
+    req.params.id,
+  ]);
   if (responseRefs[0].cnt > 0) {
-    return res.status(409).json({ error: `Cannot delete - ${responseRefs[0].cnt} form response(s) reference this lead.` });
+    return res
+      .status(409)
+      .json({ error: `Cannot delete - ${responseRefs[0].cnt} form response(s) reference this lead.` });
   }
   const [callbackRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM callbacks WHERE lead_id = ?', [req.params.id]);
   if (callbackRefs[0].cnt > 0) {
@@ -1862,8 +2059,12 @@ async function readLeadUpload(file) {
       table.push({ rowNum, cells });
     });
   } else {
-    const lines = file.buffer.toString('utf-8').replace(/^﻿/, '').split(/\r?\n/);
-    table = lines.map((l, i) => ({ rowNum: i + 1, cells: parseCsvLine(l).map((c) => c.trim()) }))
+    const lines = file.buffer
+      .toString('utf-8')
+      .replace(/^\uFEFF/, '')
+      .split(/\r?\n/);
+    table = lines
+      .map((l, i) => ({ rowNum: i + 1, cells: parseCsvLine(l).map((c) => c.trim()) }))
       .filter((r) => r.cells.some((c) => c !== ''));
   }
   if (table.length < 2) return { error: 'the file has no data rows (row 1 must be the column headers)' };
@@ -1895,7 +2096,10 @@ function parseLeadCustomValue(field, raw) {
     case 'radio':
       return opts.includes(raw) ? { value: raw } : { error: `must be one of: ${opts.join(', ')}` };
     case 'checkbox': {
-      const picked = raw.split(',').map((x) => x.trim()).filter(Boolean);
+      const picked = raw
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
       const bad = picked.filter((x) => !opts.includes(x));
       return bad.length ? { error: `"${bad[0]}" is not one of: ${opts.join(', ')}` } : { value: picked };
     }
@@ -1959,16 +2163,25 @@ app.post('/admin/leads/import', requireRole('admin'), receiveLeadFile, async (re
 
   for (const { rowNum, values } of rows) {
     const phone = normalizePhone(values.phone);
-    if (phone.length < 7 || phone.length > 15) { rowError(rowNum, `invalid phone "${values.phone}"`); continue; }
+    if (phone.length < 7 || phone.length > 15) {
+      rowError(rowNum, `invalid phone "${values.phone}"`);
+      continue;
+    }
     let altPhone = null;
     if (values.alt_phone) {
       altPhone = normalizePhone(values.alt_phone);
-      if (altPhone.length < 7 || altPhone.length > 15) { rowError(rowNum, `invalid alt_phone "${values.alt_phone}"`); continue; }
+      if (altPhone.length < 7 || altPhone.length > 15) {
+        rowError(rowNum, `invalid alt_phone "${values.alt_phone}"`);
+        continue;
+      }
     }
     let priority = 0;
     if (values.priority) {
       priority = Number(values.priority);
-      if (!Number.isInteger(priority) || priority < -100 || priority > 100) { rowError(rowNum, 'priority must be a whole number -100..100'); continue; }
+      if (!Number.isInteger(priority) || priority < -100 || priority > 100) {
+        rowError(rowNum, 'priority must be a whole number -100..100');
+        continue;
+      }
     }
     const custom = {};
     let bad = null;
@@ -1976,15 +2189,35 @@ app.post('/admin/leads/import', requireRole('admin'), receiveLeadFile, async (re
       const raw = values[f.field_key];
       if (!raw) continue;
       const r = parseLeadCustomValue(f, raw);
-      if (r.error) { bad = `${f.field_key} ${r.error}`; break; }
+      if (r.error) {
+        bad = `${f.field_key} ${r.error}`;
+        break;
+      }
       custom[f.field_key] = r.value;
     }
-    if (bad) { rowError(rowNum, bad); continue; }
-    if (dnc.has(phone)) { summary.dnc++; continue; }
-    if (existing.has(phone)) { summary.duplicates++; continue; }
+    if (bad) {
+      rowError(rowNum, bad);
+      continue;
+    }
+    if (dnc.has(phone)) {
+      summary.dnc++;
+      continue;
+    }
+    if (existing.has(phone)) {
+      summary.duplicates++;
+      continue;
+    }
     existing.add(phone);
-    toInsert.push([1, phone, altPhone, values.name || null, campaignId, list.id, priority,
-      Object.keys(custom).length ? JSON.stringify(custom) : null]);
+    toInsert.push([
+      1,
+      phone,
+      altPhone,
+      values.name || null,
+      campaignId,
+      list.id,
+      priority,
+      Object.keys(custom).length ? JSON.stringify(custom) : null,
+    ]);
   }
 
   // One transaction, multi-row INSERTs in chunks - all or nothing, and
@@ -1995,7 +2228,7 @@ app.post('/admin/leads/import', requireRole('admin'), receiveLeadFile, async (re
     for (let i = 0; i < toInsert.length; i += 500) {
       await conn.query(
         'INSERT INTO leads (tenant_id, phone, alt_phone, name, campaign_id, list_id, priority, custom_data) VALUES ?',
-        [toInsert.slice(i, i + 500)]
+        [toInsert.slice(i, i + 500)],
       );
     }
     await conn.commit();
@@ -2025,8 +2258,16 @@ app.get('/admin/leads/template', requireRole('admin'), async (req, res) => {
   const example = { phone: '9840012345', name: 'Ravi Kumar', alt_phone: '', priority: '0' };
   for (const f of fields) {
     const o = f.options || [];
-    example[f.field_key] = { number: '50000', date: '2026-12-31', email: 'ravi@example.com', phone: '9840012346',
-      dropdown: o[0], radio: o[0], checkbox: o.slice(0, 2).join(', ') }[f.field_type] || '';
+    example[f.field_key] =
+      {
+        number: '50000',
+        date: '2026-12-31',
+        email: 'ravi@example.com',
+        phone: '9840012346',
+        dropdown: o[0],
+        radio: o[0],
+        checkbox: o.slice(0, 2).join(', '),
+      }[f.field_type] || '';
   }
 
   if (req.query.format === 'csv') {
@@ -2040,19 +2281,29 @@ app.get('/admin/leads/template', requireRole('admin'), async (req, res) => {
   const ws = wb.addWorksheet('Leads');
   ws.addRow(headers).font = { bold: true };
   ws.addRow(headers.map((h) => example[h] || ''));
-  ws.columns.forEach((col) => { col.width = 18; });
-  ws.getColumn(1).numFmt = '@';  // keep phone numbers as text (no 9.84E+09)
+  ws.columns.forEach((col) => {
+    col.width = 18;
+  });
+  ws.getColumn(1).numFmt = '@'; // keep phone numbers as text (no 9.84E+09)
   ws.getColumn(3).numFmt = '@';
   const info = wb.addWorksheet('Instructions');
   info.addRow(['Column', 'Required', 'Type', 'Allowed values / notes']).font = { bold: true };
   for (const c of LEAD_BASE_COLUMNS) info.addRow([c.key, c.required ? 'yes' : 'no', 'text', c.help]);
   for (const f of fields) {
-    info.addRow([f.field_key, 'no', f.field_type,
-      `${f.label}${(f.options || []).length ? ' - one of: ' + f.options.join(', ') : ''}${f.field_type === 'checkbox' ? ' (comma-separate several)' : ''}${f.field_type === 'date' ? ' (YYYY-MM-DD)' : ''}`]);
+    info.addRow([
+      f.field_key,
+      'no',
+      f.field_type,
+      `${f.label}${(f.options || []).length ? ' - one of: ' + f.options.join(', ') : ''}${f.field_type === 'checkbox' ? ' (comma-separate several)' : ''}${f.field_type === 'date' ? ' (YYYY-MM-DD)' : ''}`,
+    ]);
   }
   info.addRow([]);
-  info.addRow(['Row 2 of the Leads sheet is an example - replace or delete it. Numbers on the DNC list and numbers already in the campaign are skipped.']);
-  info.columns.forEach((col, i) => { col.width = [16, 10, 12, 70][i]; });
+  info.addRow([
+    'Row 2 of the Leads sheet is an example - replace or delete it. Numbers on the DNC list and numbers already in the campaign are skipped.',
+  ]);
+  info.columns.forEach((col, i) => {
+    col.width = [16, 10, 12, 70][i];
+  });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${fileName}.xlsx"`);
   await wb.xlsx.write(res);
@@ -2060,7 +2311,9 @@ app.get('/admin/leads/template', requireRole('admin'), async (req, res) => {
 });
 
 // Old template URL kept working for bookmarks.
-app.get('/admin/leads/csv-template', requireRole('admin'), (req, res) => res.redirect('/admin/leads/template?format=csv'));
+app.get('/admin/leads/csv-template', requireRole('admin'), (req, res) =>
+  res.redirect('/admin/leads/template?format=csv'),
+);
 
 // --- Calls (admin sees everything, agent sees only their own extension's calls) ---
 app.get('/calls', requireAuth, async (req, res) => {
@@ -2068,10 +2321,9 @@ app.get('/calls', requireAuth, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM calls ORDER BY id DESC LIMIT 100');
     return res.json(rows);
   }
-  const [rows] = await pool.query(
-    'SELECT * FROM calls WHERE from_extension = ? ORDER BY id DESC LIMIT 100',
-    [req.session.user.extensionName]
-  );
+  const [rows] = await pool.query('SELECT * FROM calls WHERE from_extension = ? ORDER BY id DESC LIMIT 100', [
+    req.session.user.extensionName,
+  ]);
   res.json(rows);
 });
 
@@ -2080,8 +2332,7 @@ app.post('/calls/click2call', requireAuth, async (req, res) => {
   // Agents can only ever call from their own assigned extension - never
   // trust a client-supplied fromExtension for that role. Admins (who have
   // no extension of their own) may still specify one for testing.
-  const fromExtension =
-    req.session.user.role === 'agent' ? req.session.user.extensionName : req.body.fromExtension;
+  const fromExtension = req.session.user.role === 'agent' ? req.session.user.extensionName : req.body.fromExtension;
 
   if (!fromExtension || !toNumber) {
     return res.status(400).json({ error: 'fromExtension and toNumber are required' });
@@ -2100,8 +2351,7 @@ app.post('/calls/click2call', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'this number is on the Do Not Call list' });
   }
 
-  const campaign =
-    req.session.user.role === 'agent' ? await findCurrentCampaign(req.session.user.id) : null;
+  const campaign = req.session.user.role === 'agent' ? await findCurrentCampaign(req.session.user.id) : null;
 
   // Calling hours only apply to real outside calls through the trunk,
   // not to internal extension-to-extension test calls.
@@ -2124,7 +2374,7 @@ app.post('/calls/click2call', requireAuth, async (req, res) => {
   const [insertResult] = await pool.query(
     `INSERT INTO calls (tenant_id, lead_id, direction, from_extension, to_number, campaign_id)
      VALUES (1, ?, 'outbound', ?, ?, ?)`,
-    [leadId || null, fromExtension, toNumber, campaign ? campaign.id : null]
+    [leadId || null, fromExtension, toNumber, campaign ? campaign.id : null],
   );
   const callId = insertResult.insertId;
   await logEvent(callId, 'originated', { fromExtension, toNumber });
@@ -2149,7 +2399,7 @@ app.get('/admin/users', requireRole('admin'), async (req, res) => {
   const [rows] = await pool.query(
     `SELECT users.id, users.username, users.role, users.created_at, extensions.name AS extension_name
      FROM users LEFT JOIN extensions ON users.extension_id = extensions.id
-     ORDER BY users.id`
+     ORDER BY users.id`,
   );
   res.json(rows);
 });
@@ -2166,7 +2416,7 @@ app.post('/admin/users', requireRole('admin'), async (req, res) => {
   try {
     const [result] = await pool.query(
       'INSERT INTO users (tenant_id, username, password_hash, role, extension_id) VALUES (1, ?, ?, ?, ?)',
-      [username, hash, role, role === 'agent' ? extensionId : null]
+      [username, hash, role, role === 'agent' ? extensionId : null],
     );
     res.status(201).json({ id: result.insertId, username, role });
   } catch (err) {
@@ -2187,14 +2437,12 @@ app.get('/admin/dashboard', requireRole('admin'), async (req, res) => {
   const [[agentCount]] = await pool.query("SELECT COUNT(*) AS c FROM users WHERE role = 'agent'");
   const [[availableCount]] = await pool.query(
     `SELECT COUNT(*) AS c FROM agent_status_log
-     WHERE ended_at IS NULL AND status = 'available'`
+     WHERE ended_at IS NULL AND status = 'available'`,
   );
-  const [[callsToday]] = await pool.query(
-    'SELECT COUNT(*) AS c FROM calls WHERE DATE(start_time) = CURDATE()'
-  );
+  const [[callsToday]] = await pool.query('SELECT COUNT(*) AS c FROM calls WHERE DATE(start_time) = CURDATE()');
   const [[avgHandle]] = await pool.query(
     `SELECT COALESCE(AVG(TIMESTAMPDIFF(SECOND, answer_time, end_time)), 0) AS secs
-     FROM calls WHERE DATE(start_time) = CURDATE() AND answer_time IS NOT NULL AND end_time IS NOT NULL`
+     FROM calls WHERE DATE(start_time) = CURDATE() AND answer_time IS NOT NULL AND end_time IS NOT NULL`,
   );
   res.json({
     totalAgents: agentCount.c,
@@ -2269,7 +2517,7 @@ app.get('/admin/reports/campaigns', requireRole('admin'), async (req, res) => {
      LEFT JOIN calls ca ON ca.campaign_id = c.id AND DATE(ca.start_time) BETWEEN ? AND ?
      GROUP BY c.id, c.name
      ORDER BY c.id DESC`,
-    [from, to]
+    [from, to],
   );
   const result = rows.map((r) => {
     const totalCalls = Number(r.total_calls);
@@ -2312,7 +2560,7 @@ app.get('/admin/reports/agents', requireRole('admin'), async (req, res) => {
       AND (asl.ended_at IS NULL OR ca.start_time <= asl.ended_at)
      WHERE ca.from_extension IS NOT NULL AND DATE(ca.start_time) BETWEEN ? AND ?
      GROUP BY asl.user_id`,
-    [from, to]
+    [from, to],
   );
 
   const [loginStats] = await pool.query(
@@ -2321,7 +2569,7 @@ app.get('/admin/reports/agents', requireRole('admin'), async (req, res) => {
      FROM agent_status_log
      WHERE DATE(started_at) BETWEEN ? AND ?
      GROUP BY user_id`,
-    [from, to]
+    [from, to],
   );
 
   const [callbackStats] = await pool.query(
@@ -2329,7 +2577,7 @@ app.get('/admin/reports/agents', requireRole('admin'), async (req, res) => {
      FROM leads
      WHERE status = 'callback' AND updated_by IS NOT NULL AND DATE(updated_at) BETWEEN ? AND ?
      GROUP BY updated_by`,
-    [from, to]
+    [from, to],
   );
 
   const [agents] = await pool.query("SELECT id, username FROM users WHERE role = 'agent'");
@@ -2394,7 +2642,7 @@ app.get('/admin/reports/hourly', requireRole('admin'), async (req, res) => {
     `SELECT HOUR(start_time) AS hour, COUNT(*) AS total_calls, SUM(answer_time IS NOT NULL) AS answered
      FROM calls WHERE DATE(start_time) = ?
      GROUP BY HOUR(start_time)`,
-    [date]
+    [date],
   );
   const byHour = {};
   for (const r of rows) byHour[r.hour] = { total_calls: Number(r.total_calls), answered: Number(r.answered) };
@@ -2413,8 +2661,16 @@ app.get('/admin/reports/hourly', requireRole('admin'), async (req, res) => {
 
 // --- ARI event handling: drives the click-to-call flow above ---
 callControl.init({
-  pool, ari, ami, logEvent, setAgentStatus, findAgentIdByExtension, resolveDestination,
-  activeCalls, queueCallChannels, APP_NAME,
+  pool,
+  ari,
+  ami,
+  logEvent,
+  setAgentStatus,
+  findAgentIdByExtension,
+  resolveDestination,
+  activeCalls,
+  queueCallChannels,
+  APP_NAME,
 });
 
 ari.connectEvents(APP_NAME, async (event) => {
@@ -2447,7 +2703,7 @@ ari.connectEvents(APP_NAME, async (event) => {
              JOIN queues q ON q.id = c.queue_id
              WHERE d.number = ? AND c.status = 'active' AND q.status = 'active'
              LIMIT 1`,
-            [dialedNumber]
+            [dialedNumber],
           );
           if (didRows[0]) {
             campaign = didRows[0];
@@ -2467,7 +2723,7 @@ ari.connectEvents(APP_NAME, async (event) => {
           campaign = campaignRows[0] || null;
           if (campaign) {
             console.error(
-              `[DID routing] "${dialedNumber}" has no campaign mapping - falling back to campaign ${campaign.id}. Add it under Admin > Campaigns > DID Numbers.`
+              `[DID routing] "${dialedNumber}" has no campaign mapping - falling back to campaign ${campaign.id}. Add it under Admin > Campaigns > DID Numbers.`,
             );
           }
         }
@@ -2490,7 +2746,7 @@ ari.connectEvents(APP_NAME, async (event) => {
         const [insertResult] = await pool.query(
           `INSERT INTO calls (tenant_id, direction, to_number, campaign_id, auto_answer, channel_name)
            VALUES (1, 'inbound', ?, ?, ?, ?)`,
-          [callerNumber, campaign.id, campaign.auto_answer, event.channel.name]
+          [callerNumber, campaign.id, campaign.auto_answer, event.channel.name],
         );
         const callId = insertResult.insertId;
         queueCallChannels.set(event.channel.name, callId);
@@ -2537,10 +2793,9 @@ ari.connectEvents(APP_NAME, async (event) => {
           const toNumber = rows[0].to_number;
           let campaignCallerId = null;
           if (rows[0].campaign_id) {
-            const [campRows] = await pool.query(
-              'SELECT outbound_caller_id FROM campaigns WHERE id = ?',
-              [rows[0].campaign_id]
-            );
+            const [campRows] = await pool.query('SELECT outbound_caller_id FROM campaigns WHERE id = ?', [
+              rows[0].campaign_id,
+            ]);
             campaignCallerId = campRows[0] ? campRows[0].outbound_caller_id : null;
           }
           const { endpoint, callerId } = await resolveDestination(toNumber, campaignCallerId);
@@ -2579,8 +2834,7 @@ ari.connectEvents(APP_NAME, async (event) => {
           // because one leg left - ARI leaves teardown entirely to us.
           // Without this, whichever side didn't hang up first stays
           // connected indefinitely (this was a real bug, not a gap).
-          const otherChannelId =
-            state.agentChannelId === event.channel.id ? state.destChannelId : state.agentChannelId;
+          const otherChannelId = state.agentChannelId === event.channel.id ? state.destChannelId : state.agentChannelId;
           if (otherChannelId) {
             try {
               await ari.hangup(otherChannelId);
@@ -2597,10 +2851,7 @@ ari.connectEvents(APP_NAME, async (event) => {
           }
 
           const [callRows] = await pool.query('SELECT from_extension FROM calls WHERE id = ?', [callId]);
-          await pool.query(
-            "UPDATE calls SET end_time = NOW(), disposition = 'ended' WHERE id = ?",
-            [callId]
-          );
+          await pool.query("UPDATE calls SET end_time = NOW(), disposition = 'ended' WHERE id = ?", [callId]);
           await logEvent(callId, 'ended', { channelId: event.channel.id });
 
           // Automatically move the agent into after-call-work (ACW) status
@@ -2630,7 +2881,8 @@ async function findQueueCall(channelName) {
   if (callId) return { callId, attemptId: null };
   if (!channelName) return null;
   const [rows] = await pool.query(
-    'SELECT id, dial_attempt_id FROM calls WHERE channel_name = ? ORDER BY id DESC LIMIT 1', [channelName]
+    'SELECT id, dial_attempt_id FROM calls WHERE channel_name = ? ORDER BY id DESC LIMIT 1',
+    [channelName],
   );
   return rows[0] ? { callId: rows[0].id, attemptId: rows[0].dial_attempt_id } : null;
 }
@@ -2646,13 +2898,13 @@ ami.on('AgentConnect', async (fields) => {
     // Dialer calls already have answer_time (when the customer picked up).
     await pool.query(
       'UPDATE calls SET from_extension = ?, agent_channel = ?, answer_time = COALESCE(answer_time, NOW()) WHERE id = ?',
-      [extensionName, fields.DestChannel || null, callId]
+      [extensionName, fields.DestChannel || null, callId],
     );
     await logEvent(callId, 'agent_answered', { extensionName, interface: fields.Interface });
     if (attemptId) {
       await pool.query(
         "UPDATE dial_attempts SET status = 'connected', result = 'connected', connected_at = NOW(), agent_user_id = ? WHERE id = ? AND result IS NULL",
-        [await findAgentIdByExtension(extensionName), attemptId]
+        [await findAgentIdByExtension(extensionName), attemptId],
       );
     }
   } catch (err) {
@@ -2732,6 +2984,6 @@ const tlsOptions = {
   key: fs.readFileSync(path.join(CERT_DIR, 'privkey.pem')),
   cert: fs.readFileSync(path.join(CERT_DIR, 'fullchain.pem')),
 };
-https.createServer(tlsOptions, app).listen(PORT, () =>
-  console.log(`DialForge backend listening on port ${PORT} (HTTPS)`)
-);
+https
+  .createServer(tlsOptions, app)
+  .listen(PORT, () => console.log(`DialForge backend listening on port ${PORT} (HTTPS)`));
