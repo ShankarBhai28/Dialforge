@@ -1,6 +1,6 @@
 # DialForge — Application Rebuild Plan (React frontend + structured backend)
 
-Status: **in progress** — Stage 0 done 2026-10-09. Branch: `react-frontend` (cut from `predictive-dialer`).
+Status: **in progress** — Stage 0 and Stage 1 done 2026-10-09. Branch: `react-frontend` (cut from `predictive-dialer`).
 
 ## Why
 - `admin.html` (2,600 lines) and `agent.html` (2,000 lines) are single files that mix layout, styling and logic. Every new feature makes them harder to change safely.

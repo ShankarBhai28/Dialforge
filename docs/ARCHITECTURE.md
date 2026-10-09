@@ -81,7 +81,14 @@ Every table has `tenant_id` (always 1 today; multi-tenant is planned). The schem
 
 | Path | What |
 |---|---|
-| `backend/server.js` | Express app and every REST route (to be split into `src/routes/*` in Stage 1 of the rebuild) |
+| `backend/server.js` | Entry point only: checks `.env`, connects AMI, builds the app, starts telephony events, listens on HTTPS |
+| `backend/src/app.js` | `createApp()`: middleware plus every route module. Opens no connections, so tests can build it freely |
+| `backend/src/routes/*.js` | One Express router per area (campaigns, leads, forms, dialer, agent, reports…). Full URL paths are written in each file, so grep for a URL finds its handler |
+| `backend/src/services/*.js` | Logic shared by several routes: agent status and queue membership, dispositions, forms validation, DNC, lead import, campaign settings |
+| `backend/src/telephony/events.js` | `start()`: ARI Stasis handler (inbound, click-to-call) and AMI queue event handlers. Called once by `server.js` only |
+| `backend/src/realtime/hub.js` | WebSocket `/ws`: pushes live updates to logged-in browsers (§8) |
+| `backend/src/middleware/auth.js` | `requireAuth`, `requireRole('admin')` |
+| `backend/src/config.js`, `src/state.js` | Settings from `.env`; in-memory call maps shared by routes and telephony |
 | `backend/call-control.js` | Transfer / conference state machine |
 | `backend/dialer-engine.js` | Dialer process |
 | `backend/dialer-common.js` | Code shared by both processes (attempt results, recycle rules) |
@@ -91,7 +98,24 @@ Every table has `tenant_id` (always 1 today; multi-tenant is planned). The schem
 | `bot-service/` | AI voice-bot audio plumbing (proof of concept) |
 | `docs/` | This file, RUNBOOK, DEPLOY, STATUS, plans, checklists, ADRs |
 
+### Where new code goes
+- A new endpoint goes in the matching `src/routes/<area>.js`, or a new file added to `ROUTERS` in `src/app.js`. Protect it with `requireAuth` or `requireRole('admin')`; `tests/routes.test.js` fails if a route is public by accident or an admin route lets agents in.
+- Logic used by more than one route, or worth unit-testing, goes in `src/services/`. Services never import routes.
+- Anything reacting to Asterisk events goes in `src/telephony/` or `call-control.js`.
+
 ## 7. Configuration
 
 All settings come from `backend/.env` (template: `backend/.env.example`). Never commit `.env`.
 Extra optional setting: `DIALER_MAX_TRUNK_CHANNELS` caps how many trunk channels the dialer may use (default 4).
+
+## 8. Live updates (WebSocket `/ws`)
+
+Browsers open `wss://<host>:3000/ws` after logging in. The upgrade is checked against the same session cookie as the REST API; no login gets a 401. Each message is JSON `{ type, data, at }`.
+
+| type | data | Sent to |
+|---|---|---|
+| `hello` | `{ user, role }` | the new connection |
+| `agent.status` | `{ userId, status, reason, queueId, extensionName }` | admins + that agent |
+| `call.event` | `{ callId, eventType, payload }` (every `call_events` row) | admins |
+
+Publish from server code with `require('./src/realtime/hub').publish(type, data, { toUserId })`. More message types get added as React screens need them (Stages 3–4). The old HTML pages still poll and don't use `/ws`.

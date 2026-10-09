@@ -1110,3 +1110,25 @@ Plan: `docs/APP_REBUILD_PLAN.md`. Branch `react-frontend`, cut from `predictive-
 - CI: `.github/workflows/ci.yml` runs lint, format, syntax and tests on every push and PR. It only starts once the branch is pushed to GitHub.
 - Docs for developers: `README.md` (rewritten), `docs/ARCHITECTURE.md`, `docs/CONTRIBUTING.md`, `docs/adr/0001-0004`, PR template.
 - Key safety note for developers: never run a local backend against the shared Asterisk. Both would register ARI app `dialforge-app` and take each other's calls.
+
+## App rebuild — Stage 1: backend restructure + live-update channel (2026-10-09, deployed)
+- `server.js` (2,989 lines) is now a 50-line entry point. The code lives in `backend/src/`: `app.js` (createApp), 20 route modules, 9 service modules, `telephony/events.js`, `realtime/hub.js`, `middleware/auth.js`, `config.js`, `state.js`. The map is in ARCHITECTURE §6.
+- **How it was split safely.** A script moved each top-level statement verbatim with its comments, and generated the require/export lines. The only text change was `app.get(` → `router.get(`. Checks:
+  - AST comparison: 150/150 statements identical. The two exceptions are the deliberate live-update hooks; with those lines removed they match too.
+  - Lint `no-undef` and `no-unused-vars` prove every name resolves.
+  - The route list is identical: 85 old, 85 new.
+  - On the server, the old and new apps ran side by side with each real user against the live DB, read-only. Every GET route was compared: **120/120 identical responses**. `/agent/extension-credentials` was skipped on purpose because it returns a SIP password.
+- Small deliberate changes:
+  - `ami.js` no longer connects when it is `require`d; `server.js` calls `ami.connect()` at startup instead. Same timing in production; tests can now load the app without an Asterisk.
+  - `express.static` uses an absolute path to `public/`, so it no longer depends on the working directory.
+  - New WebSocket `/ws` (ARCHITECTURE §8) pushes `agent.status` and `call.event`. Nothing uses it yet; it's for the React app.
+- Also deployed: the Stage 0 Prettier formatting of `ari.js`, `call-control.js`, `dialer-common.js`, `dialer-engine.js` and `seed-users.js` (AST-identical). That is why `dialforge-dialer` was restarted too.
+- New tests (30 total):
+  - `routes.test.js`: only 4 routes are public, every `/admin` route refuses agents, no route hides another.
+  - `realtime.test.js`: `/ws` needs a login, and an agent only receives their own messages.
+  - `forms.test.js`: form definition and answer validation.
+- Deploy:
+  - Backup `~/backups/pre-stage1-20261009-131010/`: all backend files plus a DB dump. The mysqldump "PROCESS privilege… tablespaces" warning is harmless, and the dump completed.
+  - 0 active calls at the time. Both services restarted, ARI apps reconnected, AMI logged in.
+  - `/health` ok. Pages 200. Protected routes 401 without login. `/ws` 401 without login.
+- **Rollback:** `cd ~/dialforge-backend && tar xzf ~/backups/pre-stage1-20261009-131010/backend-files.tgz && sudo systemctl restart dialforge-backend dialforge-dialer`. The old `server.js` doesn't use `src/`, so leaving `src/` in place is harmless.
