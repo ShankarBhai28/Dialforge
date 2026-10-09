@@ -216,7 +216,7 @@ router.get('/agent/extension-credentials/:extension', requireAuth, async (req, r
 
 // --- Agent: how the browser softphone reaches Asterisk (see services/webrtc.js) ---
 router.get('/agent/webrtc-config', requireAuth, (req, res) => {
-  res.json(buildWebrtcConfig(process.env, req.hostname));
+  res.json(buildWebrtcConfig(process.env, req.hostname, { userId: req.session.user.id }));
 });
 
 module.exports = router;

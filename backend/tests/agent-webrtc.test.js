@@ -47,3 +47,27 @@ test('extension guard: blocks only a line another agent holds AND has registered
   assert.strictEqual(await findOtherActiveHolder('1003', 7, deps([{ username: 'agent1003' }], false)), null);
   assert.strictEqual(await findOtherActiveHolder('1003', 7, deps([], true)), null);
 });
+
+test('webrtc config: TURN_SECRET gives each login its own expiring password (coturn REST API)', () => {
+  const crypto = require('node:crypto');
+  const nowMs = Date.UTC(2026, 9, 9, 12, 0, 0);
+  const cfg = buildWebrtcConfig(
+    {
+      STUN_URLS: '',
+      TURN_URLS: 'turn:1.2.3.4:3478',
+      TURN_SECRET: 's3cret',
+      TURN_USERNAME: 'old',
+      TURN_PASSWORD: 'old',
+    },
+    'h',
+    { userId: 7, nowMs },
+  );
+  const [turn] = cfg.iceServers;
+  const expiry = nowMs / 1000 + 12 * 3600;
+  assert.strictEqual(turn.username, `${expiry}:agent7`);
+  // What coturn computes from its static-auth-secret:
+  assert.strictEqual(turn.credential, crypto.createHmac('sha1', 's3cret').update(turn.username).digest('base64'));
+  // TTL can be set
+  const short = buildWebrtcConfig({ TURN_URLS: 't', TURN_SECRET: 's', TURN_TTL_SEC: '60' }, 'h', { userId: 1, nowMs });
+  assert.strictEqual(short.iceServers.at(-1).username, `${nowMs / 1000 + 60}:agent1`);
+});
