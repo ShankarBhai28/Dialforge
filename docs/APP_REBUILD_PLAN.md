@@ -1,6 +1,6 @@
 # DialForge — Application Rebuild Plan (React frontend + structured backend)
 
-Status: **in progress** — Stages 0, 1 and 2 done 2026-10-09 (the Dashboard was rebuilt early as the proof screen). Branch: `react-frontend` (cut from `predictive-dialer`).
+Status: **in progress** — Stages 0–3 done 2026-10-09: every admin screen is rebuilt at `/app`. Next: Stage 4 (agent screen). Branch: `react-frontend` (cut from `predictive-dialer`).
 
 ## Why
 - `admin.html` (2,600 lines) and `agent.html` (2,000 lines) are single files that mix layout, styling and logic. Every new feature makes them harder to change safely.
@@ -84,3 +84,26 @@ Dashboard + Live Agents → Campaigns (settings, dispositions, recycle rules) �
 - No new features in the old HTML pages unless something breaks.
 - Dialer and telephony behaviour do not change during Stages 0–3.
 - Same server rules as before: back up before every change, don't start campaigns, the nxtra trunk is for testing only.
+
+## Follow-ups found while rebuilding (Stage 3)
+Backend gaps the new screens work around. None of them blocks the switchover.
+
+**Security / correctness**
+- `GET /agent/extension-credentials/:extension` gives any logged-in agent the SIP password of *any* extension. It should only answer for the extension the agent is connecting with.
+- `POST /admin/users` doesn't check that the extension exists or is free. Users can't be edited or deleted, and there is no password reset or role change.
+- Team create/update don't validate member and campaign ids, so a bad id becomes a generic "failed to save team".
+- `POST /admin/lists` with an unknown campaign gives a raw 500 (foreign-key error).
+- `PUT /admin/leads/:id` doesn't check that the list belongs to the chosen campaign, and can't edit `alt_phone`, `priority` or `custom_data`.
+- `POST /admin/campaigns` ignores `status` (new campaigns are always active).
+
+**Scale (needed before real volume)**
+- Server-side paging and filtering:
+  - `GET /leads` returns the newest 200;
+  - `GET /calls` returns 100, with no filters;
+  - DNC returns 500, and its total ignores the search;
+  - callbacks return 300.
+- The dialer engine publishes nothing on `/ws`, so the Dialer screen polls every 3 s. A `dialer.status` event from the engine (via the DB or a small HTTP hook into the backend) would make it live.
+- JS bundle is 615 kB (180 kB gzipped): lazy-load each screen with React Router `lazy`.
+
+**Done during Stage 3:** `/admin/extensions` no longer returns `sip_password`, and queue settings are validated before they are written to `queues.conf`.
+

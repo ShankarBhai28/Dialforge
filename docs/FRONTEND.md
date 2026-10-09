@@ -26,6 +26,9 @@ web/src/
   features/<area>/         one folder per screen area: api.ts (types + query hooks), pages, components, tests
   lib/api.ts               fetch wrapper: get/post/put/del, ApiError with the server's message
   lib/realtime.ts          /ws live updates: useRealtime(type, handler)
+  lib/hooks.ts             small shared hooks (useNow)
+  lib/format.ts            date/time display + <input> value helpers
+  components/common.tsx    SectionHeader, EmptyState, Field, FormError, ConfirmDialog, StatusPill
   test/                    setup + helpers (fakeApi, renderAt)
 ```
 
@@ -40,7 +43,8 @@ web/src/
 7. **Compare** the new screen with the classic one using the same data before calling it done.
 
 ## Rules
-- Call the backend only through `lib/api.ts`, never `fetch` directly. That keeps errors and the 401-to-login handling in one place.
+- Call the backend only through `lib/api.ts`, never `fetch` directly. That keeps errors and the 401-to-login handling in one place. File uploads: `post(path, formData)`.
+- A mutation whose form or dialog shows the error itself sets `meta: { errorInline: true }`; otherwise its error also appears as a toast.
 - Server data lives in TanStack Query, not in `useState` copies. Local `useState` is for UI state only (open/closed, form inputs).
 - Colours come from the theme (`bg-primary`, `text-muted-foreground`, `bg-status-available`), never hex values in components.
 - Every screen must work at phone width (the sidebar becomes a drawer).

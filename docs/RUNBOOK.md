@@ -1155,3 +1155,26 @@ Plan: `docs/APP_REBUILD_PLAN.md`. Branch `react-frontend`, cut from `predictive-
   - Results: `/app/`, `/app/admin/users` and `/app/login` → 200. The asset → 200 with `immutable`. Classic pages → 200. `/admin/campaigns` without login → 401.
 - Rollback: restore `backend-files.tgz` from that backup and restart `dialforge-backend`.
 
+## App rebuild — Stage 3: every admin screen in the React app (2026-10-09, deployed)
+- Rebuilt:
+  - Live Agents, Dialer, Call Log;
+  - Campaigns (settings by dial mode, dispositions, recycle rules) and Queues;
+  - Leads & Lists (lists, leads, xlsx/csv import, recycle) and Forms (builder, responses);
+  - Callbacks, DNC, Users, Teams, Reports.
+  DID Numbers was built first as the reference pattern. Every admin menu entry at `/app` now opens a rebuilt screen; the classic `/admin.html` still works.
+- How: shared components first (table, dialog, tabs, form controls, ConfirmDialog…). Then four parallel helpers, each in its own feature folder with its own tests. Their code was reviewed, wired into the routes, and the full checks run here.
+- Small improvements over classic:
+  - Lead edit offers the campaign's own dispositions (classic hard-coded 6 codes, which the server rejected for custom ones).
+  - Filters on callbacks and leads.
+  - Debounced DNC search.
+  - Starting a dialer asks for confirmation, because it places real calls.
+- Backend hardening found on the way:
+  - `GET /admin/extensions` sent every extension's `sip_password` to the browser; it now selects only `id, name, label, created_at`.
+  - Queue create/edit wrote any submitted value into `queues.conf`, so a newline could inject config. They now go through `parseQueueSettings` (strategy whitelist, yes/no flags, integer ranges), with tests.
+- Remaining gaps: `docs/APP_REBUILD_PLAN.md` → "Follow-ups found while rebuilding".
+- Tests: 37 backend, 97 web. One heavy form test needed `testTimeout: 20000` under full parallel runs.
+- Deploy: the first run of `scripts/deploy-dev.sh`.
+  - Checks ran, then backup `~/backups/pre-deploy-20261009-152927/`.
+  - Only `dialforge-backend` restarted; dialer code was unchanged, so the dialer was left running.
+  - `/health` ok, `/app/` 200, admin APIs 401 without login.
+
