@@ -10,8 +10,12 @@ import { routes } from '@/app/routes';
 type Reply = { status?: number; body?: unknown };
 export type FakeApi = Record<string, Reply | ((init?: RequestInit) => Reply)>;
 
-/** Replaces fetch: "GET /auth/me" -> reply. Unknown paths answer 404. Returns the call log. */
-export function fakeApi(table: FakeApi) {
+/**
+ * Replaces fetch: "GET /auth/me" -> reply. Unknown paths answer 404. Returns the call log.
+ * Without its own "GET /auth/me" the user is a Super Admin (every screen and action).
+ */
+export function fakeApi(given: FakeApi) {
+  const table: FakeApi = { 'GET /auth/me': { body: ADMIN }, ...given };
   const calls: { key: string; body: unknown }[] = [];
   vi.stubGlobal(
     'fetch',

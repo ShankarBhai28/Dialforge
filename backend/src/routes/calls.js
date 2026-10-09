@@ -3,7 +3,7 @@ const pool = require('../../db');
 const ari = require('../../ari');
 const { isWithinCallWindow, normalizePhone } = require('../../dialer-common');
 const { APP_NAME } = require('../config');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requirePermission, requireCaller } = require('../middleware/auth');
 const { findCurrentCampaign } = require('../services/agents');
 const { logEvent } = require('../services/calls');
 const { isDnc } = require('../services/dnc');
@@ -12,10 +12,12 @@ const { activeCalls } = require('../state');
 
 const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
 
+const { scopeCondition } = require('../services/access');
+
 const router = express.Router();
 
 // --- Calls (admin sees everything, agent sees only their own extension's calls) ---
-router.get('/calls', requireAuth, async (req, res) => {
+router.get('/calls', requireCaller, async (req, res) => {
   if (req.session.user.role === 'admin') {
     const [rows] = await pool.query('SELECT * FROM calls ORDER BY id DESC LIMIT 100');
     return res.json(rows);
@@ -28,7 +30,7 @@ router.get('/calls', requireAuth, async (req, res) => {
 
 // --- Admin: call log, searched and paged on the server ---
 // ?q= (number) &direction= &disposition= ('none' = not answered) &extension= &from=&to= (YYYY-MM-DD) &page=
-router.get('/admin/calls', requireRole('admin'), async (req, res) => {
+router.get('/admin/calls', requirePermission('calls', 'view'), async (req, res) => {
   const paging = parsePaging(req.query);
   const { q, direction, disposition, extension, from, to } = req.query;
   const digits = normalizePhone(q || '');
@@ -42,6 +44,7 @@ router.get('/admin/calls', requireRole('admin'), async (req, res) => {
     [extension ? 'ca.from_extension = ?' : '', [extension]],
     [from ? 'ca.start_time >= ?' : '', [from]],
     [to ? 'ca.start_time < DATE_ADD(?, INTERVAL 1 DAY)' : '', [to]],
+    scopeCondition(req.access.scope, 'campaigns', 'ca.campaign_id'),
   ]);
   const [rows] = await pool.query(
     `SELECT ca.*, c.name AS campaign_name, l.name AS lead_name
@@ -56,7 +59,7 @@ router.get('/admin/calls', requireRole('admin'), async (req, res) => {
   res.json(pageResult(rows, count.n, paging));
 });
 
-router.post('/calls/click2call', requireAuth, async (req, res) => {
+router.post('/calls/click2call', requireCaller, async (req, res) => {
   const { toNumber, leadId } = req.body;
   // Agents can only ever call from their own assigned extension - never
   // trust a client-supplied fromExtension for that role. Admins (who have

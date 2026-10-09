@@ -35,6 +35,7 @@ import {
   type LeadFilters,
 } from './api';
 import { DEFAULT_DISPOSITIONS, statusLabel } from './statuses';
+import { useCanManage } from '@/features/auth/access';
 
 const muted = (text: string) => <span className="text-muted-foreground">{text}</span>;
 
@@ -218,6 +219,7 @@ function LeadDialog({ lead, onOpenChange }: { lead: Lead; onOpenChange: (open: b
 }
 
 export function LeadsTab() {
+  const manages = useCanManage('leads');
   const campaigns = useCampaigns();
   const lists = useLists();
   const remove = useDeleteLead();
@@ -350,18 +352,22 @@ export function LeadsTab() {
                     <TableCell className="tabular-nums">{l.attempts}</TableCell>
                     <TableCell className="whitespace-nowrap">{formatDateTime(l.created_at)}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
-                      <Button variant="ghost" size="sm" onClick={() => setEditing(l)} aria-label={`Edit ${l.phone}`}>
-                        <Pencil /> Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive"
-                        onClick={() => setDeleting(l)}
-                        aria-label={`Delete ${l.phone}`}
-                      >
-                        <Trash2 /> Delete
-                      </Button>
+                      {manages && (
+                        <Button variant="ghost" size="sm" onClick={() => setEditing(l)} aria-label={`Edit ${l.phone}`}>
+                          <Pencil /> Edit
+                        </Button>
+                      )}
+                      {manages && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive"
+                          onClick={() => setDeleting(l)}
+                          aria-label={`Delete ${l.phone}`}
+                        >
+                          <Trash2 /> Delete
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))

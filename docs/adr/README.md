@@ -10,3 +10,4 @@ Never edit an accepted ADR's decision; write a new one that supersedes it.
 | [0002](0002-react-typescript-frontend.md) | Frontend: React + TypeScript + Vite, replacing the HTML pages | Accepted |
 | [0003](0003-keep-express-mysql.md) | Backend: keep Node/Express + MySQL, restructure instead of rewrite | Accepted |
 | [0004](0004-tests-with-fakes.md) | Tests: node:test with fake ARI/AMI/DB; real calls stay a manual checklist | Accepted |
+| [0005](0005-admin-roles-and-team-scope.md) | Admin roles: per-screen None / View / Manage, own-teams or all-teams scope, checked on the server | Accepted |

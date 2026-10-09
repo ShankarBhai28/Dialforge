@@ -1,18 +1,20 @@
 const express = require('express');
 const pool = require('../../db');
-const { requireRole } = require('../middleware/auth');
-const { dialerOverview } = require('../services/dialer');
+const { requirePermission } = require('../middleware/auth');
+const { dialerOverview, scopeOverview } = require('../services/dialer');
 const dialerFeed = require('../realtime/dialerFeed');
+
+const { campaignInScope } = require('../services/access');
 
 const router = express.Router();
 
 // --- Admin: dialer control + live view (the engine itself is the
 // separate dialer-engine.js process; these only flip state / read status) ---
-router.post('/admin/campaigns/:id/dialer', requireRole('admin'), async (req, res) => {
+router.post('/admin/campaigns/:id/dialer', requirePermission('dialer', 'manage'), async (req, res) => {
   const { action } = req.body;
   const [rows] = await pool.query('SELECT * FROM campaigns WHERE id = ?', [req.params.id]);
   const c = rows[0];
-  if (!c) return res.status(404).json({ error: 'campaign not found' });
+  if (!c || !campaignInScope(req.access.scope, c.id)) return res.status(404).json({ error: 'campaign not found' });
   const next = { start: 'running', pause: 'paused', stop: 'stopped' }[action];
   if (!next) return res.status(400).json({ error: 'action must be start, pause or stop' });
   if (action === 'start') {
@@ -31,11 +33,12 @@ router.post('/admin/campaigns/:id/dialer', requireRole('admin'), async (req, res
   res.json({ status: 'ok', dialerState: next });
 });
 
-router.get('/admin/dialer', requireRole('admin'), async (req, res) => {
-  res.json(await dialerOverview());
+router.get('/admin/dialer', requirePermission('dialer', 'view'), async (req, res) => {
+  res.json(scopeOverview(await dialerOverview(), req.access.scope));
 });
 
-router.get('/admin/campaigns/:id/hopper', requireRole('admin'), async (req, res) => {
+router.get('/admin/campaigns/:id/hopper', requirePermission('dialer', 'view'), async (req, res) => {
+  if (!campaignInScope(req.access.scope, req.params.id)) return res.status(404).json({ error: 'campaign not found' });
   const [rows] = await pool.query(
     `
     SELECT h.*, l.name, ls.name AS list_name, u.username AS reserved_for

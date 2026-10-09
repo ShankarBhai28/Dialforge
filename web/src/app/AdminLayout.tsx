@@ -62,7 +62,10 @@ export function AdminLayout() {
           <h1 className="flex-1 truncate text-lg font-bold">{title}</h1>
           <div className="hidden text-right text-sm leading-tight sm:block">
             <div className="font-semibold">{user?.username}</div>
-            <div className="text-xs text-muted-foreground capitalize">{user?.role}</div>
+            <div className="text-xs text-muted-foreground">
+              {user?.roleName ?? user?.role}
+              {user?.scope === 'team' && ' · own teams'}
+            </div>
           </div>
           <Button variant="outline" size="sm" onClick={() => logout.mutate()} disabled={logout.isPending}>
             <LogOut /> <span className="hidden sm:inline">Log out</span>

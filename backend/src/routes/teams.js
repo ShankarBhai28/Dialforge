@@ -1,17 +1,23 @@
 const express = require('express');
 const pool = require('../../db');
-const { requireRole } = require('../middleware/auth');
+const { requirePermission, requireAdminSide, requireAllScope } = require('../middleware/auth');
 const { checkTeamRefs, parseTeam } = require('../services/teams');
+const hub = require('../realtime/hub');
 
 const router = express.Router();
 
 // --- Admin: teams (a group of agents + the campaigns they may work) ---
 // Members and campaigns come back as id arrays so the edit form can
 // pre-tick its checkboxes, plus names for the table.
-router.get('/admin/teams', requireRole('admin'), async (req, res) => {
-  const [teams] = await pool.query('SELECT * FROM teams ORDER BY id DESC');
+router.get('/admin/teams', requireAdminSide, async (req, res) => {
+  const { scope } = req.access;
+  const [teams] = scope
+    ? await pool.query('SELECT * FROM teams WHERE id IN (?) ORDER BY id DESC', [
+        scope.teamIds.length ? scope.teamIds : [-1],
+      ])
+    : await pool.query('SELECT * FROM teams ORDER BY id DESC');
   const [members] = await pool.query(
-    'SELECT tm.team_id, u.id, u.username FROM team_members tm JOIN users u ON u.id = tm.user_id ORDER BY u.username',
+    'SELECT tm.team_id, u.id, u.username, u.role FROM team_members tm JOIN users u ON u.id = tm.user_id ORDER BY u.username',
   );
   const [campaigns] = await pool.query(
     'SELECT tc.team_id, c.id, c.name FROM team_campaigns tc JOIN campaigns c ON c.id = tc.campaign_id ORDER BY c.name',
@@ -19,7 +25,7 @@ router.get('/admin/teams', requireRole('admin'), async (req, res) => {
   res.json(
     teams.map((t) => ({
       ...t,
-      members: members.filter((m) => m.team_id === t.id).map(({ id, username }) => ({ id, username })),
+      members: members.filter((m) => m.team_id === t.id).map(({ id, username, role }) => ({ id, username, role })),
       campaigns: campaigns.filter((c) => c.team_id === t.id).map(({ id, name }) => ({ id, name })),
     })),
   );
@@ -68,6 +74,7 @@ async function handleSave(req, res, teamId) {
   if (refError) return res.status(400).json({ error: refError });
   try {
     const id = await saveTeam(teamId, team);
+    hub.refreshAccess(); // team-scoped live updates follow the new membership
     res.status(teamId ? 200 : 201).json({ id, name: team.name });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'a team with that name already exists' });
@@ -76,21 +83,34 @@ async function handleSave(req, res, teamId) {
   }
 }
 
-router.post('/admin/teams', requireRole('admin'), (req, res) => handleSave(req, res, null));
+router.post('/admin/teams', requirePermission('teams', 'manage'), requireAllScope('change teams'), (req, res) =>
+  handleSave(req, res, null),
+);
 
-router.put('/admin/teams/:id', requireRole('admin'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id FROM teams WHERE id = ?', [req.params.id]);
-  if (!rows[0]) return res.status(404).json({ error: 'team not found' });
-  return handleSave(req, res, rows[0].id);
-});
+router.put(
+  '/admin/teams/:id',
+  requirePermission('teams', 'manage'),
+  requireAllScope('change teams'),
+  async (req, res) => {
+    const [rows] = await pool.query('SELECT id FROM teams WHERE id = ?', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'team not found' });
+    return handleSave(req, res, rows[0].id);
+  },
+);
 
 // Deleting a team only removes the grouping (link rows cascade); no call
 // or lead data references teams, so nothing needs to block it.
-router.delete('/admin/teams/:id', requireRole('admin'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id FROM teams WHERE id = ?', [req.params.id]);
-  if (!rows[0]) return res.status(404).json({ error: 'team not found' });
-  await pool.query('DELETE FROM teams WHERE id = ?', [req.params.id]);
-  res.json({ status: 'ok' });
-});
+router.delete(
+  '/admin/teams/:id',
+  requirePermission('teams', 'manage'),
+  requireAllScope('change teams'),
+  async (req, res) => {
+    const [rows] = await pool.query('SELECT id FROM teams WHERE id = ?', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'team not found' });
+    await pool.query('DELETE FROM teams WHERE id = ?', [req.params.id]);
+    hub.refreshAccess();
+    res.json({ status: 'ok' });
+  },
+);
 
 module.exports = router;

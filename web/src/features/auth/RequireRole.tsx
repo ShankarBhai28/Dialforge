@@ -5,11 +5,12 @@ import { FullPageSpinner } from '@/components/FullPageSpinner';
 import { ErrorState } from '@/components/ErrorState';
 import { homeFor, useMe, type Role } from './auth';
 
-/** Renders children only for a logged-in user with this role. */
-export function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
+/** Renders children only for a logged-in user with this role (or one of these). */
+export function RequireRole({ role, children }: { role: Role | Role[]; children: ReactNode }) {
   const { data: user, isPending, error, refetch } = useMe();
   const location = useLocation();
-  const allowed = !!user && user.role === role;
+  const roles = Array.isArray(role) ? role : [role];
+  const allowed = !!user && roles.includes(user.role);
 
   useEffect(() => {
     if (allowed) startRealtime();
@@ -21,6 +22,6 @@ export function RequireRole({ role, children }: { role: Role; children: ReactNod
     const next = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?next=${next}`} replace />;
   }
-  if (user.role !== role) return <Navigate to={homeFor(user.role)} replace />;
+  if (!allowed) return <Navigate to={homeFor(user.role)} replace />;
   return children;
 }

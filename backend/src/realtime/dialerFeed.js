@@ -73,7 +73,7 @@ function createDialerFeed({ load, publish, hasAdmins, intervalMs = POLL_MS }) {
 const feed = createDialerFeed({
   load: () => dialerOverview(),
   publish: (type, data) => hub.publish(type, data),
-  hasAdmins: () => hub.adminCount() > 0,
+  hasAdmins: () => hub.watchingCount('dialer') > 0,
 });
 
 module.exports = { ...feed, createDialerFeed, fingerprint };

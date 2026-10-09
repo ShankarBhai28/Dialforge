@@ -3,18 +3,18 @@ const fs = require('fs');
 const pool = require('../../db');
 const ami = require('../../ami');
 const { QUEUES_CONF_PATH } = require('../config');
-const { requireRole } = require('../middleware/auth');
+const { requirePermission, requireAdminSide } = require('../middleware/auth');
 const { QUEUE_DEFAULTS, parseQueueSettings, queueStanzaRegex, slugify } = require('../services/queueConfig');
 
 const router = express.Router();
 
 // --- Admin: standalone queue management (reusable across campaigns) ---
-router.get('/admin/queues', requireRole('admin'), async (req, res) => {
+router.get('/admin/queues', requireAdminSide, async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM queues ORDER BY id DESC');
   res.json(rows);
 });
 
-router.post('/admin/queues', requireRole('admin'), async (req, res) => {
+router.post('/admin/queues', requirePermission('queues', 'manage'), async (req, res) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const asteriskName = slugify(name);
@@ -49,7 +49,7 @@ router.post('/admin/queues', requireRole('admin'), async (req, res) => {
   res.status(201).json({ id: result.insertId, name, asteriskName });
 });
 
-router.put('/admin/queues/:id', requireRole('admin'), async (req, res) => {
+router.put('/admin/queues/:id', requirePermission('queues', 'manage'), async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM queues WHERE id = ?', [req.params.id]);
   const queue = rows[0];
   if (!queue) return res.status(404).json({ error: 'queue not found' });
@@ -90,7 +90,7 @@ router.put('/admin/queues/:id', requireRole('admin'), async (req, res) => {
   res.json({ id: Number(req.params.id), ...updated });
 });
 
-router.delete('/admin/queues/:id', requireRole('admin'), async (req, res) => {
+router.delete('/admin/queues/:id', requirePermission('queues', 'manage'), async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM queues WHERE id = ?', [req.params.id]);
   const queue = rows[0];
   if (!queue) return res.status(404).json({ error: 'queue not found' });

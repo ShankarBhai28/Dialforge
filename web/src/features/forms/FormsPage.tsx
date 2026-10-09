@@ -12,8 +12,10 @@ import { ErrorState } from '@/components/ErrorState';
 import { toFormInput, useDeleteForm, useForms, useSaveForm, type Form } from './api';
 import { FormBuilderDialog } from './FormBuilderDialog';
 import { ResponsesDialog } from './ResponsesDialog';
+import { useCanManage } from '@/features/auth/access';
 
 export function FormsPage() {
+  const manages = useCanManage('forms');
   const forms = useForms();
   const remove = useDeleteForm();
   // Separate from the builder's own mutation so its error shows in this dialog only.
@@ -36,9 +38,11 @@ export function FormsPage() {
               <Button variant="outline" onClick={() => forms.refetch()}>
                 <RefreshCw /> Refresh
               </Button>
-              <Button onClick={() => setEditing('new')}>
-                <Plus /> Create form
-              </Button>
+              {manages && (
+                <Button onClick={() => setEditing('new')}>
+                  <Plus /> Create form
+                </Button>
+              )}
             </>
           }
         />
@@ -96,26 +100,32 @@ export function FormsPage() {
                     >
                       <Eye /> Responses
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setEditing(f)} aria-label={`Edit ${f.name}`}>
-                      <Pencil /> Edit
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setToggling(f)}
-                      aria-label={`${f.status === 'active' ? 'Deactivate' : 'Activate'} ${f.name}`}
-                    >
-                      <Power /> {f.status === 'active' ? 'Deactivate' : 'Activate'}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive"
-                      onClick={() => setDeleting(f)}
-                      aria-label={`Delete ${f.name}`}
-                    >
-                      <Trash2 /> Delete
-                    </Button>
+                    {manages && (
+                      <Button variant="ghost" size="sm" onClick={() => setEditing(f)} aria-label={`Edit ${f.name}`}>
+                        <Pencil /> Edit
+                      </Button>
+                    )}
+                    {manages && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setToggling(f)}
+                        aria-label={`${f.status === 'active' ? 'Deactivate' : 'Activate'} ${f.name}`}
+                      >
+                        <Power /> {f.status === 'active' ? 'Deactivate' : 'Activate'}
+                      </Button>
+                    )}
+                    {manages && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={() => setDeleting(f)}
+                        aria-label={`Delete ${f.name}`}
+                      >
+                        <Trash2 /> Delete
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

@@ -47,7 +47,7 @@ describe('Users', () => {
     fakeApi({ 'GET /admin/users': USERS });
     renderPage(<UsersPage />);
     const row = (await screen.findByText('agent04')).closest('tr')!;
-    expect(within(row).getByText('agent')).toBeInTheDocument();
+    expect(within(row).getByText('Agent')).toBeInTheDocument();
     expect(within(row).getByText('1003')).toBeInTheDocument();
   });
 
@@ -71,10 +71,11 @@ describe('Users', () => {
       password: 'pw123456',
       role: 'agent',
       extensionId: 3,
+      roleId: null,
     });
   });
 
-  it('creates an admin without an extension', async () => {
+  it('creates a Super Admin without an extension', async () => {
     const calls = fakeApi({
       'GET /admin/users': USERS,
       'GET /admin/extensions': EXTENSIONS,
@@ -84,7 +85,7 @@ describe('Users', () => {
     await userEvent.click(await screen.findByRole('button', { name: /create user/i }));
     await userEvent.type(screen.getByLabelText('Username'), 'boss');
     await userEvent.type(screen.getByLabelText('Password'), 'pw');
-    await userEvent.selectOptions(screen.getByLabelText('Role'), 'admin');
+    await userEvent.selectOptions(screen.getByLabelText('Account type'), 'admin');
     expect(screen.queryByLabelText('Extension')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -93,7 +94,61 @@ describe('Users', () => {
       password: 'pw',
       role: 'admin',
       extensionId: null,
+      roleId: null,
     });
+  });
+
+  it('creates an admin login with a role (TL / supervisor)', async () => {
+    const calls = fakeApi({
+      'GET /admin/users': USERS,
+      'GET /admin/extensions': EXTENSIONS,
+      'GET /admin/roles': {
+        body: {
+          screens: [],
+          roles: [
+            { id: 4, name: 'Supervisor', scope: 'all', permissions: {}, userCount: 0 },
+            { id: 5, name: 'Team Leader', scope: 'team', permissions: {}, userCount: 0 },
+          ],
+        },
+      },
+      'POST /admin/users': { status: 201, body: {} },
+    });
+    renderPage(<UsersPage />);
+    await userEvent.click(await screen.findByRole('button', { name: /create user/i }));
+    await userEvent.type(screen.getByLabelText('Username'), 'tl.ravi');
+    await userEvent.type(screen.getByLabelText('Password'), 'pw123456');
+    await userEvent.selectOptions(screen.getByLabelText('Account type'), 'staff');
+    await screen.findByRole('option', { name: 'Team Leader (own teams)' });
+    await userEvent.selectOptions(screen.getByLabelText('Role'), 'Team Leader (own teams)');
+    expect(screen.queryByLabelText('Extension')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(calls.find((c) => c.key === 'POST /admin/users')?.body).toEqual({
+      username: 'tl.ravi',
+      password: 'pw123456',
+      role: 'staff',
+      extensionId: null,
+      roleId: 5,
+    });
+  });
+
+  it('a role with Users: manage handles agent accounts only; view-only changes nothing', async () => {
+    const staff = (permissions: Record<string, string>) => ({
+      body: { id: 30, username: 'sup', role: 'staff', roleName: 'Supervisor', scope: 'all', permissions },
+    });
+    fakeApi({ 'GET /auth/me': staff({ users: 'manage' }), 'GET /admin/users': USERS });
+    const { unmount } = renderPage(<UsersPage />);
+    await screen.findByRole('button', { name: 'Edit agent04' });
+    expect(screen.queryByRole('button', { name: 'Edit admin' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /create user/i }));
+    expect(screen.queryByLabelText('Account type')).not.toBeInTheDocument(); // agents only
+    unmount();
+
+    fakeApi({ 'GET /auth/me': staff({ users: 'view' }), 'GET /admin/users': USERS });
+    renderPage(<UsersPage />);
+    await screen.findByText('agent04');
+    expect(screen.queryByRole('button', { name: /create user/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit agent04' })).not.toBeInTheDocument();
   });
 
   it("shows the server's reason when create fails", async () => {
@@ -140,6 +195,7 @@ describe('Users', () => {
           role: 'agent',
           status: 'active',
           extensionId: 2,
+          roleId: null,
         }),
       );
     });

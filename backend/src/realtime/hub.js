@@ -4,12 +4,44 @@
 // - The connection is authenticated with the same login session as the
 //   REST API (the session cookie is checked during the upgrade).
 // - Messages are JSON: { type, data, at }.
-// - Admins receive everything; an agent receives only messages addressed
-//   to their own user id.
+// - Who gets what:
+//     Super Admin - everything
+//     agent       - only messages addressed to their own user id
+//     staff       - what their role allows (staffView below), limited to
+//                   their teams for a team-scoped role
 const { WebSocketServer } = require('ws');
+const { accessFor, can } = require('../services/access');
+const { scopeOverview } = require('../services/dialer');
 
-const clients = new Set(); // { ws, user }
+const clients = new Set(); // { ws, user, access }
 let wss = null;
+
+/** A staff client's copy of a message, or null when their role doesn't cover it. */
+function staffView(type, data, access) {
+  if (!access) return null;
+  const { scope } = access;
+  switch (type) {
+    case 'agent.status':
+      if (!can(access, 'live', 'view')) return null;
+      return !scope || scope.agentIds.includes(data.userId) ? data : null;
+    case 'call.event':
+      if (!can(access, 'live', 'view') && !can(access, 'calls', 'view')) return null;
+      // Team scope: only a "something changed" hint; the screen re-reads its own (scoped) data.
+      return scope ? { callId: data.callId } : data;
+    case 'dialer.status':
+      return can(access, 'dialer', 'view') ? scopeOverview(data, scope) : null;
+    default:
+      return null;
+  }
+}
+
+async function loadAccess(client) {
+  try {
+    client.access = await accessFor(client.user);
+  } catch (err) {
+    console.error('[ws access]', err.message);
+  }
+}
 
 function attach(server, sessionMiddleware) {
   wss = new WebSocketServer({ noServer: true });
@@ -24,8 +56,9 @@ function attach(server, sessionMiddleware) {
         return;
       }
       wss.handleUpgrade(req, socket, head, (ws) => {
-        const client = { ws, user };
+        const client = { ws, user, access: null };
         clients.add(client);
+        if (user.role === 'staff') void loadAccess(client);
         ws.isAlive = true;
         ws.on('pong', () => (ws.isAlive = true));
         ws.on('close', () => clients.delete(client));
@@ -35,9 +68,11 @@ function attach(server, sessionMiddleware) {
     });
   });
 
-  // Drop connections that stopped answering pings (laptop slept, network gone).
+  // Drop connections that stopped answering pings (laptop slept, network
+  // gone), and re-read staff rights (team membership may have changed).
   const timer = setInterval(() => {
-    for (const { ws } of clients) {
+    for (const client of clients) {
+      const { ws } = client;
       if (!ws.isAlive) {
         ws.terminate();
         continue;
@@ -45,17 +80,28 @@ function attach(server, sessionMiddleware) {
       ws.isAlive = false;
       ws.ping();
     }
+    refreshAccess();
   }, 30000);
   timer.unref();
 }
 
-// toUserId: also deliver to that agent (admins always get it).
+/** Re-reads every staff connection's rights (a role or team just changed). */
+function refreshAccess() {
+  for (const client of clients) if (client.user.role === 'staff') void loadAccess(client);
+}
+
+// toUserId: also deliver to that agent (Super Admins always get it).
 function publish(type, data, { toUserId = null } = {}) {
   if (!clients.size) return;
-  const msg = JSON.stringify({ type, data, at: Date.now() });
-  for (const { ws, user } of clients) {
+  const full = JSON.stringify({ type, data, at: Date.now() });
+  for (const { ws, user, access } of clients) {
     if (ws.readyState !== ws.OPEN) continue;
-    if (user.role === 'admin' || (toUserId != null && user.id === toUserId)) ws.send(msg);
+    if (user.role === 'admin' || (toUserId != null && user.id === toUserId)) {
+      ws.send(full);
+    } else if (user.role === 'staff') {
+      const view = staffView(type, data, access);
+      if (view) ws.send(JSON.stringify({ type, data: view, at: Date.now() }));
+    }
   }
 }
 
@@ -73,10 +119,13 @@ function connectedCount() {
   return clients.size;
 }
 
-function adminCount() {
+/** How many connections may see `screen` (e.g. 'dialer' - the feed only reads while someone watches). */
+function watchingCount(screen) {
   let n = 0;
-  for (const { user } of clients) if (user.role === 'admin') n++;
+  for (const { user, access } of clients) {
+    if (user.role === 'admin' || (user.role === 'staff' && can(access, screen, 'view'))) n++;
+  }
   return n;
 }
 
-module.exports = { attach, publish, disconnectUser, connectedCount, adminCount };
+module.exports = { attach, publish, disconnectUser, connectedCount, watchingCount, refreshAccess, staffView };

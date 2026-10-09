@@ -7,7 +7,8 @@ export type Team = {
   name: string;
   status: 'active' | 'inactive' | string;
   created_at: string;
-  members: { id: number; username: string }[];
+  /** Agents and admin logins (TL, supervisor) - a team-scoped role sees its teams' data. */
+  members: { id: number; username: string; role: string }[];
   campaigns: { id: number; name: string }[];
 };
 

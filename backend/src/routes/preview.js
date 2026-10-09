@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../../db');
 const { isWithinCallWindow } = require('../../dialer-common');
-const { requireAuth } = require('../middleware/auth');
+const { requireCaller } = require('../middleware/auth');
 const { currentAgentStatus, findCurrentCampaign } = require('../services/agents');
 const { previewLockOwner } = require('../services/preview');
 
@@ -32,7 +32,7 @@ async function previewBlocker(userId, campaign) {
   return null;
 }
 
-router.get('/agent/preview', requireAuth, async (req, res) => {
+router.get('/agent/preview', requireCaller, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const campaign = await findCurrentCampaign(req.session.user.id);
   if (!campaign || campaign.dial_mode !== 'preview') return res.json({ enabled: false });
@@ -48,7 +48,7 @@ router.get('/agent/preview', requireAuth, async (req, res) => {
   });
 });
 
-router.post('/agent/preview/next', requireAuth, async (req, res) => {
+router.post('/agent/preview/next', requireCaller, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const userId = req.session.user.id;
   const campaign = await findCurrentCampaign(userId);
@@ -99,7 +99,7 @@ router.post('/agent/preview/next', requireAuth, async (req, res) => {
 });
 
 // Skip: lead leaves the hopper and isn't offered again for 15 minutes.
-router.post('/agent/preview/skip', requireAuth, async (req, res) => {
+router.post('/agent/preview/skip', requireCaller, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const [held] = await pool.query('SELECT id, lead_id FROM dial_hopper WHERE locked_by = ?', [
     previewLockOwner(req.session.user.id),

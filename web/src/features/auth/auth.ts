@@ -2,13 +2,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, get, post } from '@/lib/api';
 import { stopRealtime } from '@/lib/realtime';
 
-export type Role = 'admin' | 'agent';
+/** admin = Super Admin; staff = admin login limited by a role (TL, supervisor, ...). */
+export type Role = 'admin' | 'staff' | 'agent';
 export type User = {
   id: number;
   username: string;
   role: Role;
   extensionId: number | null;
   extensionName: string | null;
+  /** Admin-side logins only: 'Super Admin' or the staff role's name. */
+  roleName?: string;
+  /** 'team' = only the data of the teams they belong to. */
+  scope?: 'all' | 'team';
+  /** Staff: level per screen. Super Admin: null (everything). */
+  permissions?: Record<string, 'none' | 'view' | 'manage'> | null;
 };
 
 export const meKey = ['auth', 'me'] as const;
@@ -31,7 +38,7 @@ export function useMe() {
 }
 
 export function homeFor(role: Role) {
-  return role === 'admin' ? '/admin' : '/agent';
+  return role === 'agent' ? '/agent' : '/admin';
 }
 
 export function useLogin() {

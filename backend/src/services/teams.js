@@ -34,7 +34,7 @@ function parseTeam(body) {
 /** Every id must exist (and members must be agents); returns an error naming the bad ones, or null. */
 async function checkTeamRefs({ memberIds, campaignIds }, deps = { pool }) {
   const checks = [
-    [memberIds, "SELECT id FROM users WHERE role = 'agent' AND id IN (?)", 'agent'],
+    [memberIds, "SELECT id FROM users WHERE role IN ('agent', 'staff') AND id IN (?)", 'member'],
     [campaignIds, 'SELECT id FROM campaigns WHERE id IN (?)', 'campaign'],
   ];
   for (const [ids, sql, label] of checks) {

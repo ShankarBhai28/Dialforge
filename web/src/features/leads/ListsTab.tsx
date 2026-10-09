@@ -23,6 +23,7 @@ import { formatDateTime } from '@/lib/format';
 import { useCampaigns } from '@/features/campaigns/api';
 import { useDeleteList, useLists, useSaveList, type LeadList } from './api';
 import { RecycleDialog } from './RecycleDialog';
+import { useCanManage } from '@/features/auth/access';
 
 function ListDialog({ list, onOpenChange }: { list: LeadList | null; onOpenChange: (open: boolean) => void }) {
   const campaigns = useCampaigns();
@@ -112,6 +113,7 @@ function ListDialog({ list, onOpenChange }: { list: LeadList | null; onOpenChang
 }
 
 export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
+  const manages = useCanManage('leads');
   const lists = useLists();
   const remove = useDeleteList();
   const [editing, setEditing] = useState<LeadList | 'new' | null>(null);
@@ -124,9 +126,11 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
         title="Lists"
         description="Inactive lists are skipped by the dialer; higher priority lists are dialed first."
         actions={
-          <Button onClick={() => setEditing('new')}>
-            <Plus /> Create list
-          </Button>
+          manages && (
+            <Button onClick={() => setEditing('new')}>
+              <Plus /> Create list
+            </Button>
+          )
         }
       />
       {lists.isPending ? (
@@ -174,24 +178,37 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
                 <TableCell className="tabular-nums">{l.priority}</TableCell>
                 <TableCell className="whitespace-nowrap">{formatDateTime(l.created_at)}</TableCell>
                 <TableCell className="text-right whitespace-nowrap">
-                  <Button variant="ghost" size="sm" onClick={() => setEditing(l)} aria-label={`Edit ${l.name}`}>
-                    <Pencil /> Edit
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => onImport(l.id)} aria-label={`Import into ${l.name}`}>
-                    <Upload /> Import
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setRecycling(l)} aria-label={`Recycle ${l.name}`}>
-                    <RotateCcw /> Recycle
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-destructive"
-                    onClick={() => setDeleting(l)}
-                    aria-label={`Delete ${l.name}`}
-                  >
-                    <Trash2 /> Delete
-                  </Button>
+                  {manages && (
+                    <Button variant="ghost" size="sm" onClick={() => setEditing(l)} aria-label={`Edit ${l.name}`}>
+                      <Pencil /> Edit
+                    </Button>
+                  )}
+                  {manages && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onImport(l.id)}
+                      aria-label={`Import into ${l.name}`}
+                    >
+                      <Upload /> Import
+                    </Button>
+                  )}
+                  {manages && (
+                    <Button variant="ghost" size="sm" onClick={() => setRecycling(l)} aria-label={`Recycle ${l.name}`}>
+                      <RotateCcw /> Recycle
+                    </Button>
+                  )}
+                  {manages && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive"
+                      onClick={() => setDeleting(l)}
+                      aria-label={`Delete ${l.name}`}
+                    >
+                      <Trash2 /> Delete
+                    </Button>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

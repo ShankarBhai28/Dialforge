@@ -22,6 +22,7 @@ import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader, StatusPill 
 import { ErrorState } from '@/components/ErrorState';
 import { useCampaigns } from '@/features/campaigns/api';
 import { useDeleteDid, useDids, useSaveDid, type Did } from './api';
+import { useCanManage } from '@/features/auth/access';
 
 function DidDialog({
   did,
@@ -97,6 +98,7 @@ function DidDialog({
 }
 
 export function NumbersPage() {
+  const manages = useCanManage('numbers');
   const dids = useDids();
   const remove = useDeleteDid();
   // `editing`: null = closed, 'new' = add, Did = edit that one.
@@ -110,9 +112,11 @@ export function NumbersPage() {
           title="DID numbers"
           description="Which campaign an inbound number routes to. A call only reaches the right queue if its number is mapped here."
           actions={
-            <Button onClick={() => setEditing('new')}>
-              <Plus /> Add number
-            </Button>
+            manages && (
+              <Button onClick={() => setEditing('new')}>
+                <Plus /> Add number
+              </Button>
+            )
           }
         />
 
@@ -147,18 +151,22 @@ export function NumbersPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-right whitespace-nowrap">
-                    <Button variant="ghost" size="sm" onClick={() => setEditing(d)} aria-label={`Edit ${d.number}`}>
-                      <Pencil /> Edit
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive"
-                      onClick={() => setDeleting(d)}
-                      aria-label={`Delete ${d.number}`}
-                    >
-                      <Trash2 /> Delete
-                    </Button>
+                    {manages && (
+                      <Button variant="ghost" size="sm" onClick={() => setEditing(d)} aria-label={`Edit ${d.number}`}>
+                        <Pencil /> Edit
+                      </Button>
+                    )}
+                    {manages && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={() => setDeleting(d)}
+                        aria-label={`Delete ${d.number}`}
+                      >
+                        <Trash2 /> Delete
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

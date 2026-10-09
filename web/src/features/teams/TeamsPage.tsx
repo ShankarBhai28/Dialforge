@@ -1,5 +1,6 @@
 // Teams: group agents and map them to campaigns. An agent only sees the
-// campaigns mapped to their team(s).
+// campaigns mapped to their team(s). Admin logins (TL, supervisor) added
+// to a team see that team's data when their role is "own teams".
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Pencil, Plus, RefreshCw, Trash2, UsersRound } from 'lucide-react';
@@ -21,7 +22,8 @@ import {
 import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader, StatusPill } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
 import { useCampaigns } from '@/features/campaigns/api';
-import { useUsers } from '@/features/users/api';
+import { accountLabel, useUsers } from '@/features/users/api';
+import { useAccess } from '@/features/auth/access';
 import { useDeleteTeam, useSaveTeam, useTeams, type Team } from './api';
 
 /** A titled box of checkboxes; `selected` holds the ticked ids. */
@@ -82,6 +84,7 @@ function TeamDialog({ team, onOpenChange }: { team: Team | null; onOpenChange: (
   const save = useSaveTeam();
   const [name, setName] = useState(team?.name ?? '');
   const [status, setStatus] = useState(team?.status ?? 'active');
+  // One set for both lists; the server stores agents and leaders together.
   const [members, setMembers] = useState(() => new Set<number>(team?.members.map((m) => m.id)));
   const [campaignIds, setCampaignIds] = useState(() => new Set<number>(team?.campaigns.map((c) => c.id)));
 
@@ -144,6 +147,21 @@ function TeamDialog({ team, onOpenChange }: { team: Team | null; onOpenChange: (
                 emptyText="No agents yet"
               />
               <CheckList
+                legend="Team leaders & supervisors"
+                items={users.data
+                  ?.filter((u) => u.role === 'staff')
+                  .map((u) => ({
+                    id: u.id,
+                    name: u.username,
+                    label: `${u.username} (${accountLabel(u)})`,
+                  }))}
+                selected={members}
+                onChange={setMembers}
+                loading={users.isPending}
+                error={users.error?.message}
+                emptyText="No admin logins with a role yet (Users)"
+              />
+              <CheckList
                 legend="Campaigns"
                 items={campaigns.data?.map((c) => ({
                   id: c.id,
@@ -179,9 +197,13 @@ function TeamDialog({ team, onOpenChange }: { team: Team | null; onOpenChange: (
 }
 
 const none = <span className="text-muted-foreground">—</span>;
+const names = (list: { username: string }[]) => (list.length ? list.map((m) => m.username).join(', ') : none);
 
 export function TeamsPage() {
   const teams = useTeams();
+  const { canManage, teamScope } = useAccess();
+  // A team-scoped role sees its own teams but can't change any.
+  const manages = canManage('teams') && !teamScope;
   const remove = useDeleteTeam();
   // null = closed, 'new' = create, Team = edit that one.
   const [editing, setEditing] = useState<Team | 'new' | null>(null);
@@ -198,9 +220,11 @@ export function TeamsPage() {
               <Button variant="outline" onClick={() => teams.refetch()}>
                 <RefreshCw /> Refresh
               </Button>
-              <Button onClick={() => setEditing('new')}>
-                <Plus /> Create team
-              </Button>
+              {manages && (
+                <Button onClick={() => setEditing('new')}>
+                  <Plus /> Create team
+                </Button>
+              )}
             </>
           }
         />
@@ -223,6 +247,7 @@ export function TeamsPage() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Agents</TableHead>
+                <TableHead>Leaders</TableHead>
                 <TableHead>Campaigns</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -232,9 +257,8 @@ export function TeamsPage() {
               {teams.data.map((t) => (
                 <TableRow key={t.id}>
                   <TableCell className="font-semibold">{t.name}</TableCell>
-                  <TableCell className="min-w-40">
-                    {t.members.length ? t.members.map((m) => m.username).join(', ') : none}
-                  </TableCell>
+                  <TableCell className="min-w-40">{names(t.members.filter((m) => m.role === 'agent'))}</TableCell>
+                  <TableCell className="min-w-32">{names(t.members.filter((m) => m.role !== 'agent'))}</TableCell>
                   <TableCell className="min-w-40">
                     {t.campaigns.length ? t.campaigns.map((c) => c.name).join(', ') : none}
                   </TableCell>
@@ -242,18 +266,22 @@ export function TeamsPage() {
                     <StatusPill tone={t.status === 'active' ? 'green' : 'grey'}>{t.status}</StatusPill>
                   </TableCell>
                   <TableCell className="text-right whitespace-nowrap">
-                    <Button variant="ghost" size="sm" onClick={() => setEditing(t)} aria-label={`Edit ${t.name}`}>
-                      <Pencil /> Edit
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive"
-                      onClick={() => setDeleting(t)}
-                      aria-label={`Delete ${t.name}`}
-                    >
-                      <Trash2 /> Delete
-                    </Button>
+                    {manages && (
+                      <>
+                        <Button variant="ghost" size="sm" onClick={() => setEditing(t)} aria-label={`Edit ${t.name}`}>
+                          <Pencil /> Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive"
+                          onClick={() => setDeleting(t)}
+                          aria-label={`Delete ${t.name}`}
+                        >
+                          <Trash2 /> Delete
+                        </Button>
+                      </>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

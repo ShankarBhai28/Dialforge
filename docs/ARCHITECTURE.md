@@ -116,9 +116,11 @@ Browsers open `wss://<host>:3000/ws` after logging in. The upgrade is checked ag
 | type | data | Sent to |
 |---|---|---|
 | `hello` | `{ user, role }` | the new connection |
-| `agent.status` | `{ userId, status, reason, queueId, extensionName }` | admins + that agent |
-| `call.event` | `{ callId, eventType, payload }` (every `call_events` row) | admins |
-| `dialer.status` | the `GET /admin/dialer` payload, when anything on the Dialer screen changed | admins |
+| `agent.status` | `{ userId, status, reason, queueId, extensionName }` | Super Admins, staff with Live Agents (team scope: their agents), and that agent |
+| `call.event` | `{ callId, eventType, payload }` (every `call_events` row) | Super Admins, staff with Live Agents or Call Log (team scope: `{ callId }` only) |
+| `dialer.status` | the `GET /admin/dialer` payload, when anything on the Dialer screen changed | Super Admins, staff with Dialer (team scope: their campaigns) |
+
+Staff = admin logins with a role; see `docs/adr/0005-admin-roles-and-team-scope.md`.
 
 Publish from server code with `require('./src/realtime/hub').publish(type, data, { toUserId })`. More message types get added as screens need them.
 

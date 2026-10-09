@@ -1,16 +1,18 @@
 const express = require('express');
 const pool = require('../../db');
 const { normalizePhone } = require('../../dialer-common');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requirePermission, requireCaller } = require('../middleware/auth');
 const { findCurrentCampaign } = require('../services/agents');
 
 const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
+
+const { scopeCondition } = require('../services/access');
 
 const router = express.Router();
 
 // Pending callbacks the agent should see: their own, plus "anyone"
 // callbacks in the campaign they're currently working.
-router.get('/agent/callbacks', requireAuth, async (req, res) => {
+router.get('/agent/callbacks', requireCaller, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const campaign = await findCurrentCampaign(req.session.user.id);
   const [rows] = await pool.query(
@@ -30,7 +32,7 @@ router.get('/agent/callbacks', requireAuth, async (req, res) => {
 });
 
 // ?status= pending|overdue|done|cancelled &campaignId= &q= (lead name or phone) &page= &pageSize=
-router.get('/admin/callbacks', requireRole('admin'), async (req, res) => {
+router.get('/admin/callbacks', requirePermission('callbacks', 'view'), async (req, res) => {
   const paging = parsePaging(req.query);
   const { status, campaignId, q } = req.query;
   const digits = normalizePhone(q || '');
@@ -44,6 +46,7 @@ router.get('/admin/callbacks', requireRole('admin'), async (req, res) => {
       status === 'overdue' ? [] : [status],
     ],
     [campaignId ? 'cb.campaign_id = ?' : '', [campaignId]],
+    scopeCondition(req.access.scope, 'campaigns', 'cb.campaign_id'),
     [
       q ? `(l.name LIKE ?${digits ? ' OR l.phone LIKE ?' : ''})` : '',
       q ? [likeTerm(q.trim()), ...(digits ? [likeTerm(digits)] : [])] : [],
@@ -67,10 +70,12 @@ router.get('/admin/callbacks', requireRole('admin'), async (req, res) => {
   res.json(pageResult(rows, count.n, paging));
 });
 
-router.post('/admin/callbacks/:id/cancel', requireRole('admin'), async (req, res) => {
-  const [result] = await pool.query("UPDATE callbacks SET status = 'cancelled' WHERE id = ? AND status = 'pending'", [
-    req.params.id,
-  ]);
+router.post('/admin/callbacks/:id/cancel', requirePermission('callbacks', 'manage'), async (req, res) => {
+  const [cond, params] = scopeCondition(req.access.scope, 'campaigns', 'campaign_id');
+  const [result] = await pool.query(
+    `UPDATE callbacks SET status = 'cancelled' WHERE id = ? AND status = 'pending'${cond ? ` AND ${cond}` : ''}`,
+    [req.params.id, ...params],
+  );
   if (!result.affectedRows) return res.status(404).json({ error: 'no pending callback with that id' });
   res.json({ status: 'ok' });
 });

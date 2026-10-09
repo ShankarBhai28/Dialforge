@@ -6,6 +6,7 @@ import { homeFor, useMe } from '@/features/auth/auth';
 import { FullPageSpinner } from '@/components/FullPageSpinner';
 import { AdminLayout } from './AdminLayout';
 import { NotFoundPage } from './NotFoundPage';
+import { RequireScreen } from './RequireScreen';
 import { allNavItems } from './nav';
 
 function Home() {
@@ -40,11 +41,12 @@ const SCREENS: Record<string, RouteObject['element']> = {
   '/admin/numbers': page(() => import('@/features/numbers/NumbersPage'), 'NumbersPage'),
   '/admin/users': page(() => import('@/features/users/UsersPage'), 'UsersPage'),
   '/admin/teams': page(() => import('@/features/teams/TeamsPage'), 'TeamsPage'),
+  '/admin/roles': page(() => import('@/features/roles/RolesPage'), 'RolesPage'),
   '/admin/reports': page(() => import('@/features/reports/ReportsPage'), 'ReportsPage'),
 };
 
 const adminChildren: RouteObject[] = allNavItems().map((item) => {
-  const element = SCREENS[item.to] ?? <NotFoundPage />;
+  const element = <RequireScreen screen={item.screen}>{SCREENS[item.to] ?? <NotFoundPage />}</RequireScreen>;
   return item.to === '/admin' ? { index: true, element } : { path: item.to.replace('/admin/', ''), element };
 });
 
@@ -54,7 +56,7 @@ export const routes: RouteObject[] = [
   {
     path: '/admin',
     element: (
-      <RequireRole role="admin">
+      <RequireRole role={['admin', 'staff']}>
         <AdminLayout />
       </RequireRole>
     ),

@@ -1,6 +1,6 @@
 const express = require('express');
 const callControl = require('../../call-control');
-const { requireAuth } = require('../middleware/auth');
+const { requireCaller } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -21,49 +21,49 @@ function callControlRoute(fn) {
 
 router.get(
   '/agent/transfer-targets',
-  requireAuth,
+  requireCaller,
   callControlRoute((ext) => callControl.transferTargets(ext)),
 );
 
 router.get(
   '/agent/call/control',
-  requireAuth,
+  requireCaller,
   callControlRoute(async (ext) => callControl.viewFor(ext)),
 );
 
 router.post(
   '/agent/call/transfer',
-  requireAuth,
+  requireCaller,
   callControlRoute((ext, req) => callControl.transfer(ext, req.body || {})),
 );
 
 router.post(
   '/agent/call/complete',
-  requireAuth,
+  requireCaller,
   callControlRoute((ext) => callControl.completeTransfer(ext)),
 );
 
 router.post(
   '/agent/call/merge',
-  requireAuth,
+  requireCaller,
   callControlRoute((ext) => callControl.merge(ext)),
 );
 
 router.post(
   '/agent/call/cancel',
-  requireAuth,
+  requireCaller,
   callControlRoute((ext) => callControl.cancelConsult(ext)),
 );
 
 router.post(
   '/agent/call/drop',
-  requireAuth,
+  requireCaller,
   callControlRoute((ext, req) => callControl.dropParty(ext, String((req.body || {}).partyId || ''))),
 );
 
 router.post(
   '/agent/call/leave',
-  requireAuth,
+  requireCaller,
   callControlRoute((ext) => callControl.leave(ext)),
 );
 

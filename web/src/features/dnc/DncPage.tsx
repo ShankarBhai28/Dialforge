@@ -13,6 +13,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { formatDateTime } from '@/lib/format';
 import { useDebouncedValue } from '@/lib/hooks';
 import { useAddDnc, useDnc, useRemoveDnc, type DncAddResult, type DncNumber } from './api';
+import { useCanManage } from '@/features/auth/access';
 
 const n = (x: number) => x.toLocaleString('en-IN');
 
@@ -63,6 +64,7 @@ function AddNumbers() {
 }
 
 export function DncPage() {
+  const manages = useCanManage('dnc');
   const [search, setSearch] = useState('');
   // Wait for a pause in typing before asking the server.
   const q = useDebouncedValue(search.trim(), 300);
@@ -79,7 +81,7 @@ export function DncPage() {
 
   return (
     <div className="grid gap-4">
-      <AddNumbers />
+      {manages && <AddNumbers />}
       <Card>
         <CardContent className="pt-5">
           <SectionHeader
@@ -132,15 +134,17 @@ export function DncPage() {
                       <TableCell>{r.created_by_name ?? <span className="text-muted-foreground">—</span>}</TableCell>
                       <TableCell className="whitespace-nowrap">{formatDateTime(r.created_at)}</TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive"
-                          onClick={() => setRemoving(r)}
-                          aria-label={`Remove ${r.phone}`}
-                        >
-                          <Trash2 /> Remove
-                        </Button>
+                        {manages && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive"
+                            onClick={() => setRemoving(r)}
+                            aria-label={`Remove ${r.phone}`}
+                          >
+                            <Trash2 /> Remove
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

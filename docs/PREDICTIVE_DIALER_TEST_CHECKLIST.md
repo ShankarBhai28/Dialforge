@@ -115,5 +115,14 @@ Same setup as above: two agents in **two different browsers** (or one normal + o
 - [ ] Audio check from a **different network** (e.g. a mobile hotspot): the new screen uses the TURN server; the classic screen never did.
 - [ ] Anything that behaves differently from the classic agent screen → note it.
 
+## Admin roles (TL / supervisor)
+- [ ] Super Admin → Users & Teams → **Roles** → Create role **Team Leader**: Sees data of = *Their own teams*; Live Agents = View, Dialer = Manage, Call Log = View, Reports = View; everything else None → Create.
+- [ ] Users → Create user `tl.test` → Account type **Admin with a role** → Role **Team Leader** → Create.
+- [ ] Teams → Edit **Test Team** → tick `tl.test` under **Team leaders & supervisors** → Save.
+- [ ] Log in as `tl.test` (another browser): the menu shows only Live Agents, Dialer, Call Log, Reports; the header says "Team Leader · own teams".
+- [ ] Live Agents / Dialer / Call Log show only Test Team's agents and campaigns. Dialer: Start / Pause work (Manage). Typing `/app/admin/users` in the address bar → "Your role doesn't include this screen."
+- [ ] Super Admin edits the role: Dialer = View → Save → `tl.test` refreshes → no Start / Pause / Stop buttons any more.
+- [ ] Super Admin tries to delete the role while `tl.test` has it → refused, naming `tl.test`.
+
 ## After testing
 - [ ] Tell Claude what failed (step + what you saw) — fixes go in before the live trunk.

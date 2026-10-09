@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../../db');
 const { normalizePhone } = require('../../dialer-common');
-const { requireRole } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/auth');
 const { addDnc } = require('../services/dnc');
 
 const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
@@ -9,7 +9,7 @@ const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/
 const router = express.Router();
 
 // --- Admin: DNC list ---
-router.get('/admin/dnc', requireRole('admin'), async (req, res) => {
+router.get('/admin/dnc', requirePermission('dnc', 'view'), async (req, res) => {
   // total = every number on the list; matching = after the search (paged).
   const paging = parsePaging(req.query);
   const q = normalizePhone(req.query.q || '');
@@ -30,7 +30,7 @@ router.get('/admin/dnc', requireRole('admin'), async (req, res) => {
 });
 
 // Bulk add: one number per line (or comma-separated).
-router.post('/admin/dnc', requireRole('admin'), async (req, res) => {
+router.post('/admin/dnc', requirePermission('dnc', 'manage'), async (req, res) => {
   const entries = String(req.body.phones || '')
     .split(/[\n,]+/)
     .map((p) => p.trim())
@@ -52,7 +52,7 @@ router.post('/admin/dnc', requireRole('admin'), async (req, res) => {
   res.json({ added, existing, invalid });
 });
 
-router.delete('/admin/dnc/:id', requireRole('admin'), async (req, res) => {
+router.delete('/admin/dnc/:id', requirePermission('dnc', 'manage'), async (req, res) => {
   const [result] = await pool.query('DELETE FROM dnc_numbers WHERE id = ? AND tenant_id = 1', [req.params.id]);
   if (!result.affectedRows) return res.status(404).json({ error: 'not found' });
   res.json({ status: 'ok' });

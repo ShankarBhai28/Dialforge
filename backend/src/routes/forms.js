@@ -1,12 +1,14 @@
 const express = require('express');
 const pool = require('../../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requirePermission, requireAdminSide, requireCaller } = require('../middleware/auth');
 const { findCurrentCampaign } = require('../services/agents');
 const { loadFormsWithFields, validateFormData, validateFormFields } = require('../services/forms');
 
+const { scopeCondition } = require('../services/access');
+
 const router = express.Router();
 
-router.get('/admin/forms', requireRole('admin'), async (req, res) => {
+router.get('/admin/forms', requireAdminSide, async (req, res) => {
   const forms = await loadFormsWithFields();
   const [usage] = await pool.query(
     "SELECT form_id, GROUP_CONCAT(name ORDER BY name SEPARATOR ', ') AS campaigns FROM campaigns WHERE form_id IS NOT NULL GROUP BY form_id",
@@ -83,9 +85,9 @@ async function handleFormSave(req, res, formId) {
   }
 }
 
-router.post('/admin/forms', requireRole('admin'), (req, res) => handleFormSave(req, res, null));
+router.post('/admin/forms', requirePermission('forms', 'manage'), (req, res) => handleFormSave(req, res, null));
 
-router.put('/admin/forms/:id', requireRole('admin'), async (req, res) => {
+router.put('/admin/forms/:id', requirePermission('forms', 'manage'), async (req, res) => {
   const [rows] = await pool.query('SELECT id FROM forms WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'form not found' });
   return handleFormSave(req, res, Number(req.params.id));
@@ -93,7 +95,7 @@ router.put('/admin/forms/:id', requireRole('admin'), async (req, res) => {
 
 // Blocked while referenced: a campaign using it, or saved responses
 // (those are real call data - deactivate the form instead).
-router.delete('/admin/forms/:id', requireRole('admin'), async (req, res) => {
+router.delete('/admin/forms/:id', requirePermission('forms', 'manage'), async (req, res) => {
   const [rows] = await pool.query('SELECT id FROM forms WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'form not found' });
   const [campRefs] = await pool.query('SELECT name FROM campaigns WHERE form_id = ?', [req.params.id]);
@@ -107,7 +109,8 @@ router.delete('/admin/forms/:id', requireRole('admin'), async (req, res) => {
   res.json({ status: 'ok' });
 });
 
-router.get('/admin/forms/:id/responses', requireRole('admin'), async (req, res) => {
+router.get('/admin/forms/:id/responses', requirePermission('forms', 'view'), async (req, res) => {
+  const [cond, params] = scopeCondition(req.access.scope, 'campaigns', 'r.campaign_id');
   const [rows] = await pool.query(
     `
     SELECT r.id, r.data, r.created_at, r.lead_id, r.call_id, u.username, c.name AS campaign_name, l.phone AS lead_phone
@@ -115,23 +118,23 @@ router.get('/admin/forms/:id/responses', requireRole('admin'), async (req, res) 
     JOIN users u ON u.id = r.user_id
     LEFT JOIN campaigns c ON c.id = r.campaign_id
     LEFT JOIN leads l ON l.id = r.lead_id
-    WHERE r.form_id = ?
+    WHERE r.form_id = ?${cond ? ` AND ${cond}` : ''}
     ORDER BY r.id DESC LIMIT 200
   `,
-    [req.params.id],
+    [req.params.id, ...params],
   );
   res.json(rows);
 });
 
 // --- Agent: the form for the campaign they're currently working ---
-router.get('/agent/form', requireAuth, async (req, res) => {
+router.get('/agent/form', requireCaller, async (req, res) => {
   const campaign = await findCurrentCampaign(req.session.user.id);
   if (!campaign || !campaign.form_id) return res.json(null);
   const [form] = await loadFormsWithFields("WHERE id = ? AND status = 'active'", [campaign.form_id]);
   res.json(form || null);
 });
 
-router.post('/agent/form-responses', requireAuth, async (req, res) => {
+router.post('/agent/form-responses', requireCaller, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const campaign = await findCurrentCampaign(req.session.user.id);
   if (!campaign || !campaign.form_id) return res.status(400).json({ error: 'your current campaign has no form' });

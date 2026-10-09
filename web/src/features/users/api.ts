@@ -5,20 +5,38 @@ import { get, post, put } from '@/lib/api';
 export type User = {
   id: number;
   username: string;
-  role: 'agent' | 'admin' | string;
+  /** admin = Super Admin; staff = admin login limited by role_id. */
+  role: 'agent' | 'admin' | 'staff' | string;
   /** inactive = can't log in (users are never deleted: calls and history point at them) */
   status: 'active' | 'inactive';
   created_at: string;
   extension_id: number | null;
   extension_name: string | null;
+  role_id: number | null;
+  role_name: string | null;
 };
 
-export type UserUpdate = { role: string; extensionId: number | null; status: 'active' | 'inactive' };
+export type UserUpdate = {
+  role: string;
+  extensionId: number | null;
+  roleId: number | null;
+  status: 'active' | 'inactive';
+};
+
+/** "Super Admin", the admin login's role name, or "Agent". */
+export const accountLabel = (u: Pick<User, 'role' | 'role_name'>) =>
+  u.role === 'admin' ? 'Super Admin' : u.role === 'staff' ? (u.role_name ?? 'Admin') : 'Agent';
 
 // GET /admin/extensions (the server deliberately leaves out sip_password).
 export type Extension = { id: number; name: string; label: string | null };
 
-export type NewUser = { username: string; password: string; role: string; extensionId: number | null };
+export type NewUser = {
+  username: string;
+  password: string;
+  role: string;
+  extensionId: number | null;
+  roleId: number | null;
+};
 
 export const userKeys = {
   all: ['admin', 'users'] as const,

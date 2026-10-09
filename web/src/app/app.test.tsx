@@ -113,3 +113,69 @@ describe('admin sidebar', () => {
     expect(router.state.location.pathname).toBe('/login');
   });
 });
+
+describe('admin logins with a role', () => {
+  const TL = {
+    id: 31,
+    username: 'tl.ravi',
+    role: 'staff',
+    extensionId: null,
+    extensionName: null,
+    roleName: 'Team Leader',
+    scope: 'team',
+    permissions: { live: 'view', dialer: 'manage', reports: 'view' },
+  };
+
+  it('the menu shows only the screens of the role, and the header says which role', async () => {
+    fakeApi({ 'GET /auth/me': { body: TL }, 'GET /admin/live-agents': { body: [] } });
+    renderAt('/admin/live');
+    const nav = await screen.findByRole('navigation', { name: 'Admin' });
+    const scope = within(nav);
+    expect(scope.getByRole('link', { name: 'Live Agents' })).toBeInTheDocument();
+    expect(scope.getByRole('link', { name: 'Dialer' })).toBeInTheDocument();
+    expect(scope.queryByRole('link', { name: 'Dashboard' })).not.toBeInTheDocument();
+    expect(scope.queryByRole('button', { name: /campaign management/i })).not.toBeInTheDocument();
+    expect(scope.queryByRole('button', { name: /users & teams/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Team Leader · own teams/)).toBeInTheDocument();
+  });
+
+  it('without the dashboard, the admin home opens their first screen', async () => {
+    fakeApi({ 'GET /auth/me': { body: TL }, 'GET /admin/live-agents': { body: [] } });
+    const { router } = renderAt('/admin');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/live'));
+  });
+
+  it('a screen outside the role says so (typed-in address)', async () => {
+    fakeApi({ 'GET /auth/me': { body: TL } });
+    renderAt('/admin/users');
+    expect(await screen.findByText("Your role doesn't include this screen.")).toBeInTheDocument();
+  });
+
+  it('Roles is for the Super Admin only', async () => {
+    fakeApi({ 'GET /auth/me': { body: { ...TL, permissions: { users: 'manage', teams: 'manage' } } } });
+    renderAt('/admin/roles');
+    expect(await screen.findByText("Your role doesn't include this screen.")).toBeInTheDocument();
+  });
+
+  it('view-only: the screen opens without its change buttons', async () => {
+    fakeApi({
+      'GET /auth/me': { body: { ...TL, scope: 'all', permissions: { campaigns: 'view' } } },
+      'GET /admin/campaigns': { body: [{ id: 1, name: 'Sales', status: 'active', dial_mode: 'manual' }] },
+    });
+    renderAt('/admin/campaigns');
+    await screen.findByText('Sales');
+    expect(screen.queryByRole('button', { name: /create campaign/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit Sales' })).not.toBeInTheDocument();
+  });
+
+  it("team scope with Campaigns: manage edits its campaigns but can't create or delete", async () => {
+    fakeApi({
+      'GET /auth/me': { body: { ...TL, permissions: { campaigns: 'manage' } } },
+      'GET /admin/campaigns': { body: [{ id: 1, name: 'Sales', status: 'active', dial_mode: 'manual' }] },
+    });
+    renderAt('/admin/campaigns');
+    expect(await screen.findByRole('button', { name: 'Edit Sales' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /create campaign/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete Sales' })).not.toBeInTheDocument();
+  });
+});

@@ -10,8 +10,10 @@ import { leadKeys } from './api';
 import { ListsTab } from './ListsTab';
 import { LeadsTab } from './LeadsTab';
 import { ImportTab } from './ImportTab';
+import { useCanManage } from '@/features/auth/access';
 
 export function LeadsPage() {
+  const manages = useCanManage('leads');
   const qc = useQueryClient();
   const [tab, setTab] = useState('lists');
   // Lifted so "Import" on a list row opens the Import tab with that list picked.
@@ -39,7 +41,7 @@ export function LeadsPage() {
           <TabsList>
             <TabsTrigger value="lists">Lists</TabsTrigger>
             <TabsTrigger value="leads">Leads</TabsTrigger>
-            <TabsTrigger value="import">Import</TabsTrigger>
+            {manages && <TabsTrigger value="import">Import</TabsTrigger>}
           </TabsList>
           <TabsContent value="lists">
             <ListsTab
@@ -52,9 +54,11 @@ export function LeadsPage() {
           <TabsContent value="leads">
             <LeadsTab />
           </TabsContent>
-          <TabsContent value="import">
-            <ImportTab listId={importListId} onListChange={setImportListId} />
-          </TabsContent>
+          {manages && (
+            <TabsContent value="import">
+              <ImportTab listId={importListId} onListChange={setImportListId} />
+            </TabsContent>
+          )}
         </Tabs>
       </CardContent>
     </Card>

@@ -38,4 +38,10 @@ async function dialerOverview(deps = { pool }) {
   };
 }
 
-module.exports = { dialerOverview };
+/** The overview limited to a team-scoped role's campaigns (scope null = all). */
+function scopeOverview(overview, scope) {
+  if (!scope) return overview;
+  return { ...overview, campaigns: overview.campaigns.filter((c) => scope.campaignIds.includes(c.id)) };
+}
+
+module.exports = { dialerOverview, scopeOverview };

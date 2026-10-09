@@ -15,6 +15,7 @@ import { useCampaigns, useDeleteCampaign, type Campaign } from './api';
 import { CampaignSettingsForm } from './CampaignSettingsForm';
 import { DispositionsEditor } from './DispositionsEditor';
 import { RecycleRulesEditor } from './RecycleRulesEditor';
+import { useAccess } from '@/features/auth/access';
 
 type Tab = 'settings' | 'dispositions' | 'recycle';
 
@@ -85,6 +86,10 @@ function CampaignDialog({
 }
 
 export function CampaignsPage() {
+  const { canManage, teamScope } = useAccess();
+  const manages = canManage('campaigns');
+  // Creating or deleting a campaign reaches outside a team-scoped role's teams.
+  const managesAll = manages && !teamScope;
   const campaigns = useCampaigns();
   const remove = useDeleteCampaign();
   // null = closed; otherwise which campaign (or 'new') and which tab to open on.
@@ -98,9 +103,11 @@ export function CampaignsPage() {
           title="Campaigns"
           description="A campaign references a queue, plus its outbound CLI, auto-answer behavior and dialer settings."
           actions={
-            <Button onClick={() => setOpen({ campaign: 'new', tab: 'settings' })}>
-              <Plus /> Create campaign
-            </Button>
+            managesAll && (
+              <Button onClick={() => setOpen({ campaign: 'new', tab: 'settings' })}>
+                <Plus /> Create campaign
+              </Button>
+            )
           }
         />
 
@@ -145,39 +152,47 @@ export function CampaignsPage() {
                     </StatusPill>
                   </TableCell>
                   <TableCell className="text-right whitespace-nowrap">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setOpen({ campaign: c, tab: 'settings' })}
-                      aria-label={`Edit ${c.name}`}
-                    >
-                      <Pencil /> Edit
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setOpen({ campaign: c, tab: 'dispositions' })}
-                      aria-label={`Dispositions for ${c.name}`}
-                    >
-                      <ListChecks /> Dispositions
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setOpen({ campaign: c, tab: 'recycle' })}
-                      aria-label={`Recycle rules for ${c.name}`}
-                    >
-                      <Repeat /> Recycle rules
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive"
-                      onClick={() => setDeleting(c)}
-                      aria-label={`Delete ${c.name}`}
-                    >
-                      <Trash2 /> Delete
-                    </Button>
+                    {manages && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setOpen({ campaign: c, tab: 'settings' })}
+                        aria-label={`Edit ${c.name}`}
+                      >
+                        <Pencil /> Edit
+                      </Button>
+                    )}
+                    {manages && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setOpen({ campaign: c, tab: 'dispositions' })}
+                        aria-label={`Dispositions for ${c.name}`}
+                      >
+                        <ListChecks /> Dispositions
+                      </Button>
+                    )}
+                    {manages && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setOpen({ campaign: c, tab: 'recycle' })}
+                        aria-label={`Recycle rules for ${c.name}`}
+                      >
+                        <Repeat /> Recycle rules
+                      </Button>
+                    )}
+                    {managesAll && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={() => setDeleting(c)}
+                        aria-label={`Delete ${c.name}`}
+                      >
+                        <Trash2 /> Delete
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

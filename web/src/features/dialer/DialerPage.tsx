@@ -21,6 +21,7 @@ import {
   type DialerEngine,
   type DialerToday,
 } from './api';
+import { useCanManage } from '@/features/auth/access';
 
 const NONE = <span className="text-muted-foreground">—</span>;
 
@@ -152,6 +153,7 @@ function HopperCard({ campaign, onClose }: { campaign: { id: number; name: strin
 type Confirming = { campaign: DialerCampaign; action: 'start' | 'stop' };
 
 export function DialerPage() {
+  const manages = useCanManage('dialer');
   const dialer = useDialer();
   const act = useDialerAction();
   const [confirming, setConfirming] = useState<Confirming | null>(null);
@@ -280,7 +282,7 @@ export function DialerPage() {
                       </TableCell>
                       <TableCell className="max-w-72 min-w-48 text-xs">{row.note ?? NONE}</TableCell>
                       <TableCell className="text-right whitespace-nowrap">
-                        {row.dialer_state !== 'running' && (
+                        {manages && row.dialer_state !== 'running' && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -290,7 +292,7 @@ export function DialerPage() {
                             <Play /> Start
                           </Button>
                         )}
-                        {row.dialer_state === 'running' && (
+                        {manages && row.dialer_state === 'running' && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -304,7 +306,7 @@ export function DialerPage() {
                             <Pause /> Pause
                           </Button>
                         )}
-                        {row.dialer_state !== 'stopped' && (
+                        {manages && row.dialer_state !== 'stopped' && (
                           <Button
                             variant="ghost"
                             size="sm"

@@ -1,8 +1,10 @@
 const express = require('express');
 const pool = require('../../db');
 const { normalizePhone, DEFAULT_RECYCLE_RULES, getRecycleRules } = require('../../dialer-common');
-const { requireRole } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/auth');
 const { getDispositions } = require('../services/dispositions');
+
+const { campaignInScope } = require('../services/access');
 
 const router = express.Router();
 
@@ -17,16 +19,18 @@ const RECYCLE_RULE_LABELS = {
   abandoned: 'Abandoned',
 };
 
-router.get('/admin/campaigns/:id/recycle-rules', requireRole('admin'), async (req, res) => {
+router.get('/admin/campaigns/:id/recycle-rules', requirePermission('campaigns', 'view'), async (req, res) => {
   const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [req.params.id]);
-  if (!rows[0]) return res.status(404).json({ error: 'campaign not found' });
+  if (!rows[0] || !campaignInScope(req.access.scope, rows[0].id))
+    return res.status(404).json({ error: 'campaign not found' });
   const rules = await getRecycleRules(pool, Number(req.params.id));
   res.json(Object.keys(rules).map((key) => ({ result: key, label: RECYCLE_RULE_LABELS[key], ...rules[key] })));
 });
 
-router.put('/admin/campaigns/:id/recycle-rules', requireRole('admin'), async (req, res) => {
+router.put('/admin/campaigns/:id/recycle-rules', requirePermission('campaigns', 'manage'), async (req, res) => {
   const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [req.params.id]);
-  if (!rows[0]) return res.status(404).json({ error: 'campaign not found' });
+  if (!rows[0] || !campaignInScope(req.access.scope, rows[0].id))
+    return res.status(404).json({ error: 'campaign not found' });
   const input = req.body.rules || {};
   const values = [];
   for (const key of Object.keys(DEFAULT_RECYCLE_RULES)) {
@@ -67,9 +71,10 @@ async function listWithCampaign(listId) {
 
 // What's in the list, by lead status: how many can be dialed now, are
 // waiting for their retry time, or are done (final / attempts used up).
-router.get('/admin/lists/:id/recycle', requireRole('admin'), async (req, res) => {
+router.get('/admin/lists/:id/recycle', requirePermission('leads', 'view'), async (req, res) => {
   const list = await listWithCampaign(req.params.id);
-  if (!list) return res.status(404).json({ error: 'list not found' });
+  if (!list || !campaignInScope(req.access.scope, list.campaign_id))
+    return res.status(404).json({ error: 'list not found' });
   const [statuses] = await pool.query(
     `SELECT status, COUNT(*) AS total,
        SUM(is_final = 0 AND attempts < ? AND (next_call_at IS NULL OR next_call_at <= NOW())) AS dialable,
@@ -100,9 +105,10 @@ router.get('/admin/lists/:id/recycle', requireRole('admin'), async (req, res) =>
   });
 });
 
-router.post('/admin/lists/:id/recycle', requireRole('admin'), async (req, res) => {
+router.post('/admin/lists/:id/recycle', requirePermission('leads', 'manage'), async (req, res) => {
   const list = await listWithCampaign(req.params.id);
-  if (!list) return res.status(404).json({ error: 'list not found' });
+  if (!list || !campaignInScope(req.access.scope, list.campaign_id))
+    return res.status(404).json({ error: 'list not found' });
   const { statuses, resetAttempts } = req.body;
   if (
     !Array.isArray(statuses) ||

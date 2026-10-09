@@ -1,6 +1,9 @@
-// Users: agent / admin login accounts. Create, edit role / extension,
-// reset password, deactivate. There is no delete - calls, status history,
-// form answers and callbacks point at users - so leavers are deactivated.
+// Users: login accounts - agents, admin logins with a role (TL,
+// supervisor, ...) and Super Admins. Create, edit account type / role /
+// extension, reset password, deactivate. There is no delete - calls,
+// status history, form answers and callbacks point at users - so leavers
+// are deactivated. Only a Super Admin manages admin-side accounts; a role
+// with Users: manage handles agent accounts.
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import { KeyRound, Pencil, Plus, UserRound, UserRoundCheck, UserRoundX } from 'lucide-react';
@@ -24,7 +27,17 @@ import { ErrorState } from '@/components/ErrorState';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useMe } from '@/features/auth/auth';
-import { useCreateUser, useExtensions, useResetPassword, useUpdateUser, useUsers, type User } from './api';
+import { useAccess } from '@/features/auth/access';
+import { useRoles } from '@/features/roles/api';
+import {
+  accountLabel,
+  useCreateUser,
+  useExtensions,
+  useResetPassword,
+  useUpdateUser,
+  useUsers,
+  type User,
+} from './api';
 
 const PASSWORD_HINT = 'At least 8 characters.';
 
@@ -55,6 +68,71 @@ function ExtensionSelect({ id, value, onChange }: { id: string; value: string; o
   );
 }
 
+/**
+ * Account type (+ the role for an admin login). Only a Super Admin sees the
+ * choice; anyone else manages agent accounts only.
+ */
+function AccountTypeFields({
+  idPrefix,
+  kind,
+  roleId,
+  onKind,
+  onRoleId,
+}: {
+  idPrefix: string;
+  kind: string;
+  roleId: string;
+  onKind: (v: string) => void;
+  onRoleId: (v: string) => void;
+}) {
+  const { isSuperAdmin } = useAccess();
+  const roles = useRoles();
+  if (!isSuperAdmin) return null;
+  const list = roles.data?.roles ?? [];
+  return (
+    <>
+      <Field id={`${idPrefix}-role`} label="Account type">
+        <Select id={`${idPrefix}-role`} value={kind} onChange={(e) => onKind(e.target.value)}>
+          <option value="agent">Agent</option>
+          <option value="staff">Admin with a role (TL, supervisor, ...)</option>
+          <option value="admin">Super Admin (everything)</option>
+        </Select>
+      </Field>
+      {kind === 'staff' && (
+        <Field
+          id={`${idPrefix}-admin-role`}
+          label="Role"
+          error={roles.error ? `Could not load roles: ${roles.error.message}` : null}
+          hint={
+            roles.data && !list.length ? 'No roles yet - create one in Roles first.' : 'What this login may see and do.'
+          }
+        >
+          <Select
+            id={`${idPrefix}-admin-role`}
+            value={roleId || String(list[0]?.id ?? '')}
+            onChange={(e) => onRoleId(e.target.value)}
+            disabled={!list.length}
+            required
+          >
+            {roles.isPending && <option value="">Loading…</option>}
+            {list.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name} ({r.scope === 'team' ? 'own teams' : 'all teams'})
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
+    </>
+  );
+}
+
+/** The chosen role id, defaulting to the first role once the list loads. */
+function useChosenRole(chosen: string) {
+  const roles = useRoles();
+  return chosen || (roles.data?.roles[0] ? String(roles.data.roles[0].id) : '');
+}
+
 /** First extension pre-selected once the list loads. */
 function useDefaultExtension(chosen: string) {
   const extensions = useExtensions();
@@ -66,17 +144,25 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (v: boolean) => void
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('agent');
+  const [roleId, setRoleId] = useState('');
   const [extensionId, setExtensionId] = useState('');
   const extension = useDefaultExtension(extensionId);
+  const adminRole = useChosenRole(roleId);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     const name = username.trim();
     create.mutate(
-      { username: name, password, role, extensionId: role === 'agent' && extension ? Number(extension) : null },
+      {
+        username: name,
+        password,
+        role,
+        extensionId: role === 'agent' && extension ? Number(extension) : null,
+        roleId: role === 'staff' && adminRole ? Number(adminRole) : null,
+      },
       {
         onSuccess: () => {
-          toast.success(`Created ${role} account: ${name}`);
+          toast.success(`Created account: ${name}`);
           onOpenChange(false);
         },
       },
@@ -89,7 +175,9 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (v: boolean) => void
         <form onSubmit={onSubmit} className="contents">
           <DialogHeader>
             <DialogTitle>Create user account</DialogTitle>
-            <DialogDescription>Agents must be linked to the extension (softphone) they log in on.</DialogDescription>
+            <DialogDescription>
+              Agents take calls on their extension. Admin logins see only what their role allows.
+            </DialogDescription>
           </DialogHeader>
           <DialogBody className="grid gap-4">
             <Field id="user-name" label="Username" hint="3-50 letters, digits, dots, dashes or underscores.">
@@ -113,12 +201,7 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (v: boolean) => void
                 autoComplete="new-password"
               />
             </Field>
-            <Field id="user-role" label="Role">
-              <Select id="user-role" value={role} onChange={(e) => setRole(e.target.value)}>
-                <option value="agent">agent</option>
-                <option value="admin">admin</option>
-              </Select>
-            </Field>
+            <AccountTypeFields idPrefix="user" kind={role} roleId={adminRole} onKind={setRole} onRoleId={setRoleId} />
             {role === 'agent' && <ExtensionSelect id="user-extension" value={extension} onChange={setExtensionId} />}
             <FormError message={create.error?.message} />
           </DialogBody>
@@ -139,13 +222,21 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (v: boolean) => void
 function EditUserDialog({ user, onOpenChange }: { user: User; onOpenChange: (v: boolean) => void }) {
   const update = useUpdateUser();
   const [role, setRole] = useState(user.role);
+  const [roleId, setRoleId] = useState(user.role_id ? String(user.role_id) : '');
   const [extensionId, setExtensionId] = useState(user.extension_id ? String(user.extension_id) : '');
   const extension = useDefaultExtension(extensionId);
+  const adminRole = useChosenRole(roleId);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     update.mutate(
-      { id: user.id, role, status: user.status, extensionId: role === 'agent' && extension ? Number(extension) : null },
+      {
+        id: user.id,
+        role,
+        status: user.status,
+        extensionId: role === 'agent' && extension ? Number(extension) : null,
+        roleId: role === 'staff' && adminRole ? Number(adminRole) : null,
+      },
       {
         onSuccess: () => {
           toast.success(`Saved ${user.username}`);
@@ -162,16 +253,11 @@ function EditUserDialog({ user, onOpenChange }: { user: User; onOpenChange: (v: 
           <DialogHeader>
             <DialogTitle>Edit {user.username}</DialogTitle>
             <DialogDescription>
-              Changing the role logs {user.username} out; they log in again with the new access.
+              Changing the account type or role logs {user.username} out; they log in again with the new access.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="grid gap-4">
-            <Field id="edit-role" label="Role">
-              <Select id="edit-role" value={role} onChange={(e) => setRole(e.target.value)}>
-                <option value="agent">agent</option>
-                <option value="admin">admin</option>
-              </Select>
-            </Field>
+            <AccountTypeFields idPrefix="edit" kind={role} roleId={adminRole} onKind={setRole} onRoleId={setRoleId} />
             {role === 'agent' && <ExtensionSelect id="edit-extension" value={extension} onChange={setExtensionId} />}
             <FormError message={update.error?.message} />
           </DialogBody>
@@ -246,6 +332,10 @@ type Open = { kind: 'create' } | { kind: 'edit' | 'password' | 'toggle'; user: U
 export function UsersPage() {
   const users = useUsers();
   const { data: me } = useMe();
+  const { canManage, isSuperAdmin, teamScope } = useAccess();
+  // Team-scoped roles only read; anyone but a Super Admin manages agent accounts only.
+  const manages = canManage('users') && !teamScope;
+  const canChange = (u: User) => manages && (isSuperAdmin || u.role === 'agent');
   const toggle = useUpdateUser();
   const [open, setOpen] = useState<Open>(null);
   const close = () => {
@@ -260,11 +350,13 @@ export function UsersPage() {
       <CardContent className="pt-5">
         <SectionHeader
           title="Users"
-          description="Agent and admin accounts. People who leave are deactivated, so their call history stays."
+          description="Agents, admin logins with a role, and Super Admins. People who leave are deactivated, so their call history stays."
           actions={
-            <Button onClick={() => setOpen({ kind: 'create' })}>
-              <Plus /> Create user
-            </Button>
+            manages && (
+              <Button onClick={() => setOpen({ kind: 'create' })}>
+                <Plus /> Create user
+              </Button>
+            )
           }
         />
 
@@ -301,7 +393,9 @@ export function UsersPage() {
                       {isMe && <span className="ml-1.5 text-xs font-normal text-muted-foreground">(you)</span>}
                     </TableCell>
                     <TableCell>
-                      <StatusPill tone={u.role === 'admin' ? 'amber' : 'blue'}>{u.role}</StatusPill>
+                      <StatusPill tone={u.role === 'admin' ? 'amber' : u.role === 'staff' ? 'green' : 'blue'}>
+                        {accountLabel(u)}
+                      </StatusPill>
                     </TableCell>
                     <TableCell className="tabular-nums">
                       {u.extension_name ?? <span className="text-muted-foreground">—</span>}
@@ -311,32 +405,36 @@ export function UsersPage() {
                     </TableCell>
                     <TableCell className="whitespace-nowrap">{formatDateTime(u.created_at)}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Edit ${u.username}`}
-                        onClick={() => setOpen({ kind: 'edit', user: u })}
-                      >
-                        <Pencil /> Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Reset password for ${u.username}`}
-                        onClick={() => setOpen({ kind: 'password', user: u })}
-                      >
-                        <KeyRound /> Password
-                      </Button>
-                      {!isMe && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className={cn(active && 'text-destructive')}
-                          aria-label={`${active ? 'Deactivate' : 'Activate'} ${u.username}`}
-                          onClick={() => setOpen({ kind: 'toggle', user: u })}
-                        >
-                          {active ? <UserRoundX /> : <UserRoundCheck />} {active ? 'Deactivate' : 'Activate'}
-                        </Button>
+                      {canChange(u) && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Edit ${u.username}`}
+                            onClick={() => setOpen({ kind: 'edit', user: u })}
+                          >
+                            <Pencil /> Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Reset password for ${u.username}`}
+                            onClick={() => setOpen({ kind: 'password', user: u })}
+                          >
+                            <KeyRound /> Password
+                          </Button>
+                          {!isMe && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className={cn(active && 'text-destructive')}
+                              aria-label={`${active ? 'Deactivate' : 'Activate'} ${u.username}`}
+                              onClick={() => setOpen({ kind: 'toggle', user: u })}
+                            >
+                              {active ? <UserRoundX /> : <UserRoundCheck />} {active ? 'Deactivate' : 'Activate'}
+                            </Button>
+                          )}
+                        </>
                       )}
                     </TableCell>
                   </TableRow>
@@ -370,6 +468,7 @@ export function UsersPage() {
               id: target.id,
               role: target.role,
               extensionId: target.extension_id,
+              roleId: target.role_id,
               status: deactivating ? 'inactive' : 'active',
             },
             {

@@ -1,6 +1,6 @@
 const express = require('express');
 const pool = require('../../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireCaller } = require('../middleware/auth');
 const {
   findAgentQueues,
   findCurrentCampaign,
@@ -13,7 +13,7 @@ const { buildWebrtcConfig } = require('../services/webrtc');
 
 const router = express.Router();
 
-router.post('/agent/status', requireAuth, async (req, res) => {
+router.post('/agent/status', requireCaller, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const { status, reason, queueId } = req.body;
   if (!['available', 'break', 'acw'].includes(status)) {
@@ -46,7 +46,7 @@ router.post('/agent/status', requireAuth, async (req, res) => {
 // calls row - auto_answer is a property of the campaign/queue, the same
 // for whoever answers, so this needs no correlation to a particular call
 // and can't race against AMI events telling us who picked up.
-router.get('/agent/call-policy', requireAuth, async (req, res) => {
+router.get('/agent/call-policy', requireCaller, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const asteriskName = await findCurrentQueueAsteriskName(req.session.user.id);
   if (!asteriskName) return res.json({ autoAnswer: false });
@@ -64,7 +64,7 @@ router.get('/agent/call-policy', requireAuth, async (req, res) => {
 // agent to be working under.
 // Agents additionally only see campaigns mapped to one of their (active)
 // teams - an agent in no team sees nothing, by design.
-router.get('/queues', requireAuth, async (req, res) => {
+router.get('/queues', requireCaller, async (req, res) => {
   if (req.session.user.role !== 'agent') {
     const [rows] = await pool.query(`
       SELECT q.id, q.name, c.name AS campaign_name
@@ -81,7 +81,7 @@ router.get('/queues', requireAuth, async (req, res) => {
 // --- Agent: the dialer call they're on right now (screen pop, D7) ---
 // The dialer's customer reaches the agent through Queue(), so the browser
 // only sees "a call came in"; this tells it which lead it is.
-router.get('/agent/active-call', requireAuth, async (req, res) => {
+router.get('/agent/active-call', requireCaller, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const [rows] = await pool.query(
     `
@@ -103,7 +103,7 @@ router.get('/agent/active-call', requireAuth, async (req, res) => {
 
 // In-call panel: has the customer on the agent's click-to-call answered
 // yet? (The agent's own leg answers first, so the browser can't tell.)
-router.get('/agent/call-state/:callId', requireAuth, async (req, res) => {
+router.get('/agent/call-state/:callId', requireCaller, async (req, res) => {
   const [rows] = await pool.query(
     'SELECT answer_time, end_time, disposition FROM calls WHERE id = ? AND from_extension = ?',
     [req.params.callId, req.session.user.extensionName],
@@ -113,7 +113,7 @@ router.get('/agent/call-state/:callId', requireAuth, async (req, res) => {
   res.json({ answered: !!rows[0].answer_time, ended: !!rows[0].end_time, disposition: rows[0].disposition });
 });
 
-router.get('/agent/campaign-info', requireAuth, async (req, res) => {
+router.get('/agent/campaign-info', requireCaller, async (req, res) => {
   const c = await findCurrentCampaign(req.session.user.id);
   res.json(
     c ? { id: c.id, name: c.name, dialMode: c.dial_mode, wrapupSec: c.wrapup_sec, dialerState: c.dialer_state } : null,
@@ -121,12 +121,12 @@ router.get('/agent/campaign-info', requireAuth, async (req, res) => {
 });
 
 // --- Agent: dispositions + callbacks for the campaign they're working ---
-router.get('/agent/dispositions', requireAuth, async (req, res) => {
+router.get('/agent/dispositions', requireCaller, async (req, res) => {
   const campaign = await findCurrentCampaign(req.session.user.id);
   res.json(await getDispositions(campaign ? campaign.id : null));
 });
 
-router.get('/agent/stats', requireAuth, async (req, res) => {
+router.get('/agent/stats', requireCaller, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const userId = req.session.user.id;
 
@@ -193,7 +193,7 @@ router.get('/agent/stats', requireAuth, async (req, res) => {
 // Always the extension the admin assigned to this agent (Users screen);
 // agents can see it but not choose another. Read from the DB, not the
 // session, so a change by the admin applies on the next connect.
-router.get('/agent/extension-credentials', requireAuth, async (req, res) => {
+router.get('/agent/extension-credentials', requireCaller, async (req, res) => {
   const [rows] = await pool.query(
     'SELECT e.id, e.name, e.sip_password FROM users u JOIN extensions e ON e.id = u.extension_id WHERE u.id = ?',
     [req.session.user.id],
@@ -216,7 +216,7 @@ router.get('/agent/extension-credentials', requireAuth, async (req, res) => {
 });
 
 // --- Agent: how the browser softphone reaches Asterisk (see services/webrtc.js) ---
-router.get('/agent/webrtc-config', requireAuth, (req, res) => {
+router.get('/agent/webrtc-config', requireCaller, (req, res) => {
   res.json(buildWebrtcConfig(process.env, req.hostname, { userId: req.session.user.id }));
 });
 

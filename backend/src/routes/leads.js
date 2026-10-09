@@ -2,7 +2,7 @@ const express = require('express');
 const ExcelJS = require('exceljs');
 const pool = require('../../db');
 const { normalizePhone } = require('../../dialer-common');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requirePermission, requireCaller } = require('../middleware/auth');
 const { findCurrentCampaign } = require('../services/agents');
 const { getDispositions } = require('../services/dispositions');
 const { addDnc } = require('../services/dnc');
@@ -16,12 +16,14 @@ const {
   receiveLeadFile,
 } = require('../services/leadImport');
 
+const { campaignInScope, scopeCondition } = require('../services/access');
+
 const router = express.Router();
 
 const PHONE_RE = /^\+?[0-9]{7,15}$/;
 
 // --- Leads (campaign-scoped for agents - admins see everything) ---
-router.get('/leads', requireAuth, async (req, res) => {
+router.get('/leads', requireCaller, async (req, res) => {
   if (req.session.user.role === 'admin') {
     const [rows] = await pool.query(`
       SELECT l.*, c.name AS campaign_name, ls.name AS list_name
@@ -42,7 +44,7 @@ router.get('/leads', requireAuth, async (req, res) => {
 
 // --- Admin: every lead, searched and paged on the server ---
 // ?q= (name or phone) &campaignId= (or 'none') &listId= &status= &page= &pageSize=
-router.get('/admin/leads', requireRole('admin'), async (req, res) => {
+router.get('/admin/leads', requirePermission('leads', 'view'), async (req, res) => {
   const paging = parsePaging(req.query);
   const { q, campaignId, listId, status } = req.query;
   const digits = normalizePhone(q || '');
@@ -57,6 +59,7 @@ router.get('/admin/leads', requireRole('admin'), async (req, res) => {
     ],
     [listId ? 'l.list_id = ?' : '', [listId]],
     [status ? 'l.status = ?' : '', [status]],
+    scopeCondition(req.access.scope, 'campaigns', 'l.campaign_id'),
   ]);
   const [rows] = await pool.query(
     `SELECT l.*, c.name AS campaign_name, ls.name AS list_name
@@ -71,12 +74,13 @@ router.get('/admin/leads', requireRole('admin'), async (req, res) => {
   // Statuses present (for the filter), within the chosen campaign if any.
   const scope = whereClause([
     [campaignId === 'none' ? 'campaign_id IS NULL' : campaignId ? 'campaign_id = ?' : '', [campaignId]],
+    scopeCondition(req.access.scope, 'campaigns', 'campaign_id'),
   ]);
   const [statuses] = await pool.query(`SELECT DISTINCT status FROM leads ${scope.sql} ORDER BY status`, scope.params);
   res.json({ ...pageResult(rows, count.n, paging), statuses: statuses.map((s) => s.status) });
 });
 
-router.post('/leads', requireAuth, async (req, res) => {
+router.post('/leads', requireCaller, async (req, res) => {
   const { phone, name } = req.body;
   if (!phone) return res.status(400).json({ error: 'phone is required' });
   let campaignId = null;
@@ -97,7 +101,7 @@ router.post('/leads', requireAuth, async (req, res) => {
 // right after it ends. What it does comes from the campaign's own
 // disposition config: final (lead done), retry after N minutes, schedule a
 // callback, and/or add the number to the DNC list (click2call then refuses it).
-router.post('/leads/:id/disposition', requireAuth, async (req, res) => {
+router.post('/leads/:id/disposition', requireCaller, async (req, res) => {
   const [leadRows] = await pool.query('SELECT id, phone, campaign_id FROM leads WHERE id = ?', [req.params.id]);
   const lead = leadRows[0];
   if (!lead) return res.status(404).json({ error: 'lead not found' });
@@ -115,7 +119,7 @@ router.post('/leads/:id/disposition', requireAuth, async (req, res) => {
 // lead in the call's campaign - or the lead already there with that number
 // is used - the call is linked to it, and the outcome is saved on it like
 // any lead's. Only the agent who had the call may do this.
-router.post('/agent/calls/:callId/disposition', requireAuth, async (req, res) => {
+router.post('/agent/calls/:callId/disposition', requireCaller, async (req, res) => {
   const ext = req.session.user.extensionName;
   const [callRows] = await pool.query(
     'SELECT id, lead_id, to_number, campaign_id FROM calls WHERE id = ? AND (from_extension = ? OR transfer_ext = ?)',
@@ -216,7 +220,7 @@ async function saveDisposition(req, res, lead) {
 
 // --- Admin: full lead edit/delete (distinct from the agent-facing
 // disposition endpoint above, which only ever touches status) ---
-router.put('/admin/leads/:id', requireRole('admin'), async (req, res) => {
+router.put('/admin/leads/:id', requirePermission('leads', 'manage'), async (req, res) => {
   const { name, phone, status } = req.body;
   const campaignId = req.body.campaignId ? Number(req.body.campaignId) : null;
   const listId = req.body.listId ? Number(req.body.listId) : null;
@@ -237,10 +241,14 @@ router.put('/admin/leads/:id', requireRole('admin'), async (req, res) => {
     if (!codes.includes(status))
       return res.status(400).json({ error: `status must be new or one of: ${codes.join(', ')}` });
   }
-  const [rows] = await pool.query('SELECT id, alt_phone, priority, custom_data FROM leads WHERE id = ?', [
+  const [rows] = await pool.query('SELECT id, alt_phone, priority, custom_data, campaign_id FROM leads WHERE id = ?', [
     req.params.id,
   ]);
-  if (!rows[0]) return res.status(404).json({ error: 'lead not found' });
+  if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id))
+    return res.status(404).json({ error: 'lead not found' });
+  if (!campaignInScope(req.access.scope, campaignId)) {
+    return res.status(400).json({ error: "that campaign isn't one of your teams'" });
+  }
   if (campaignId) {
     const [c] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [campaignId]);
     if (!c[0]) return res.status(400).json({ error: 'campaign not found' });
@@ -280,9 +288,10 @@ router.put('/admin/leads/:id', requireRole('admin'), async (req, res) => {
   res.json({ status: 'ok' });
 });
 
-router.delete('/admin/leads/:id', requireRole('admin'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id FROM leads WHERE id = ?', [req.params.id]);
-  if (!rows[0]) return res.status(404).json({ error: 'lead not found' });
+router.delete('/admin/leads/:id', requirePermission('leads', 'manage'), async (req, res) => {
+  const [rows] = await pool.query('SELECT id, campaign_id FROM leads WHERE id = ?', [req.params.id]);
+  if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id))
+    return res.status(404).json({ error: 'lead not found' });
 
   const [callRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM calls WHERE lead_id = ?', [req.params.id]);
   if (callRefs[0].cnt > 0) {
@@ -305,13 +314,15 @@ router.delete('/admin/leads/:id', requireRole('admin'), async (req, res) => {
   res.json({ status: 'ok' });
 });
 
-router.post('/admin/leads/import', requireRole('admin'), receiveLeadFile, async (req, res) => {
+router.post('/admin/leads/import', requirePermission('leads', 'manage'), receiveLeadFile, async (req, res) => {
   const { listId } = req.body;
   if (!req.file) return res.status(400).json({ error: 'choose an .xlsx or .csv file' });
   if (!listId) return res.status(400).json({ error: 'listId is required - create a list first' });
   const [listRows] = await pool.query('SELECT * FROM lists WHERE id = ?', [listId]);
   const list = listRows[0];
-  if (!list) return res.status(400).json({ error: 'list not found' });
+  if (!list || !campaignInScope(req.access.scope, list.campaign_id)) {
+    return res.status(400).json({ error: 'list not found' });
+  }
   const campaignId = list.campaign_id;
 
   const parsed = await readLeadUpload(req.file);
@@ -427,12 +438,14 @@ router.post('/admin/leads/import', requireRole('admin'), receiveLeadFile, async 
 
 // Template built from the list's campaign form, so the columns always
 // match what the import accepts. xlsx (default) adds an Instructions sheet.
-router.get('/admin/leads/template', requireRole('admin'), async (req, res) => {
+router.get('/admin/leads/template', requirePermission('leads', 'view'), async (req, res) => {
   let fields = [];
   let fileName = 'leads-template';
   if (req.query.listId) {
     const [rows] = await pool.query('SELECT l.name, l.campaign_id FROM lists l WHERE l.id = ?', [req.query.listId]);
-    if (!rows[0]) return res.status(404).json({ error: 'list not found' });
+    if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id)) {
+      return res.status(404).json({ error: 'list not found' });
+    }
     fields = await getCampaignFormFields(rows[0].campaign_id);
     fileName = `leads-${rows[0].name.replace(/[^A-Za-z0-9_-]+/g, '_')}`;
   }
@@ -493,7 +506,7 @@ router.get('/admin/leads/template', requireRole('admin'), async (req, res) => {
 });
 
 // Old template URL kept working for bookmarks.
-router.get('/admin/leads/csv-template', requireRole('admin'), (req, res) =>
+router.get('/admin/leads/csv-template', requirePermission('leads', 'view'), (req, res) =>
   res.redirect('/admin/leads/template?format=csv'),
 );
 

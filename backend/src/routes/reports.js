@@ -1,6 +1,13 @@
 const express = require('express');
 const pool = require('../../db');
-const { requireRole } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/auth');
+const { scopeCondition } = require('../services/access');
+
+// A team-scoped role's reports cover only its teams' campaigns and agents.
+const andScope = (req, kind, column) => {
+  const [cond, params] = scopeCondition(req.access.scope, kind, column);
+  return { sql: cond ? ` AND ${cond}` : '', params };
+};
 
 const router = express.Router();
 
@@ -35,7 +42,7 @@ function dateRange(req) {
 }
 
 // --- Campaign report: per-campaign call outcomes for a date range ---
-router.get('/admin/reports/campaigns', requireRole('admin'), async (req, res) => {
+router.get('/admin/reports/campaigns', requirePermission('reports', 'view'), async (req, res) => {
   const { from, to } = dateRange(req);
   const [rows] = await pool.query(
     `SELECT
@@ -49,9 +56,10 @@ router.get('/admin/reports/campaigns', requireRole('admin'), async (req, res) =>
          THEN TIMESTAMPDIFF(SECOND, ca.answer_time, COALESCE(ca.end_time, NOW())) END), 0) AS avg_talk_seconds
      FROM campaigns c
      LEFT JOIN calls ca ON ca.campaign_id = c.id AND DATE(ca.start_time) BETWEEN ? AND ?
+     WHERE 1 = 1${andScope(req, 'campaigns', 'c.id').sql}
      GROUP BY c.id, c.name
      ORDER BY c.id DESC`,
-    [from, to],
+    [from, to, ...andScope(req, 'campaigns', 'c.id').params],
   );
   const result = rows.map((r) => {
     const totalCalls = Number(r.total_calls);
@@ -77,7 +85,7 @@ router.get('/admin/reports/campaigns', requireRole('admin'), async (req, res) =>
 // time-window join), not the login account's statically-assigned
 // extension - that exact mismatch was a real bug fixed twice already
 // this project (see RUNBOOK Phase 8 6d/6f), not repeating it here.
-router.get('/admin/reports/agents', requireRole('admin'), async (req, res) => {
+router.get('/admin/reports/agents', requirePermission('reports', 'view'), async (req, res) => {
   const { from, to } = dateRange(req);
 
   const [callStats] = await pool.query(
@@ -114,7 +122,11 @@ router.get('/admin/reports/agents', requireRole('admin'), async (req, res) => {
     [from, to],
   );
 
-  const [agents] = await pool.query("SELECT id, username FROM users WHERE role = 'agent'");
+  const agentScope = andScope(req, 'agents', 'id');
+  const [agents] = await pool.query(
+    `SELECT id, username FROM users WHERE role = 'agent'${agentScope.sql}`,
+    agentScope.params,
+  );
 
   const callMap = Object.fromEntries(callStats.map((r) => [r.user_id, r]));
   const loginMap = Object.fromEntries(loginStats.map((r) => [r.user_id, r]));
@@ -141,7 +153,7 @@ router.get('/admin/reports/agents', requireRole('admin'), async (req, res) => {
 });
 
 // --- Call report: filterable detailed call list ---
-router.get('/admin/reports/calls', requireRole('admin'), async (req, res) => {
+router.get('/admin/reports/calls', requirePermission('reports', 'view'), async (req, res) => {
   const { from, to } = dateRange(req);
   const { campaignId, extension, disposition } = req.query;
   let sql = `
@@ -152,6 +164,9 @@ router.get('/admin/reports/calls', requireRole('admin'), async (req, res) => {
     WHERE DATE(ca.start_time) BETWEEN ? AND ?
   `;
   const params = [from, to];
+  const callScope = andScope(req, 'campaigns', 'ca.campaign_id');
+  sql += callScope.sql;
+  params.push(...callScope.params);
   if (campaignId) {
     sql += ' AND ca.campaign_id = ?';
     params.push(campaignId);
@@ -170,13 +185,13 @@ router.get('/admin/reports/calls', requireRole('admin'), async (req, res) => {
 });
 
 // --- Hourly report: call volume + answer rate by hour, one day at a time ---
-router.get('/admin/reports/hourly', requireRole('admin'), async (req, res) => {
+router.get('/admin/reports/hourly', requirePermission('reports', 'view'), async (req, res) => {
   const date = req.query.date || new Date().toISOString().slice(0, 10);
   const [rows] = await pool.query(
     `SELECT HOUR(start_time) AS hour, COUNT(*) AS total_calls, SUM(answer_time IS NOT NULL) AS answered
-     FROM calls WHERE DATE(start_time) = ?
+     FROM calls WHERE DATE(start_time) = ?${andScope(req, 'campaigns', 'campaign_id').sql}
      GROUP BY HOUR(start_time)`,
-    [date],
+    [date, ...andScope(req, 'campaigns', 'campaign_id').params],
   );
   const byHour = {};
   for (const r of rows) byHour[r.hour] = { total_calls: Number(r.total_calls), answered: Number(r.answered) };

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ADMIN_NAV, isGroup, type NavGroup, type NavItem } from './nav';
+import { useAccess } from '@/features/auth/access';
+import { isGroup, visibleNav, type NavGroup, type NavItem } from './nav';
 
 const OPEN_KEY = 'dialforge.nav.open';
 
@@ -49,6 +50,8 @@ function Item({ item, nested, onNavigate }: { item: NavItem; nested?: boolean; o
 /** Admin sidebar: click a group heading to show or hide its screens. */
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { pathname } = useLocation();
+  const { canView } = useAccess();
+  const nav = visibleNav(canView);
   const [open, setOpen] = useState<string[]>(loadOpen);
   const [openedFor, setOpenedFor] = useState<string | null>(null);
 
@@ -56,7 +59,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   // Adjusting state during render, not in an effect, avoids a second paint.
   if (openedFor !== pathname) {
     setOpenedFor(pathname);
-    const active = ADMIN_NAV.find((e): e is NavGroup => isGroup(e) && groupHasPath(e, pathname));
+    const active = nav.find((e): e is NavGroup => isGroup(e) && groupHasPath(e, pathname));
     if (active && !open.includes(active.key)) setOpen([...open, active.key]);
   }
 
@@ -74,7 +77,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <div className="-mx-1 flex-1 space-y-0.5 overflow-y-auto px-1">
-        {ADMIN_NAV.map((entry) => {
+        {nav.map((entry) => {
           if (!isGroup(entry)) return <Item key={entry.to} item={entry} onNavigate={onNavigate} />;
           const isOpen = open.includes(entry.key);
           const hasActive = groupHasPath(entry, pathname);

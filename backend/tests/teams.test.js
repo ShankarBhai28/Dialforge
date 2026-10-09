@@ -33,7 +33,7 @@ const fakePool = {
 test('team refs: every id must exist, naming the ones that do not', async () => {
   const ok = { memberIds: [1, 2], campaignIds: [5] };
   assert.strictEqual(await checkTeamRefs(ok, { pool: fakePool }), null);
-  assert.match(await checkTeamRefs({ ...ok, memberIds: [1, 3] }, { pool: fakePool }), /unknown agent id\(s\): 3/);
+  assert.match(await checkTeamRefs({ ...ok, memberIds: [1, 3] }, { pool: fakePool }), /unknown member id\(s\): 3/);
   assert.match(await checkTeamRefs({ ...ok, campaignIds: [6] }, { pool: fakePool }), /unknown campaign id\(s\): 6/);
   // nothing to check -> no query at all
   assert.strictEqual(await checkTeamRefs({ memberIds: [], campaignIds: [] }, { pool: null }), null);
