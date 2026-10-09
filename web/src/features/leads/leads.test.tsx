@@ -347,6 +347,62 @@ describe('Leads & Lists - leads', () => {
     await waitFor(() => expect(calls.filter((c) => c.key === FIRST)).toHaveLength(2));
   });
 
+  it("edits the lead's form fields; saved values not on the form are kept and shown", async () => {
+    const field = (id: number, field_key: string, label: string, field_type: string, options: string[] | null) => ({
+      id,
+      form_id: 3,
+      field_key,
+      label,
+      field_type,
+      options,
+      is_required: 1,
+      sort_order: id,
+    });
+    const calls = fakeApi({
+      ...base,
+      'GET /admin/campaigns': {
+        body: [
+          { id: 1, name: 'Predictive_Test', form_id: 3 },
+          { id: 4, name: 'Support', form_id: null },
+        ],
+      },
+      'GET /admin/forms': {
+        body: [
+          {
+            id: 3,
+            name: 'Loan form',
+            fields: [
+              field(1, 'amount', 'Amount', 'number', null),
+              field(2, 'plan', 'Plan', 'dropdown', ['Gold', 'Silver']),
+              field(3, 'tags', 'Tags', 'checkbox', ['vip', 'new']),
+            ],
+          },
+        ],
+      },
+      [FIRST]: page([{ ...RAVI, custom_data: { amount: 5000, plan: 'Gold', city: 'Chennai' } }]),
+      'GET /admin/campaigns/1/dispositions': { body: [{ code: 'no_answer', label: 'No Answer' }] },
+      'PUT /admin/leads/31': { body: { status: 'ok' } },
+    });
+    renderPage(<LeadsPage />);
+    await userEvent.click(await screen.findByRole('tab', { name: 'Leads' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit 9840012345' }));
+    const dialog = screen.getByRole('dialog');
+    const amount = await within(dialog).findByLabelText('Amount');
+    expect(amount).toHaveValue(5000);
+    expect(amount).not.toBeRequired(); // admins may leave fields blank
+    expect(within(dialog).getByLabelText('Plan')).toHaveValue('Gold');
+    expect(within(dialog).getByText(/Also saved .*city: Chennai/)).toBeInTheDocument();
+    await userEvent.clear(amount);
+    await userEvent.type(amount, '6000');
+    await userEvent.selectOptions(within(dialog).getByLabelText('Plan'), '-- select --');
+    await userEvent.click(within(dialog).getByLabelText('vip'));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(calls.find((c) => c.key === 'PUT /admin/leads/31')?.body).toMatchObject({
+      customData: { amount: '6000', plan: '', tags: ['vip'] },
+    });
+  });
+
   it('deletes a lead and reloads the table', async () => {
     const calls = fakeApi({ ...base, 'DELETE /admin/leads/31': { body: { status: 'ok' } } });
     renderPage(<LeadsPage />);

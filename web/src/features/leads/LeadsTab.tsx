@@ -22,6 +22,8 @@ import { ErrorState } from '@/components/ErrorState';
 import { formatDateTime } from '@/lib/format';
 import { useDebouncedValue } from '@/lib/hooks';
 import { useCampaigns } from '@/features/campaigns/api';
+import { useForms } from '@/features/forms/api';
+import { FieldInput, fieldValues, type FieldValues } from '@/features/forms/FieldInput';
 import {
   NO_LEAD_FILTERS,
   useDeleteLead,
@@ -47,6 +49,17 @@ function LeadDialog({ lead, onOpenChange }: { lead: Lead; onOpenChange: (open: b
   const [campaignId, setCampaignId] = useState(lead.campaign_id ? String(lead.campaign_id) : '');
   const [listId, setListId] = useState(lead.list_id ? String(lead.list_id) : '');
   const [status, setStatus] = useState(lead.status);
+  const [customEdits, setCustomEdits] = useState<FieldValues>({});
+
+  // The form fields of the campaign the lead is (being moved) in. Saved
+  // values for other keys are kept by the server and listed read-only.
+  const forms = useForms();
+  const formId = campaigns.data?.find((c) => String(c.id) === campaignId)?.form_id;
+  const form = formId ? forms.data?.find((f) => f.id === formId) : undefined;
+  const fields = form?.fields ?? [];
+  const saved = fieldValues(fields, lead.custom_data);
+  const customValue = (key: string) => customEdits[key] ?? saved[key];
+  const otherSaved = Object.entries(lead.custom_data ?? {}).filter(([k]) => !fields.some((f) => f.field_key === k));
 
   // The server checks status against the chosen campaign's dispositions
   // (or the defaults when unassigned), so offer exactly those.
@@ -78,6 +91,10 @@ function LeadDialog({ lead, onOpenChange }: { lead: Lead; onOpenChange: (open: b
         phone: phone.trim(),
         altPhone: altPhone.trim(),
         priority: Number(priority),
+        // Only when the form is on screen; otherwise the saved values stay as they are.
+        customData: fields.length
+          ? Object.fromEntries(fields.map((f) => [f.field_key, customValue(f.field_key)]))
+          : undefined,
         campaignId: campaignId ? Number(campaignId) : null,
         listId: listId ? Number(listId) : null,
         status,
@@ -163,6 +180,27 @@ function LeadDialog({ lead, onOpenChange }: { lead: Lead; onOpenChange: (open: b
                 ))}
               </Select>
             </Field>
+            {fields.length > 0 && (
+              <fieldset className="grid gap-4 rounded-md border p-3 sm:grid-cols-2">
+                <legend className="px-1 text-sm font-semibold">Form: {form?.name}</legend>
+                {fields.map((f) => (
+                  <FieldInput
+                    key={f.field_key}
+                    f={f}
+                    idPrefix="lead-ff"
+                    optional
+                    value={customValue(f.field_key)}
+                    onChange={(v) => setCustomEdits((prev) => ({ ...prev, [f.field_key]: v }))}
+                  />
+                ))}
+              </fieldset>
+            )}
+            {otherSaved.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Also saved (not on {form ? 'this' : "the campaign's"} form, kept as is):{' '}
+                {otherSaved.map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : String(v)}`).join(' · ')}
+              </p>
+            )}
             <FormError message={save.error?.message} />
           </DialogBody>
           <DialogFooter>

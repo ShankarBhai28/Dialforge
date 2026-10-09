@@ -93,7 +93,7 @@ Backend gaps the new screens work around. None of them blocks the switchover.
 - ~~Users can't be edited, no password reset~~ — **done 2026-10-09**: edit role and extension, reset password, deactivate (no delete, by design), and create checks that the extension exists.
 - ~~Team ids not validated~~ — **done 2026-10-10**: unknown agent, campaign or extension ids get a 400 naming them.
 - ~~`POST /admin/lists` unknown campaign = raw 500~~ — **done 2026-10-10**: 400 "campaign not found" (create and edit).
-- ~~`PUT /admin/leads/:id` list/campaign mismatch, no `alt_phone` / `priority`~~ — **done 2026-10-10**: the list must belong to the chosen campaign, and alt phone and priority are editable. `custom_data` is still import-only; editing it needs the campaign form's fields in the dialog.
+- ~~`PUT /admin/leads/:id` list/campaign mismatch, no `alt_phone` / `priority`~~ — **done 2026-10-10**: the list must belong to the chosen campaign, and alt phone and priority are editable. Form fields (`custom_data`) became editable too on 2026-10-10.
 - ~~`POST /admin/campaigns` ignores `status`~~ — **done 2026-10-10**: create takes active or paused; both create and edit check it.
 
 **Scale (needed before real volume)**

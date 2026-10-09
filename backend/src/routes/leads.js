@@ -9,6 +9,7 @@ const { addDnc } = require('../services/dnc');
 const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
 const {
   LEAD_BASE_COLUMNS,
+  applyCustomEdits,
   getCampaignFormFields,
   parseLeadCustomValue,
   readLeadUpload,
@@ -186,7 +187,9 @@ router.put('/admin/leads/:id', requireRole('admin'), async (req, res) => {
     if (!codes.includes(status))
       return res.status(400).json({ error: `status must be new or one of: ${codes.join(', ')}` });
   }
-  const [rows] = await pool.query('SELECT id, alt_phone, priority FROM leads WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query('SELECT id, alt_phone, priority, custom_data FROM leads WHERE id = ?', [
+    req.params.id,
+  ]);
   if (!rows[0]) return res.status(404).json({ error: 'lead not found' });
   if (campaignId) {
     const [c] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [campaignId]);
@@ -199,14 +202,24 @@ router.put('/admin/leads/:id', requireRole('admin'), async (req, res) => {
     if (l[0].campaign_id !== campaignId)
       return res.status(400).json({ error: `list "${l[0].name}" belongs to a different campaign` });
   }
+  // customData left out = unchanged; otherwise checked against the form of
+  // the campaign the lead ends up in.
+  let customData = rows[0].custom_data;
+  if (req.body.customData !== undefined) {
+    const fields = campaignId ? await getCampaignFormFields(campaignId) : [];
+    const r = applyCustomEdits(fields, rows[0].custom_data, req.body.customData);
+    if (r.error) return res.status(400).json({ error: r.error });
+    customData = r.value;
+  }
 
   await pool.query(
-    'UPDATE leads SET name = ?, phone = ?, alt_phone = ?, priority = ?, campaign_id = ?, list_id = ?, status = COALESCE(?, status), updated_by = ? WHERE id = ?',
+    'UPDATE leads SET name = ?, phone = ?, alt_phone = ?, priority = ?, custom_data = ?, campaign_id = ?, list_id = ?, status = COALESCE(?, status), updated_by = ? WHERE id = ?',
     [
       name || null,
       phone,
       altPhone === undefined ? rows[0].alt_phone : altPhone,
       priority === undefined ? rows[0].priority : priority,
+      customData == null ? null : JSON.stringify(customData),
       campaignId,
       listId,
       status || null,

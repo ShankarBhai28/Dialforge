@@ -134,6 +134,36 @@ function parseLeadCustomValue(field, raw) {
   }
 }
 
+/**
+ * Admin lead edit: apply `edits` ({ field_key: value }) for the campaign
+ * form's `fields` to the lead's `current` custom_data, with the same
+ * checks as import. An empty value removes the field; a checkbox may come
+ * as a list. Saved keys that aren't on the form are kept (moving a lead to
+ * another campaign must not silently drop data). Required isn't enforced,
+ * as in import - the agent fills those in on the call.
+ * Returns { error } or { value } (null when nothing is left).
+ */
+function applyCustomEdits(fields, current, edits) {
+  if (edits === null || typeof edits !== 'object' || Array.isArray(edits))
+    return { error: 'customData must be an object' };
+  const byKey = new Map(fields.map((f) => [f.field_key, f]));
+  const unknown = Object.keys(edits).filter((k) => !byKey.has(k));
+  if (unknown.length) return { error: `${unknown[0]} is not a field of this campaign's form` };
+  const next = { ...(current || {}) };
+  for (const [key, v] of Object.entries(edits)) {
+    const raw = (Array.isArray(v) ? v.join(',') : v == null ? '' : String(v)).trim();
+    if (!raw) {
+      delete next[key];
+      continue;
+    }
+    const r = parseLeadCustomValue(byKey.get(key), raw);
+    if (r.error) return { error: `${byKey.get(key).label} ${r.error}` };
+    if (Array.isArray(r.value) && !r.value.length) delete next[key];
+    else next[key] = r.value;
+  }
+  return { value: Object.keys(next).length ? next : null };
+}
+
 async function getCampaignFormFields(campaignId) {
   const [rows] = await pool.query('SELECT form_id FROM campaigns WHERE id = ?', [campaignId]);
   if (!rows[0] || !rows[0].form_id) return [];
@@ -149,4 +179,11 @@ function receiveLeadFile(req, res, next) {
   });
 }
 
-module.exports = { LEAD_BASE_COLUMNS, getCampaignFormFields, parseLeadCustomValue, readLeadUpload, receiveLeadFile };
+module.exports = {
+  LEAD_BASE_COLUMNS,
+  applyCustomEdits,
+  getCampaignFormFields,
+  parseLeadCustomValue,
+  readLeadUpload,
+  receiveLeadFile,
+};

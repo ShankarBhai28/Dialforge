@@ -5,20 +5,11 @@ import { useMutation } from '@tanstack/react-query';
 import { ClipboardList, Phone, SkipForward, UserRound, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Checkbox, Select, Textarea } from '@/components/ui/form-controls';
-import { Field, FormError } from '@/components/common';
+import { FormError } from '@/components/common';
 import { post } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import {
-  dispositionLabel,
-  isDncStatus,
-  useAgentDispositions,
-  useAgentForm,
-  type AgentForm,
-  type AgentFormField,
-  type Lead,
-} from './api';
+import { dispositionLabel, isDncStatus, useAgentDispositions, useAgentForm, type AgentForm, type Lead } from './api';
+import { FieldInput, fieldValues, type FieldValues } from '@/features/forms/FieldInput';
 import { useController, usePhone } from './AgentProvider';
 import { LeadStatusChip } from './LeadsPanel';
 
@@ -190,98 +181,10 @@ function LeadDetail({
   );
 }
 
-type Values = Record<string, string | string[]>;
-
-/** Lead data uploaded with the list (columns matching form keys) pre-fills the form. */
-function initialValues(form: AgentForm, data: Record<string, unknown> | null | undefined): Values {
-  const out: Values = {};
-  for (const f of form.fields) {
-    const v = data?.[f.field_key];
-    if (f.field_type === 'checkbox') out[f.field_key] = v == null ? [] : (Array.isArray(v) ? v : [v]).map(String);
-    else out[f.field_key] = v == null ? '' : String(Array.isArray(v) ? v[0] : v);
-  }
-  return out;
-}
-
-const INPUT_TYPES: Partial<Record<AgentFormField['field_type'], string>> = {
-  number: 'number',
-  email: 'email',
-  phone: 'tel',
-  date: 'date',
-};
-
-function FormInput({
-  f,
-  value,
-  onChange,
-}: {
-  f: AgentFormField;
-  value: string | string[];
-  onChange: (v: string | string[]) => void;
-}) {
-  const id = `ff-${f.field_key}`;
-  const required = !!f.is_required;
-  const label = `${f.label}${required ? ' *' : ''}`;
-  const opts = f.options ?? [];
-  if (f.field_type === 'radio' || f.field_type === 'checkbox') {
-    const list = Array.isArray(value) ? value : [value];
-    return (
-      <fieldset className="grid gap-1.5">
-        <legend className="mb-1.5 text-sm font-semibold">{label}</legend>
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-          {opts.map((o) => (
-            <label key={o} className="flex items-center gap-1.5 text-sm">
-              {f.field_type === 'checkbox' ? (
-                <Checkbox
-                  checked={list.includes(o)}
-                  onChange={(e) => onChange(e.target.checked ? [...list, o] : list.filter((x) => x !== o))}
-                />
-              ) : (
-                <input
-                  type="radio"
-                  name={id}
-                  className="accent-primary"
-                  checked={value === o}
-                  onChange={() => onChange(o)}
-                />
-              )}
-              {o}
-            </label>
-          ))}
-        </div>
-      </fieldset>
-    );
-  }
-  return (
-    <Field id={id} label={label} className={f.field_type === 'textarea' ? 'sm:col-span-2' : undefined}>
-      {f.field_type === 'textarea' ? (
-        <Textarea id={id} value={value as string} required={required} onChange={(e) => onChange(e.target.value)} />
-      ) : f.field_type === 'dropdown' ? (
-        <Select id={id} value={value as string} required={required} onChange={(e) => onChange(e.target.value)}>
-          <option value="">-- select --</option>
-          {opts.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </Select>
-      ) : (
-        <Input
-          id={id}
-          type={INPUT_TYPES[f.field_type] ?? 'text'}
-          value={value as string}
-          required={required}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      )}
-    </Field>
-  );
-}
-
 function AgentFormCard({ form }: { form: AgentForm }) {
   const { controller, state } = useController();
   const ws = state.workspace;
-  const [values, setValues] = useState<Values>(() => initialValues(form, ws.lead?.custom_data));
+  const [values, setValues] = useState<FieldValues>(() => fieldValues(form.fields, ws.lead?.custom_data));
   const save = useMutation({
     mutationFn: () => post('/agent/form-responses', { leadId: ws.lead?.id ?? null, callId: ws.callId, data: values }),
     meta: { errorInline: true },
@@ -307,7 +210,7 @@ function AgentFormCard({ form }: { form: AgentForm }) {
         <form onSubmit={onSubmit} className="grid gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
             {form.fields.map((f) => (
-              <FormInput
+              <FieldInput
                 key={f.field_key}
                 f={f}
                 value={values[f.field_key] ?? ''}

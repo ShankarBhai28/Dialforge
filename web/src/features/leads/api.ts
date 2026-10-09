@@ -28,6 +28,8 @@ export type Lead = {
   status: string;
   attempts: number;
   priority: number;
+  /** The campaign form's values known before the call (import or edit). */
+  custom_data: Record<string, unknown> | null;
   created_at: string;
 };
 
@@ -147,6 +149,8 @@ export type LeadInput = {
   altPhone: string;
   /** -100..100; higher is dialled earlier. */
   priority: number;
+  /** The campaign form's fields ('' / [] clears one). Left out = unchanged. */
+  customData?: Record<string, string | string[]>;
   campaignId: number | null;
   listId: number | null;
   status: string;

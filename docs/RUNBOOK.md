@@ -1269,3 +1269,10 @@ The user tested manual dialling on the new agent screen and reported a delay, wi
 - **Engine unchanged:** `dialer-engine.js` still only writes the DB, so the deploy didn't restart `dialforge-dialer`.
 - The overview query moved to `services/dialer.js` (shared by the route and the feed).
 - Tests: 61 backend (feed: change detection, no-admin = no read, forced publish not lost while a read runs), 135 web (a pushed update shows without another request).
+
+## Lead edit: campaign form fields (2026-10-10)
+- **Before:** a lead's form values (`custom_data`) could only be set by import.
+- **API:** `PUT /admin/leads/:id` takes `customData` ({ field_key: value }). Left out = unchanged. Values are checked against the form of the campaign the lead ends up in, with the same rules as import (`applyCustomEdits` in `services/leadImport.js`, tested). An empty value removes a field. An unknown key → 400. Saved keys that aren't on the form are kept, so moving a lead to another campaign never drops data silently. Required fields aren't enforced, as in import; the agent fills them in on the call.
+- **Screen:** the Edit lead dialog shows a "Form: <name>" section with the campaign form's fields, plus a read-only line for saved values not on the form. The inputs are now one shared component (`features/forms/FieldInput.tsx`) used by both this dialog and the agent's call form.
+- No DB change. Tests: 64 backend, 136 web.
+- **This closes the follow-up list** from the rebuild (`docs/APP_REBUILD_PLAN.md`).
