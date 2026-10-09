@@ -19,9 +19,11 @@ function onError(err: Error) {
 const queryClient: QueryClient = new QueryClient({
   queryCache: new QueryCache({ onError }),
   mutationCache: new MutationCache({
-    onError: (err) => {
+    onError: (err, _vars, _ctx, mutation) => {
       onError(err);
-      // Mutations show their error as a toast unless the screen handles it.
+      // A failed change shows as a toast, unless its form shows the error
+      // itself (useMutation({ meta: { errorInline: true } })).
+      if (mutation.meta?.errorInline) return;
       if (!(err instanceof ApiError && err.status === 401)) toast.error(err.message);
     },
   }),

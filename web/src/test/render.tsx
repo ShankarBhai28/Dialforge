@@ -1,5 +1,6 @@
 // Test helpers: render the real routes at a URL with a fresh query cache,
 // and fake the backend with a small table of path -> response.
+import type { ReactElement } from 'react';
 import { render } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -49,3 +50,15 @@ export function renderAt(url: string) {
 
 export const ADMIN = { id: 1, username: 'admin', role: 'admin', extensionId: null, extensionName: null };
 export const AGENT = { id: 7, username: 'agent04', role: 'agent', extensionId: 3, extensionName: '1003' };
+
+/** Renders one page component (no layout/auth) at `url`, matching `path` for params. */
+export function renderPage(element: ReactElement, { path = '/', url = path }: { path?: string; url?: string } = {}) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const router = createMemoryRouter([{ path, element }], { initialEntries: [url] });
+  const utils = render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+  return { ...utils, router, queryClient };
+}
