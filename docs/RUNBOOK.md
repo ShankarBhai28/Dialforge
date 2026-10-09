@@ -104,7 +104,7 @@ min-port=49152
 max-port=49300
 realm=3.7.241.104
 lt-cred-mech
-user=dialforge:DialForge_Turn_Pass!
+user=dialforge:<password>   # replaced 2026-10-09 by use-auth-secret - see "TURN secured" below
 ```
 Enabled via `/etc/default/coturn` (`TURNSERVER_ENABLED=1` — the Debian/Ubuntu package ships disabled by default, a common first-run gotcha). Test page's `pcConfig.iceServers` updated to include this TURN server alongside the STUN one.
 
