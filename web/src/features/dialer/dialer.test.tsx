@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { fakeApi, renderPage } from '@/test/render';
+import { startRealtime, stopRealtime } from '@/lib/realtime';
 import { DialerPage } from './DialerPage';
 
 // A GET /admin/dialer campaign row: DECIMAL and SUM() columns arrive as strings,
@@ -113,6 +114,33 @@ describe('Dialer', () => {
     // Running: Pause + Stop, no Start. Stopped: Start only.
     expect(within(row).queryByRole('button', { name: /start/i })).not.toBeInTheDocument();
     expect(within(stopped).queryByRole('button', { name: /stop/i })).not.toBeInTheDocument();
+  });
+
+  it('updates the moment the server pushes dialer.status, without asking again', async () => {
+    const calls = fakeApi({ 'GET /admin/dialer': OVERVIEW });
+    const sockets: { onmessage?: (ev: { data: string }) => void }[] = [];
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        onmessage?: (ev: { data: string }) => void;
+        constructor() {
+          sockets.push(this);
+        }
+        close() {}
+      },
+    );
+    startRealtime();
+    try {
+      renderPage(<DialerPage />);
+      const row = (await screen.findByText('Predictive_Test')).closest('tr')!;
+      expect(within(row).getByText('12 ready / 2 locked')).toBeInTheDocument();
+      const pushed = { ...OVERVIEW.body, campaigns: [campaign({ hopper_ready: 3, dialer_state: 'paused' }), STOPPED] };
+      act(() => sockets[0].onmessage?.({ data: JSON.stringify({ type: 'dialer.status', data: pushed, at: 0 }) }));
+      expect(await within(row).findByText('3 ready / 2 locked')).toBeInTheDocument();
+      expect(calls.filter((c) => c.key === 'GET /admin/dialer')).toHaveLength(1);
+    } finally {
+      stopRealtime();
+    }
   });
 
   it('flags a dead engine', async () => {

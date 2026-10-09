@@ -73,4 +73,10 @@ function connectedCount() {
   return clients.size;
 }
 
-module.exports = { attach, publish, disconnectUser, connectedCount };
+function adminCount() {
+  let n = 0;
+  for (const { user } of clients) if (user.role === 'admin') n++;
+  return n;
+}
+
+module.exports = { attach, publish, disconnectUser, connectedCount, adminCount };

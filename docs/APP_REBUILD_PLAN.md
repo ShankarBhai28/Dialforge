@@ -98,7 +98,7 @@ Backend gaps the new screens work around. None of them blocks the switchover.
 
 **Scale (needed before real volume)**
 - ~~Server-side paging and filtering~~ — **done 2026-10-09**: leads, calls, DNC and callbacks page and filter on the server.
-- The dialer engine publishes nothing on `/ws`, so the Dialer screen polls every 3 s. A `dialer.status` event from the engine (via the DB or a small HTTP hook into the backend) would make it live.
+- ~~Dialer screen polls every 3 s~~ — **done 2026-10-10**: the backend pushes `dialer.status` on `/ws` when the screen would change (`realtime/dialerFeed.js`); the screen keeps a 15 s safety refresh.
 - ~~JS bundle 615 kB~~ — **done 2026-10-09**: each screen is lazy-loaded; first load 370 kB (116 kB gzipped).
 
 **Done during Stage 3:** `/admin/extensions` no longer returns `sip_password`, and queue settings are validated before they are written to `queues.conf`.

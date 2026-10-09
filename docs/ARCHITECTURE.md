@@ -118,5 +118,8 @@ Browsers open `wss://<host>:3000/ws` after logging in. The upgrade is checked ag
 | `hello` | `{ user, role }` | the new connection |
 | `agent.status` | `{ userId, status, reason, queueId, extensionName }` | admins + that agent |
 | `call.event` | `{ callId, eventType, payload }` (every `call_events` row) | admins |
+| `dialer.status` | the `GET /admin/dialer` payload, when anything on the Dialer screen changed | admins |
 
-Publish from server code with `require('./src/realtime/hub').publish(type, data, { toUserId })`. More message types get added as React screens need them (Stages 3–4). The old HTML pages still poll and don't use `/ws`.
+Publish from server code with `require('./src/realtime/hub').publish(type, data, { toUserId })`. More message types get added as screens need them.
+
+`dialer.status` comes from `src/realtime/dialerFeed.js`, not from the engine: the engine is a separate process that only writes the DB. While at least one admin is connected, the backend reads the overview every 2 s and publishes it when something other than the tick times changed, and immediately after start / pause / stop. With no admin connected it reads nothing.

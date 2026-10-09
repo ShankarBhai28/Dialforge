@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, post } from '@/lib/api';
+import { useRealtime } from '@/lib/realtime';
 
 // GET /admin/dialer. mysql2 returns DECIMAL and SUM() as strings, COUNT() and
 // INT columns as numbers. The dialer_status columns are null until the
@@ -84,15 +85,22 @@ export const dialerKeys = {
   hopper: (id: number) => ['admin', 'dialer', 'hopper', id] as const,
 };
 
-// The engine is a separate process that publishes nothing on /ws, so this
-// polls like the classic page did (every 3s).
-const POLL_MS = 3000;
+// The backend pushes `dialer.status` (the same payload as GET /admin/dialer)
+// whenever the screen would change - see backend/src/realtime/dialerFeed.js.
+// The interval is only the safety net for a dropped connection.
+const SAFETY_POLL_MS = 15000;
 
 export function useDialer() {
+  const qc = useQueryClient();
+  useRealtime('dialer.status', (msg) => {
+    qc.setQueryData(dialerKeys.overview, msg.data as DialerOverview);
+    // Hopper counts moved too; refresh an open hopper (not the overview just set).
+    void qc.invalidateQueries({ queryKey: ['admin', 'dialer', 'hopper'] });
+  });
   return useQuery({
     queryKey: dialerKeys.overview,
     queryFn: () => get<DialerOverview>('/admin/dialer'),
-    refetchInterval: POLL_MS,
+    refetchInterval: SAFETY_POLL_MS,
   });
 }
 
@@ -101,7 +109,7 @@ export function useHopper(campaignId: number | null) {
     queryKey: dialerKeys.hopper(campaignId ?? 0),
     queryFn: () => get<HopperRow[]>(`/admin/campaigns/${campaignId}/hopper`),
     enabled: campaignId !== null,
-    refetchInterval: POLL_MS,
+    refetchInterval: SAFETY_POLL_MS,
   });
 }
 

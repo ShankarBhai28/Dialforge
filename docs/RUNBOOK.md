@@ -1262,3 +1262,10 @@ The user tested manual dialling on the new agent screen and reported a delay, wi
   - Campaigns: create takes `status` (active / paused); edit with no status keeps the current one (it used to reset to active).
 - **Checked on the dev DB first (read-only):** no admins in teams, all campaigns active, no lead whose list is in another campaign, so nothing existing breaks the new rules.
 - Tests: 57 backend, 134 web.
+
+## Live Dialer screen (2026-10-10)
+- **Before:** every open Dialer screen asked `GET /admin/dialer` every 3 s (3 queries each), whether anything changed or not, and start / pause / stop showed up only at the next ask.
+- **Now:** `src/realtime/dialerFeed.js` in the backend reads the same overview every 2 s, only while an admin is connected on `/ws`, and publishes `dialer.status` when something other than the tick times changed. Start / pause / stop publish at once. The screen applies the push directly; its own refresh is now a 15 s safety net (also for an open hopper).
+- **Engine unchanged:** `dialer-engine.js` still only writes the DB, so the deploy didn't restart `dialforge-dialer`.
+- The overview query moved to `services/dialer.js` (shared by the route and the feed).
+- Tests: 61 backend (feed: change detection, no-admin = no read, forced publish not lost while a read runs), 135 web (a pushed update shows without another request).
