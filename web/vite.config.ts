@@ -31,5 +31,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // Screen tests type into big forms; under a full parallel run 5 s isn't enough.
+    testTimeout: 20_000,
   },
 });

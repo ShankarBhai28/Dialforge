@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ADMIN, AGENT, fakeApi, renderAt } from '@/test/render';
+import { allNavItems } from './nav';
 
 const DASHBOARD = {
   'GET /admin/dashboard': { body: { totalAgents: 4, availableNow: 2, callsToday: 31, avgHandleSeconds: 95 } },
@@ -86,11 +87,14 @@ describe('admin sidebar', () => {
     expect(scope.queryByRole('link', { name: 'Teams' })).not.toBeInTheDocument();
   });
 
-  it('a screen not rebuilt yet links to the classic admin', async () => {
+  it('every menu entry opens a rebuilt screen, not the classic placeholder', async () => {
     fakeApi({ 'GET /auth/me': { body: ADMIN } });
-    renderAt('/admin/campaigns');
-    const link = await screen.findByRole('link', { name: /open campaigns \(classic\)/i });
-    expect(link).toHaveAttribute('href', '/admin.html#campaigns');
+    for (const item of allNavItems()) {
+      const { unmount } = renderAt(item.to);
+      await screen.findByRole('heading', { level: 1, name: item.label });
+      expect(screen.queryByText(/moving here soon/i), item.to).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
   it('logging out returns to the login page', async () => {

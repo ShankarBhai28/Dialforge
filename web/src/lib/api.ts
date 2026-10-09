@@ -16,12 +16,14 @@ type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
 export async function api<T>(path: string, options: { method?: Method; body?: unknown } = {}): Promise<T> {
   const { method = 'GET', body } = options;
   let res: Response;
+  // FormData (file uploads) goes as-is: the browser sets the multipart header.
+  const isForm = body instanceof FormData;
   try {
     res = await fetch(path, {
       method,
       credentials: 'same-origin',
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: body === undefined || isForm ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
     });
   } catch {
     throw new ApiError(0, 'Cannot reach the server - check your connection.');

@@ -39,7 +39,9 @@ router.post('/admin/users', requireRole('admin'), async (req, res) => {
 });
 
 router.get('/admin/extensions', requireRole('admin'), async (req, res) => {
-  const [rows] = await pool.query('SELECT * FROM extensions ORDER BY id');
+  // Never sip_password: only the agent's own /agent/extension-credentials
+  // hands that out, to the browser that registers the line.
+  const [rows] = await pool.query('SELECT id, name, label, created_at FROM extensions ORDER BY id');
   res.json(rows);
 });
 

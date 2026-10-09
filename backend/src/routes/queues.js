@@ -4,7 +4,7 @@ const pool = require('../../db');
 const ami = require('../../ami');
 const { QUEUES_CONF_PATH } = require('../config');
 const { requireRole } = require('../middleware/auth');
-const { queueStanzaRegex, slugify } = require('../services/queueConfig');
+const { QUEUE_DEFAULTS, parseQueueSettings, queueStanzaRegex, slugify } = require('../services/queueConfig');
 
 const router = express.Router();
 
@@ -15,10 +15,13 @@ router.get('/admin/queues', requireRole('admin'), async (req, res) => {
 });
 
 router.post('/admin/queues', requireRole('admin'), async (req, res) => {
-  const { name, ringStrategy, waitTimeout, announce, retry, timeoutRestart } = req.body;
+  const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const asteriskName = slugify(name);
   if (!asteriskName) return res.status(400).json({ error: 'name must contain at least one letter or digit' });
+  const { error, settings } = parseQueueSettings(req.body, QUEUE_DEFAULTS);
+  if (error) return res.status(400).json({ error });
+  const { ringStrategy, waitTimeout, announce, retry, timeoutRestart } = settings;
 
   const [existing] = await pool.query('SELECT id FROM queues WHERE asterisk_name = ?', [asteriskName]);
   if (existing[0]) {
@@ -28,21 +31,13 @@ router.post('/admin/queues', requireRole('admin'), async (req, res) => {
   const [result] = await pool.query(
     `INSERT INTO queues (tenant_id, name, asterisk_name, ring_strategy, wait_timeout, announce, retry, timeout_restart)
      VALUES (1, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      name,
-      asteriskName,
-      ringStrategy || 'ringall',
-      waitTimeout || 30,
-      announce || 'no',
-      retry || 1,
-      timeoutRestart || 'yes',
-    ],
+    [name, asteriskName, ringStrategy, waitTimeout, announce, retry, timeoutRestart],
   );
 
   // Make it real in Asterisk, not just a database row - this is what
   // makes "queue show" list it and lets agents actually join it.
   const announceFrequency = announce === 'yes' ? 30 : 0;
-  const stanza = `\n[${asteriskName}]\nstrategy = ${ringStrategy || 'ringall'}\ntimeout = ${waitTimeout || 30}\nretry = ${retry || 1}\ntimeoutrestart = ${timeoutRestart || 'yes'}\nannounce-frequency = ${announceFrequency}\nringinuse = no\n`;
+  const stanza = `\n[${asteriskName}]\nstrategy = ${ringStrategy}\ntimeout = ${waitTimeout}\nretry = ${retry}\ntimeoutrestart = ${timeoutRestart}\nannounce-frequency = ${announceFrequency}\nringinuse = no\n`;
   try {
     fs.appendFileSync(QUEUES_CONF_PATH, stanza);
     await ami.queueReload();
@@ -55,7 +50,6 @@ router.post('/admin/queues', requireRole('admin'), async (req, res) => {
 });
 
 router.put('/admin/queues/:id', requireRole('admin'), async (req, res) => {
-  const { ringStrategy, waitTimeout, announce, retry, timeoutRestart } = req.body;
   const [rows] = await pool.query('SELECT * FROM queues WHERE id = ?', [req.params.id]);
   const queue = rows[0];
   if (!queue) return res.status(404).json({ error: 'queue not found' });
@@ -63,13 +57,15 @@ router.put('/admin/queues/:id', requireRole('admin'), async (req, res) => {
   // Name/asterisk_name is intentionally not editable here - renaming
   // would require touching every campaign and queues.conf stanza header
   // that already points at it, not worth it for a ring-behavior change.
-  const updated = {
-    ringStrategy: ringStrategy || queue.ring_strategy,
-    waitTimeout: waitTimeout || queue.wait_timeout,
-    announce: announce || queue.announce,
-    retry: retry || queue.retry,
-    timeoutRestart: timeoutRestart || queue.timeout_restart,
-  };
+  // Fields left out keep their current value.
+  const { error, settings: updated } = parseQueueSettings(req.body, {
+    ringStrategy: queue.ring_strategy,
+    waitTimeout: queue.wait_timeout,
+    announce: queue.announce,
+    retry: queue.retry,
+    timeoutRestart: queue.timeout_restart,
+  });
+  if (error) return res.status(400).json({ error });
 
   await pool.query(
     'UPDATE queues SET ring_strategy = ?, wait_timeout = ?, announce = ?, retry = ?, timeout_restart = ? WHERE id = ?',

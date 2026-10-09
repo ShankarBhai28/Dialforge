@@ -17,7 +17,8 @@ export function fakeApi(table: FakeApi) {
     'fetch',
     vi.fn(async (path: string, init?: RequestInit) => {
       const key = `${init?.method ?? 'GET'} ${path}`;
-      calls.push({ key, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const body = init?.body;
+      calls.push({ key, body: body instanceof FormData ? body : body ? JSON.parse(String(body)) : undefined });
       const entry = table[key];
       const reply =
         typeof entry === 'function' ? entry(init) : (entry ?? { status: 404, body: { error: 'not found' } });

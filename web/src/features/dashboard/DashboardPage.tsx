@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Clock, Headset, PhoneCall, Users, type LucideIcon } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ErrorState';
+import { useNow } from '@/lib/hooks';
 import { useRealtime } from '@/lib/realtime';
 import { formatSeconds } from '@/lib/utils';
 import { dashboardKeys, useDashboardSummary, useLiveAgents, type LiveAgent } from './api';
@@ -33,16 +33,6 @@ function StatTile({
       </div>
     </Card>
   );
-}
-
-/** Ticks every second so "time in status" stays current between refreshes. */
-function useNow() {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  return now;
 }
 
 function LiveAgentsTable({ agents }: { agents: LiveAgent[] }) {
