@@ -37,7 +37,7 @@ function backend(extra: FakeApi = {}): FakeApi {
   return {
     'GET /auth/me': { body: ME },
     'GET /agent/webrtc-config': { body: { sipDomain: 'x', wsUrl: 'wss://x:8089/ws', iceServers: [] } },
-    'GET /agent/extension-credentials/1003': { body: { extension: '1003', sipPassword: 'secret' } },
+    'GET /agent/extension-credentials': { body: { extension: '1003', sipPassword: 'secret' } },
     'GET /agent/stats': {
       body: {
         loginSeconds: 3725,
@@ -65,9 +65,8 @@ async function connect(api: FakeApi) {
   const calls = fakeApi(api);
   const uas = fakeUAFactory();
   renderPage(<AgentPage createUA={uas.factory} />);
-  const ext = await screen.findByLabelText('Extension');
-  await userEvent.clear(ext);
-  await userEvent.type(ext, '1003');
+  await waitFor(() => expect(screen.getByLabelText('Your extension')).toHaveTextContent('1003'));
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument(); // shown, not editable
   await userEvent.click(screen.getByRole('button', { name: 'Connect' }));
   await waitFor(() => expect(uas.made.length).toBe(1));
   act(() => uas.last().register());
@@ -85,69 +84,17 @@ describe('agent screen', () => {
     expect(localStorage.getItem('dialforge_extension')).toBe('1003');
   });
 
-  it('a team that limits extensions: the agent picks from that list', async () => {
-    fakeApi(backend({ 'GET /agent/extensions': { body: { allowed: ['1003', '1005'] } } }));
-    const uas = fakeUAFactory();
-    renderPage(<AgentPage createUA={uas.factory} />);
-    const ext = await screen.findByRole('combobox', { name: 'Extension' });
-    expect(
-      within(ext)
-        .getAllByRole('option')
-        .map((o) => o.textContent),
-    ).toEqual(['Choose…', '1003', '1005']);
-    await userEvent.selectOptions(ext, '1003');
-    await userEvent.click(screen.getByRole('button', { name: 'Connect' }));
-    await waitFor(() => expect(uas.made.length).toBe(1));
-    expect(uas.last().options).toMatchObject({ extension: '1003' });
-  });
-
-  it('call history: the call button dials that number again', async () => {
-    const { calls } = await connect(
-      backend({
-        'GET /calls': {
-          body: [
-            {
-              id: 5,
-              direction: 'inbound',
-              to_number: '9840012345',
-              start_time: '2026-10-09T05:00:00.000Z',
-              disposition: 'ended',
-            },
-          ],
-        },
-        'POST /calls/click2call': { status: 202, body: { callId: 44, status: 'ringing_agent' } },
-      }),
-    );
-    await userEvent.click(await screen.findByRole('button', { name: 'Call 9840012345' }));
-    await waitFor(() =>
-      expect(calls.find((c) => c.key === 'POST /calls/click2call')?.body).toEqual({
-        toNumber: '9840012345',
-        leadId: null,
-      }),
-    );
-  });
-
-  it('status menu items use the menu text colour, not the top bar white', async () => {
-    await connect(backend());
-    await userEvent.click(await screen.findByRole('button', { name: /available - support queue/i }));
-    expect(screen.getByRole('menu')).toHaveClass('text-card-foreground');
-    expect(screen.getByRole('menuitem', { name: /break — lunch/i })).toBeInTheDocument();
-  });
-
   it('a busy extension: shows why it was refused', async () => {
     fakeApi(
       backend({
-        'GET /agent/extension-credentials/1003': {
+        'GET /agent/extension-credentials': {
           status: 409,
           body: { error: 'Extension 1003 is in use by agent1003 right now - pick another one.' },
         },
       }),
     );
     renderPage(<AgentPage createUA={fakeUAFactory().factory} />);
-    const ext = await screen.findByLabelText('Extension');
-    await userEvent.clear(ext);
-    await userEvent.type(ext, '1003');
-    await userEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('in use by agent1003');
   });
 

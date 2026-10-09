@@ -13,9 +13,6 @@ Server: **dialforge-dev** (`https://dialforge.ddnsfree.com:3000`). Tick each box
 - [ ] Admin → Teams shows **Default Team** with all agents and campaigns.
 - [ ] Create team **Test Team**: one agent (e.g. agent1003) + one campaign (e.g. Real Test Campaign). Untick that agent in Default Team.
 - [ ] Agent1003 → Available → queue list shows **only** Real Test Campaign's queue.
-- [ ] Edit **Test Team** → Extensions: tick one extension other than agent1003's own (e.g. 1005) → Save. The table shows it.
-- [ ] Agent1003 logs out of the line and back in → the Extension box is now a list: their own extension + 1005 only.
-- [ ] Untick all extensions on Test Team → agent1003 can type any free extension again.
 - [ ] Put agent1003 back how you want it afterwards.
 
 ## D2 — Custom Forms
@@ -102,8 +99,9 @@ Set up: two agents logged in and **Available** (e.g. agent04 on 1003 + agent1001
 
 ## New agent screen (`/app/agent`) — before agents switch to it
 Same setup as above: two agents in **two different browsers** (or one normal + one incognito), your mobile as the customer. Each agent logs in at `https://dialforge.ddnsfree.com:3000/app`.
-- [ ] Login as an agent → **Connect your line** → enter the extension → Connect → the workbench opens (tiles, leads, dialpad). Refresh the page (F5) → it reconnects by itself.
-- [ ] Second agent tries the **same** extension while the first is connected → refused with "in use by …". (Use a different extension each.)
+- [ ] Login as an agent → **Connect your line** shows **Your extension** (the one set in Admin → Users) as plain text, nothing to type or pick → Connect → the workbench opens (tiles, leads, dialpad). Refresh the page (F5) → it reconnects by itself.
+- [ ] Admin → Users → change that agent's extension → the agent logs out and back in → Connect shows and uses the new one.
+- [ ] Two agents who share an extension in Users (e.g. agent1003 and agent04 both on 1003): while one is connected, the other's Connect is refused with "in use by …". Give each agent their own extension for the real test.
 - [ ] Status pill → **Available** → queue picker → pick the queue → pill turns green "Available - <queue>". Break → Lunch → amber "Lunch". The menu items are readable (dark text on white).
 - [ ] **Dialpad** → type your mobile → Call → answer → hang up → the **Call outcome** dialog opens (now for every answered call, not only lead calls) → pick one → Leads shows the number as a lead with that status.
 - [ ] Call an inbound DID from a number that isn't a lead → answer → hang up → the outcome dialog opens.

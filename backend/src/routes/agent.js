@@ -8,7 +8,7 @@ const {
   setAgentStatus,
 } = require('../services/agents');
 const { getDispositions } = require('../services/dispositions');
-const { allowedExtensions, findOtherActiveHolder } = require('../services/extensionGuard');
+const { findOtherActiveHolder } = require('../services/extensionGuard');
 const { buildWebrtcConfig } = require('../services/webrtc');
 
 const router = express.Router();
@@ -189,39 +189,27 @@ router.get('/agent/stats', requireAuth, async (req, res) => {
   });
 });
 
-// --- Agent: the extensions they may connect with (null = any free one) ---
-router.get('/agent/extensions', requireAuth, async (req, res) => {
-  res.json({ allowed: await allowedExtensions(req.session.user) });
-});
-
 // --- Agent: SIP credentials for the browser to register a WebRTC line ---
-// The extension an agent connects with is a per-session device choice
-// (like picking a desk phone for a shift), limited to the ones their
-// team allows (see services/extensionGuard.js).
-router.get('/agent/extension-credentials/:extension', requireAuth, async (req, res) => {
-  const allowed = await allowedExtensions(req.session.user);
-  if (allowed && !allowed.includes(req.params.extension)) {
-    return res
-      .status(403)
-      .json({ error: `Extension ${req.params.extension} isn't one your team may use - pick ${allowed.join(', ')}.` });
-  }
-  const [rows] = await pool.query('SELECT id, name, sip_password FROM extensions WHERE name = ?', [
-    req.params.extension,
-  ]);
-  if (!rows[0] || !rows[0].sip_password) {
-    return res.status(404).json({ error: 'unknown extension' });
+// Always the extension the admin assigned to this agent (Users screen);
+// agents can see it but not choose another. Read from the DB, not the
+// session, so a change by the admin applies on the next connect.
+router.get('/agent/extension-credentials', requireAuth, async (req, res) => {
+  const [rows] = await pool.query(
+    'SELECT e.id, e.name, e.sip_password FROM users u JOIN extensions e ON e.id = u.extension_id WHERE u.id = ?',
+    [req.session.user.id],
+  );
+  if (!rows[0]) return res.status(400).json({ error: 'No extension is assigned to you - ask your admin.' });
+  if (!rows[0].sip_password) {
+    return res.status(400).json({ error: `Extension ${rows[0].name} has no SIP password set - ask your admin.` });
   }
   const holder = await findOtherActiveHolder(rows[0].name, req.session.user.id);
   if (holder) {
-    return res
-      .status(409)
-      .json({ error: `Extension ${rows[0].name} is in use by ${holder} right now - pick another one.` });
+    return res.status(409).json({
+      error: `Extension ${rows[0].name} is in use by ${holder} right now - ask your admin to give one of you another extension.`,
+    });
   }
-  // This is the moment the agent commits to an extension for this session -
-  // everything downstream (queue membership, click2call's fromExtension,
-  // stats, live-agents display) reads this session field, so it must match
-  // what they actually registered in the browser, not their login-assigned
-  // extension (those two can differ - picking a device is a per-shift choice).
+  // Everything downstream (queue membership, click2call's fromExtension,
+  // stats, live-agents display) reads this session field.
   req.session.user.extensionName = rows[0].name;
   req.session.user.extensionId = rows[0].id;
   res.json({ extension: rows[0].name, sipPassword: rows[0].sip_password });

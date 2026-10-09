@@ -5,10 +5,9 @@ const { checkTeamRefs, parseTeam } = require('../services/teams');
 
 const router = express.Router();
 
-// --- Admin: teams (a group of agents + the campaigns they may work +
-// the extensions they may connect with) ---
-// Members, campaigns and extensions come back as id arrays so the edit
-// form can pre-tick its checkboxes, plus names for the table.
+// --- Admin: teams (a group of agents + the campaigns they may work) ---
+// Members and campaigns come back as id arrays so the edit form can
+// pre-tick its checkboxes, plus names for the table.
 router.get('/admin/teams', requireRole('admin'), async (req, res) => {
   const [teams] = await pool.query('SELECT * FROM teams ORDER BY id DESC');
   const [members] = await pool.query(
@@ -17,15 +16,11 @@ router.get('/admin/teams', requireRole('admin'), async (req, res) => {
   const [campaigns] = await pool.query(
     'SELECT tc.team_id, c.id, c.name FROM team_campaigns tc JOIN campaigns c ON c.id = tc.campaign_id ORDER BY c.name',
   );
-  const [extensions] = await pool.query(
-    'SELECT te.team_id, e.id, e.name FROM team_extensions te JOIN extensions e ON e.id = te.extension_id ORDER BY e.name',
-  );
   res.json(
     teams.map((t) => ({
       ...t,
       members: members.filter((m) => m.team_id === t.id).map(({ id, username }) => ({ id, username })),
       campaigns: campaigns.filter((c) => c.team_id === t.id).map(({ id, name }) => ({ id, name })),
-      extensions: extensions.filter((e) => e.team_id === t.id).map(({ id, name }) => ({ id, name })),
     })),
   );
 });
@@ -33,7 +28,6 @@ router.get('/admin/teams', requireRole('admin'), async (req, res) => {
 const LINKS = [
   ['team_members', 'user_id', 'memberIds'],
   ['team_campaigns', 'campaign_id', 'campaignIds'],
-  ['team_extensions', 'extension_id', 'extensionIds'],
 ];
 
 // Create and edit both replace the full link sets inside one transaction,

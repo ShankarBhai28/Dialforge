@@ -1,40 +1,40 @@
-// Step 1 of a shift: pick the extension (desk phone) to use and register it.
-// The choice is remembered, so a page refresh reconnects by itself.
+// Step 1 of a shift: connect the browser line. The extension is the one the
+// admin assigned (Users screen) - shown here, not chosen. Once connected,
+// a page refresh reconnects by itself.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Headset, LoaderCircle, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/form-controls';
-import { Field, FormError } from '@/components/common';
+import { FormError } from '@/components/common';
 import { get } from '@/lib/api';
 import { meKey, useLogout, useMe } from '@/features/auth/auth';
 import type { WebrtcConfig } from './api';
 import { usePhone } from './AgentProvider';
 import type { Softphone } from './softphone/softphone';
 
-export const EXTENSION_KEY = 'dialforge_extension'; // same key as the classic page
+/** Set while the agent is connected, so a refresh reconnects; cleared on logout. */
+export const EXTENSION_KEY = 'dialforge_extension';
 
-/** Fetches the line settings + this extension's SIP password, then registers. */
-async function registerLine(phone: Softphone, ext: string) {
+/** Fetches the line settings + the agent's own extension and SIP password, then registers. */
+async function registerLine(phone: Softphone) {
   const [config, creds] = await Promise.all([
     get<WebrtcConfig>('/agent/webrtc-config'),
-    get<{ extension: string; sipPassword: string }>(`/agent/extension-credentials/${encodeURIComponent(ext)}`),
+    get<{ extension: string; sipPassword: string }>('/agent/extension-credentials'),
   ]);
   phone.connect({ extension: creds.extension, password: creds.sipPassword, ...config });
 }
 
-function savedExtension() {
+function wasConnected() {
   try {
-    return localStorage.getItem(EXTENSION_KEY);
+    return !!localStorage.getItem(EXTENSION_KEY);
   } catch {
-    return null;
+    return false;
   }
 }
 
 /**
- * Once the line registers: remember the extension (refresh reconnects by
- * itself) and reload the user, whose session now carries this extension.
+ * Once the line registers: remember it (refresh reconnects by itself) and
+ * reload the user, whose session now carries the extension.
  * Used by the parent screen - ConnectLine itself unmounts on registration.
  */
 export function useRememberLine() {
@@ -51,32 +51,18 @@ export function useRememberLine() {
   }, [line.reg, line.extension, qc]);
 }
 
-/** The extensions this agent may use; null = any (their teams don't limit it). */
-function useAllowedExtensions() {
-  return useQuery({
-    queryKey: ['agent', 'extensions'],
-    queryFn: () => get<{ allowed: string[] | null }>('/agent/extensions'),
-    select: (d) => d.allowed,
-  });
-}
-
 export function ConnectLine() {
   const { data: me } = useMe();
-  // On error this stays undefined and the free-text box is shown; the
-  // server still refuses an extension the agent may not use.
-  const { data: allowed } = useAllowedExtensions();
   const { phone, line } = usePhone();
   const logout = useLogout();
-  const [extension, setExtension] = useState(() => savedExtension() ?? me?.extensionName ?? '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function connect(ext: string) {
-    if (!ext) return setError('Extension is required');
+  async function connect() {
     setBusy(true);
     setError(null);
     try {
-      await registerLine(phone, ext);
+      await registerLine(phone);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -87,17 +73,14 @@ export function ConnectLine() {
   // Reconnect automatically after a page refresh.
   const tried = useRef(false);
   useEffect(() => {
-    const saved = savedExtension();
-    if (tried.current || !saved || phone.getSnapshot().reg !== 'idle') return;
+    if (tried.current || !wasConnected() || phone.getSnapshot().reg !== 'idle') return;
     tried.current = true;
-    registerLine(phone, saved).catch((err: Error) => setError(err.message));
+    registerLine(phone).catch((err: Error) => setError(err.message));
   }, [phone]);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const ext = extension.trim();
-    // A remembered extension the team no longer allows shows as "Choose…" - send what is shown.
-    void connect(allowed && !allowed.includes(ext) ? '' : ext);
+    void connect();
   }
 
   const connecting = busy || line.reg === 'connecting';
@@ -109,37 +92,15 @@ export function ConnectLine() {
           <Headset className="size-6" />
         </div>
         <h1 className="text-lg font-bold">Connect your line</h1>
-        <p className="mb-5 text-sm text-muted-foreground">
-          Hi {me?.username}. Choose the extension for this shift; calls ring here in the browser.
-        </p>
-        <Field id="ext" label="Extension" className="mb-4">
-          {allowed ? (
-            <Select
-              id="ext"
-              value={allowed.includes(extension) ? extension : ''}
-              onChange={(e) => setExtension(e.target.value)}
-              autoFocus
-            >
-              <option value="">Choose…</option>
-              {allowed.map((x) => (
-                <option key={x} value={x}>
-                  {x}
-                </option>
-              ))}
-            </Select>
-          ) : (
-            <Input
-              id="ext"
-              value={extension}
-              onChange={(e) => setExtension(e.target.value)}
-              placeholder="e.g. 1001"
-              inputMode="numeric"
-              autoFocus
-            />
-          )}
-        </Field>
+        <p className="mb-5 text-sm text-muted-foreground">Hi {me?.username}. Calls ring here in the browser.</p>
+        <div className="mb-4 flex items-center justify-between rounded-md border bg-muted/40 px-3.5 py-2.5">
+          <span className="text-sm text-muted-foreground">Your extension</span>
+          <span className="font-bold tabular-nums" aria-label="Your extension">
+            {me?.extensionName ?? '—'}
+          </span>
+        </div>
         <FormError message={error ?? regError} />
-        <Button type="submit" className="mt-4 w-full" disabled={connecting}>
+        <Button type="submit" className="mt-4 w-full" disabled={connecting} autoFocus>
           {connecting && <LoaderCircle className="animate-spin" />}
           {connecting ? 'Connecting…' : 'Connect'}
         </Button>

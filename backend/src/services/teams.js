@@ -24,7 +24,6 @@ function parseTeam(body) {
   for (const [key, label] of [
     ['memberIds', 'agents'],
     ['campaignIds', 'campaigns'],
-    ['extensionIds', 'extensions'],
   ]) {
     team[key] = parseIds(body[key]);
     if (!team[key]) return { error: `${label} must be a list of ids` };
@@ -33,11 +32,10 @@ function parseTeam(body) {
 }
 
 /** Every id must exist (and members must be agents); returns an error naming the bad ones, or null. */
-async function checkTeamRefs({ memberIds, campaignIds, extensionIds }, deps = { pool }) {
+async function checkTeamRefs({ memberIds, campaignIds }, deps = { pool }) {
   const checks = [
     [memberIds, "SELECT id FROM users WHERE role = 'agent' AND id IN (?)", 'agent'],
     [campaignIds, 'SELECT id FROM campaigns WHERE id IN (?)', 'campaign'],
-    [extensionIds, 'SELECT id FROM extensions WHERE id IN (?)', 'extension'],
   ];
   for (const [ids, sql, label] of checks) {
     if (!ids.length) continue;

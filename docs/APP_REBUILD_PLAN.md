@@ -89,7 +89,7 @@ Dashboard + Live Agents → Campaigns (settings, dispositions, recycle rules) �
 Backend gaps the new screens work around. None of them blocks the switchover.
 
 **Security / correctness**
-- ~~`GET /agent/extension-credentials/:extension` gives any agent any extension's SIP password~~ — **done 2026-10-10**: a team can list the extensions its agents may use (see Stage 4 follow-ups).
+- ~~`GET /agent/extension-credentials/:extension` gives any agent any extension's SIP password~~ — **done 2026-10-10**: agents always get their own assigned extension's credentials (see Stage 4 follow-ups).
 - ~~Users can't be edited, no password reset~~ — **done 2026-10-09**: edit role and extension, reset password, deactivate (no delete, by design), and create checks that the extension exists.
 - ~~Team ids not validated~~ — **done 2026-10-10**: unknown agent, campaign or extension ids get a 400 naming them.
 - ~~`POST /admin/lists` unknown campaign = raw 500~~ — **done 2026-10-10**: 400 "campaign not found" (create and edit).
@@ -106,5 +106,5 @@ Backend gaps the new screens work around. None of them blocks the switchover.
 ## Follow-ups found in Stage 4
 - ~~TURN password is public~~ — **done 2026-10-09**: coturn now uses `use-auth-secret`. `/agent/webrtc-config` signs a per-login password that expires after 12 h, and the old fixed password is refused.
 - The classic agent page sets ICE servers on the UA, where JsSIP ignores them, so it has never used STUN/TURN. The new screen passes them per call. Not worth fixing in the classic page; it is being retired.
-- ~~Extension choice open to any agent~~ — **done 2026-10-10**: Teams → Extensions. A team with none ticked doesn't limit anyone (no change on deploy); once ticked, its agents may use only those plus their own extension, and the Connect screen shows them as a list.
+- ~~Extension choice open to any agent~~ — **done 2026-10-10**: an agent always connects with the extension assigned in Users; the Connect screen shows it read-only. (A per-team extension list was tried the same day and removed: with a fixed extension it has no purpose.)
 

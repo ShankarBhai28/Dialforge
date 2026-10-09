@@ -1,6 +1,5 @@
-// Teams: group agents and map them to campaigns (and optionally to the
-// extensions they may connect with). An agent only sees the campaigns
-// mapped to their team(s).
+// Teams: group agents and map them to campaigns. An agent only sees the
+// campaigns mapped to their team(s).
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Pencil, Plus, RefreshCw, Trash2, UsersRound } from 'lucide-react';
@@ -22,7 +21,7 @@ import {
 import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader, StatusPill } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
 import { useCampaigns } from '@/features/campaigns/api';
-import { useExtensions, useUsers } from '@/features/users/api';
+import { useUsers } from '@/features/users/api';
 import { useDeleteTeam, useSaveTeam, useTeams, type Team } from './api';
 
 /** A titled box of checkboxes; `selected` holds the ticked ids. */
@@ -80,13 +79,11 @@ function CheckList({
 function TeamDialog({ team, onOpenChange }: { team: Team | null; onOpenChange: (v: boolean) => void }) {
   const users = useUsers();
   const campaigns = useCampaigns();
-  const extensions = useExtensions();
   const save = useSaveTeam();
   const [name, setName] = useState(team?.name ?? '');
   const [status, setStatus] = useState(team?.status ?? 'active');
   const [members, setMembers] = useState(() => new Set<number>(team?.members.map((m) => m.id)));
   const [campaignIds, setCampaignIds] = useState(() => new Set<number>(team?.campaigns.map((c) => c.id)));
-  const [extensionIds, setExtensionIds] = useState(() => new Set<number>(team?.extensions.map((x) => x.id)));
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -100,7 +97,6 @@ function TeamDialog({ team, onOpenChange }: { team: Team | null; onOpenChange: (
         // that failed to load can't silently drop existing mappings.
         memberIds: [...members],
         campaignIds: [...campaignIds],
-        extensionIds: [...extensionIds],
       },
       {
         onSuccess: () => {
@@ -166,25 +162,6 @@ function TeamDialog({ team, onOpenChange }: { team: Team | null; onOpenChange: (
                 emptyText="No campaigns yet"
               />
             </div>
-            <div>
-              <CheckList
-                legend="Extensions"
-                items={extensions.data?.map((x) => ({
-                  id: x.id,
-                  name: x.name,
-                  label: x.label ? `${x.name} - ${x.label}` : x.name,
-                }))}
-                selected={extensionIds}
-                onChange={setExtensionIds}
-                loading={extensions.isPending}
-                error={extensions.error?.message}
-                emptyText="No extensions yet"
-              />
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                None ticked: members may connect with any free extension. Ticked: only these, plus each agent&apos;s own
-                extension.
-              </p>
-            </div>
             <FormError message={save.error?.message} />
           </DialogBody>
           <DialogFooter>
@@ -247,7 +224,6 @@ export function TeamsPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Agents</TableHead>
                 <TableHead>Campaigns</TableHead>
-                <TableHead>Extensions</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -261,13 +237,6 @@ export function TeamsPage() {
                   </TableCell>
                   <TableCell className="min-w-40">
                     {t.campaigns.length ? t.campaigns.map((c) => c.name).join(', ') : none}
-                  </TableCell>
-                  <TableCell>
-                    {t.extensions.length ? (
-                      t.extensions.map((x) => x.name).join(', ')
-                    ) : (
-                      <span className="text-muted-foreground">Any</span>
-                    )}
                   </TableCell>
                   <TableCell>
                     <StatusPill tone={t.status === 'active' ? 'green' : 'grey'}>{t.status}</StatusPill>

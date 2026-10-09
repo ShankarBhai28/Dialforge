@@ -1286,3 +1286,11 @@ Reported by the user after trying the agent panel:
   - The dialog shows a retry instead of an empty list if the outcomes can't load (it can't be closed without an outcome).
 - **Redial from call history:** each row in Call history has a green phone button that dials that number (`to_number` is the customer for inbound and outbound).
 - Tests: 64 backend, 142 web.
+
+## Agent extension fixed to the one assigned in Users (2026-10-10)
+- **Asked by the user:** agents shouldn't choose or edit their extension; they should only see it.
+- **Now:** `GET /agent/extension-credentials` (no parameter) returns the credentials of the extension assigned to the logged-in user in Users, read from the DB (not the session), so an admin change applies on the next connect. No extension assigned → 400 "ask your admin". The "in use by …" check stays, for two agents who share an extension. The old `/agent/extension-credentials/:extension` and `/agent/extensions` are gone.
+- **Screen:** Connect your line shows "Your extension 1003" as text and a Connect button; a refresh still reconnects by itself. The top bar keeps showing "ext 1003". To change an agent's extension: Admin → Users → Edit.
+- **Team extension lists removed:** with a fixed extension they have no purpose. They were added earlier the same day and never used (`team_extensions` had 0 rows). `migration-drop-team-extensions.sql` drops the table (backup first); the create migration was deleted, so fresh installs never have it. Teams went back to agents + campaigns.
+- **Note:** on dev, agent04 and agent1003 share extension 1003, and agent02 and agent1002 share 1002. Only one of each pair can be connected at a time.
+- Tests: 62 backend, 139 web.
