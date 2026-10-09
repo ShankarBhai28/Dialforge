@@ -4,22 +4,29 @@ const { normalizePhone } = require('../../dialer-common');
 const { requireRole } = require('../middleware/auth');
 const { addDnc } = require('../services/dnc');
 
+const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
+
 const router = express.Router();
 
 // --- Admin: DNC list ---
 router.get('/admin/dnc', requireRole('admin'), async (req, res) => {
+  // total = every number on the list; matching = after the search (paged).
+  const paging = parsePaging(req.query);
   const q = normalizePhone(req.query.q || '');
+  const where = whereClause([
+    ['d.tenant_id = 1', []],
+    [q ? 'd.phone LIKE ?' : '', [likeTerm(q)]],
+  ]);
   const [rows] = await pool.query(
-    `
-    SELECT d.id, d.phone, d.source, d.created_at, u.username AS created_by_name
-    FROM dnc_numbers d LEFT JOIN users u ON u.id = d.created_by
-    WHERE d.tenant_id = 1 ${q ? 'AND d.phone LIKE ?' : ''}
-    ORDER BY d.id DESC LIMIT 500
-  `,
-    q ? [`%${q}%`] : [],
+    `SELECT d.id, d.phone, d.source, d.created_at, u.username AS created_by_name
+     FROM dnc_numbers d LEFT JOIN users u ON u.id = d.created_by
+     ${where.sql}
+     ORDER BY d.id DESC LIMIT ? OFFSET ?`,
+    [...where.params, paging.pageSize, paging.offset],
   );
-  const [count] = await pool.query('SELECT COUNT(*) AS cnt FROM dnc_numbers WHERE tenant_id = 1');
-  res.json({ total: count[0].cnt, rows });
+  const [[matching]] = await pool.query(`SELECT COUNT(*) AS n FROM dnc_numbers d ${where.sql}`, where.params);
+  const [[all]] = await pool.query('SELECT COUNT(*) AS n FROM dnc_numbers WHERE tenant_id = 1');
+  res.json({ ...pageResult(rows, matching.n, paging), all: Number(all.n) });
 });
 
 // Bulk add: one number per line (or comma-separated).

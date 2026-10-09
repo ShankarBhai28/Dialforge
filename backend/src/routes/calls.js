@@ -1,14 +1,16 @@
 const express = require('express');
 const pool = require('../../db');
 const ari = require('../../ari');
-const { isWithinCallWindow } = require('../../dialer-common');
+const { isWithinCallWindow, normalizePhone } = require('../../dialer-common');
 const { APP_NAME } = require('../config');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireRole } = require('../middleware/auth');
 const { findCurrentCampaign } = require('../services/agents');
 const { logEvent } = require('../services/calls');
 const { isDnc } = require('../services/dnc');
 const { previewLockOwner } = require('../services/preview');
 const { activeCalls } = require('../state');
+
+const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
 
 const router = express.Router();
 
@@ -22,6 +24,36 @@ router.get('/calls', requireAuth, async (req, res) => {
     req.session.user.extensionName,
   ]);
   res.json(rows);
+});
+
+// --- Admin: call log, searched and paged on the server ---
+// ?q= (number) &direction= &disposition= ('none' = not answered) &extension= &from=&to= (YYYY-MM-DD) &page=
+router.get('/admin/calls', requireRole('admin'), async (req, res) => {
+  const paging = parsePaging(req.query);
+  const { q, direction, disposition, extension, from, to } = req.query;
+  const digits = normalizePhone(q || '');
+  const where = whereClause([
+    [digits ? 'ca.to_number LIKE ?' : '', [likeTerm(digits)]],
+    [direction ? 'ca.direction = ?' : '', [direction]],
+    [
+      disposition === 'none' ? 'ca.disposition IS NULL' : disposition ? 'ca.disposition = ?' : '',
+      disposition && disposition !== 'none' ? [disposition] : [],
+    ],
+    [extension ? 'ca.from_extension = ?' : '', [extension]],
+    [from ? 'ca.start_time >= ?' : '', [from]],
+    [to ? 'ca.start_time < DATE_ADD(?, INTERVAL 1 DAY)' : '', [to]],
+  ]);
+  const [rows] = await pool.query(
+    `SELECT ca.*, c.name AS campaign_name, l.name AS lead_name
+     FROM calls ca
+     LEFT JOIN campaigns c ON c.id = ca.campaign_id
+     LEFT JOIN leads l ON l.id = ca.lead_id
+     ${where.sql}
+     ORDER BY ca.id DESC LIMIT ? OFFSET ?`,
+    [...where.params, paging.pageSize, paging.offset],
+  );
+  const [[count]] = await pool.query(`SELECT COUNT(*) AS n FROM calls ca ${where.sql}`, where.params);
+  res.json(pageResult(rows, count.n, paging));
 });
 
 router.post('/calls/click2call', requireAuth, async (req, res) => {

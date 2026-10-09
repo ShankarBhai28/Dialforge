@@ -1,5 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, post, put } from '@/lib/api';
+import type { Paged } from '@/components/common';
 
 // One row of GET /admin/lists (lists.* + campaign name + counts).
 export type LeadList = {
@@ -14,7 +15,7 @@ export type LeadList = {
   dialable_count: number;
 };
 
-// One row of GET /leads for an admin (leads.* + joined names, latest 200).
+// One row of GET /admin/leads (leads.* + joined names, newest first).
 export type Lead = {
   id: number;
   phone: string;
@@ -29,6 +30,16 @@ export type Lead = {
   priority: number;
   created_at: string;
 };
+
+/** GET /admin/leads: one page, plus the statuses present (within the chosen campaign) for the status filter. */
+export type LeadPage = Paged<Lead> & { statuses: string[] };
+
+/** Server-side filters; '' = no filter. `campaignId: 'none'` = leads without a campaign. `q` = name or phone. */
+export type LeadFilters = { q: string; campaignId: string; listId: string; status: string };
+
+export const NO_LEAD_FILTERS: LeadFilters = { q: '', campaignId: '', listId: '', status: '' };
+
+export const LEAD_PAGE_SIZE = 50;
 
 export type Disposition = { code: string; label: string };
 
@@ -67,6 +78,7 @@ export type RecycleResult = { recycled: number; skippedDnc: number; skippedOnCal
 export const leadKeys = {
   lists: ['admin', 'lists'] as const,
   leads: ['admin', 'leads'] as const,
+  leadPage: (f: LeadFilters, page: number) => ['admin', 'leads', f, page] as const,
   recycle: (listId: number) => ['admin', 'lists', listId, 'recycle'] as const,
   dispositions: (campaignId: number) => ['admin', 'campaigns', campaignId, 'dispositions'] as const,
 };
@@ -100,8 +112,32 @@ export function useDeleteList() {
 
 // --- Leads ---
 
-export function useLeads() {
-  return useQuery({ queryKey: leadKeys.leads, queryFn: () => get<Lead[]>('/leads') });
+/** Query string in a fixed key order, empty values left out (so the same filters always give the same URL). */
+function query(params: [string, string | number][]) {
+  const s = new URLSearchParams();
+  for (const [k, v] of params) if (v !== '') s.set(k, String(v));
+  return s.toString();
+}
+
+export const leadsPath = (f: LeadFilters, page: number) =>
+  '/admin/leads?' +
+  query([
+    ['q', f.q],
+    ['campaignId', f.campaignId],
+    ['listId', f.listId],
+    ['status', f.status],
+    ['page', page],
+    ['pageSize', LEAD_PAGE_SIZE],
+  ]);
+
+/** Mutations invalidate `leadKeys.leads`, the prefix of every page and filter combination. */
+export function useLeads(f: LeadFilters, page: number) {
+  return useQuery({
+    queryKey: leadKeys.leadPage(f, page),
+    queryFn: () => get<LeadPage>(leadsPath(f, page)),
+    // Keep the current page on screen while the next one loads.
+    placeholderData: keepPreviousData,
+  });
 }
 
 export type LeadInput = {

@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, post } from '@/lib/api';
+import type { Paged } from '@/components/common';
 
 export type DncNumber = {
   id: number;
@@ -9,20 +10,37 @@ export type DncNumber = {
   created_by_name: string | null;
 };
 
-/** GET /admin/dnc: `total` is the whole list; `rows` the newest 500 matching `q`. */
-export type DncList = { total: number; rows: DncNumber[] };
+/** GET /admin/dnc: `all` = every number on the list; `total` = how many match `q` (paged, newest first). */
+export type DncList = Paged<DncNumber> & { all: number };
 export type DncAddResult = { added: number; existing: number; invalid: number };
+
+export const DNC_PAGE_SIZE = 50;
 
 export const dncKeys = {
   all: ['admin', 'dnc'] as const,
-  list: (q: string) => ['admin', 'dnc', q] as const,
+  list: (q: string, page: number) => ['admin', 'dnc', q, page] as const,
 };
 
-export function useDnc(q: string) {
+/** Query string in a fixed key order, empty values left out (so the same search always gives the same URL). */
+function query(params: [string, string | number][]) {
+  const s = new URLSearchParams();
+  for (const [k, v] of params) if (v !== '') s.set(k, String(v));
+  return s.toString();
+}
+
+export const dncPath = (q: string, page: number) =>
+  '/admin/dnc?' +
+  query([
+    ['q', q],
+    ['page', page],
+    ['pageSize', DNC_PAGE_SIZE],
+  ]);
+
+export function useDnc(q: string, page: number) {
   return useQuery({
-    queryKey: dncKeys.list(q),
-    queryFn: () => get<DncList>('/admin/dnc' + (q ? `?q=${encodeURIComponent(q)}` : '')),
-    // Keep the table on screen while the next search loads.
+    queryKey: dncKeys.list(q, page),
+    queryFn: () => get<DncList>(dncPath(q, page)),
+    // Keep the table on screen while the next search or page loads.
     placeholderData: keepPreviousData,
   });
 }

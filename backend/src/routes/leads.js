@@ -6,6 +6,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { findCurrentCampaign } = require('../services/agents');
 const { getDispositions } = require('../services/dispositions');
 const { addDnc } = require('../services/dnc');
+const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
 const {
   LEAD_BASE_COLUMNS,
   getCampaignFormFields,
@@ -34,6 +35,42 @@ router.get('/leads', requireAuth, async (req, res) => {
     campaign.id,
   ]);
   res.json(rows);
+});
+
+// --- Admin: every lead, searched and paged on the server ---
+// ?q= (name or phone) &campaignId= (or 'none') &listId= &status= &page= &pageSize=
+router.get('/admin/leads', requireRole('admin'), async (req, res) => {
+  const paging = parsePaging(req.query);
+  const { q, campaignId, listId, status } = req.query;
+  const digits = normalizePhone(q || '');
+  const where = whereClause([
+    [
+      q ? `(l.name LIKE ?${digits ? ' OR l.phone LIKE ?' : ''})` : '',
+      q ? [likeTerm(q.trim()), ...(digits ? [likeTerm(digits)] : [])] : [],
+    ],
+    [
+      campaignId === 'none' ? 'l.campaign_id IS NULL' : campaignId ? 'l.campaign_id = ?' : '',
+      campaignId && campaignId !== 'none' ? [campaignId] : [],
+    ],
+    [listId ? 'l.list_id = ?' : '', [listId]],
+    [status ? 'l.status = ?' : '', [status]],
+  ]);
+  const [rows] = await pool.query(
+    `SELECT l.*, c.name AS campaign_name, ls.name AS list_name
+     FROM leads l
+     LEFT JOIN campaigns c ON c.id = l.campaign_id
+     LEFT JOIN lists ls ON ls.id = l.list_id
+     ${where.sql}
+     ORDER BY l.id DESC LIMIT ? OFFSET ?`,
+    [...where.params, paging.pageSize, paging.offset],
+  );
+  const [[count]] = await pool.query(`SELECT COUNT(*) AS n FROM leads l ${where.sql}`, where.params);
+  // Statuses present (for the filter), within the chosen campaign if any.
+  const scope = whereClause([
+    [campaignId === 'none' ? 'campaign_id IS NULL' : campaignId ? 'campaign_id = ?' : '', [campaignId]],
+  ]);
+  const [statuses] = await pool.query(`SELECT DISTINCT status FROM leads ${scope.sql} ORDER BY status`, scope.params);
+  res.json({ ...pageResult(rows, count.n, paging), statuses: statuses.map((s) => s.status) });
 });
 
 router.post('/leads', requireAuth, async (req, res) => {

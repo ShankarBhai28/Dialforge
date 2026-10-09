@@ -1,20 +1,20 @@
 // DNC list: numbers that must never be called. Bulk add + search + remove.
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
-import { ChevronLeft, ChevronRight, PhoneOff, Plus, Search, Trash2 } from 'lucide-react';
+import { PhoneOff, Plus, Search, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/form-controls';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader } from '@/components/common';
+import { ConfirmDialog, EmptyState, Field, FormError, Pager, SectionHeader } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
 import { formatDateTime } from '@/lib/format';
+import { useDebouncedValue } from '@/lib/hooks';
 import { useAddDnc, useDnc, useRemoveDnc, type DncAddResult, type DncNumber } from './api';
 
-const PAGE_SIZE = 50;
-const SERVER_LIMIT = 500; // the route returns at most this many rows
+const n = (x: number) => x.toLocaleString('en-IN');
 
 function AddNumbers() {
   const add = useAddDnc();
@@ -64,26 +64,18 @@ function AddNumbers() {
 
 export function DncPage() {
   const [search, setSearch] = useState('');
-  const [q, setQ] = useState('');
-  const [page, setPage] = useState(0);
-  // Wait for a pause in typing before asking the server (the classic page
-  // searched on every keystroke).
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setQ(search.trim());
-      setPage(0);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [search]);
+  // Wait for a pause in typing before asking the server.
+  const q = useDebouncedValue(search.trim(), 300);
+  // The page belongs to one search: a new search starts at page 1.
+  const [paging, setPaging] = useState({ q, page: 1 });
+  const page = paging.q === q ? paging.page : 1;
+  const setPage = (p: number) => setPaging({ q, page: p });
 
-  const dnc = useDnc(q);
+  const dnc = useDnc(q, page);
   const remove = useRemoveDnc();
   const [removing, setRemoving] = useState<DncNumber | null>(null);
 
   const rows = dnc.data?.rows ?? [];
-  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  const current = Math.min(page, pages - 1);
-  const visible = rows.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
 
   return (
     <div className="grid gap-4">
@@ -91,7 +83,7 @@ export function DncPage() {
       <Card>
         <CardContent className="pt-5">
           <SectionHeader
-            title={dnc.data ? `Numbers (${dnc.data.total} total${q ? `, ${rows.length} matching` : ''})` : 'Numbers'}
+            title={dnc.data ? `${n(dnc.data.all)} numbers${q ? ` (${n(dnc.data.total)} matching)` : ''}` : 'Numbers'}
             description="Numbers that must never be called - click-to-call and the dialer refuse them."
             actions={
               <div className="relative w-full sm:w-64">
@@ -133,7 +125,7 @@ export function DncPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {visible.map((r) => (
+                  {rows.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell className="font-semibold tabular-nums">{r.phone}</TableCell>
                       <TableCell>{r.source}</TableCell>
@@ -154,37 +146,7 @@ export function DncPage() {
                   ))}
                 </TableBody>
               </Table>
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>
-                  {current * PAGE_SIZE + 1}–{current * PAGE_SIZE + visible.length} of {rows.length}
-                  {rows.length >= SERVER_LIMIT && ` (newest ${SERVER_LIMIT} shown - search to find older numbers)`}
-                </span>
-                {pages > 1 && (
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(current - 1)}
-                      disabled={current === 0}
-                      aria-label="Previous page"
-                    >
-                      <ChevronLeft />
-                    </Button>
-                    <span className="px-2">
-                      Page {current + 1} of {pages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(current + 1)}
-                      disabled={current >= pages - 1}
-                      aria-label="Next page"
-                    >
-                      <ChevronRight />
-                    </Button>
-                  </div>
-                )}
-              </div>
+              <Pager page={page} pageSize={dnc.data.pageSize} total={dnc.data.total} onPage={setPage} />
             </>
           )}
         </CardContent>
@@ -210,6 +172,8 @@ export function DncPage() {
             onSuccess: () => {
               toast.success('Number removed from DNC');
               setRemoving(null);
+              // Removing the last row of the last page: step back so the table isn't empty.
+              if (rows.length === 1 && page > 1) setPage(page - 1);
             },
           })
         }

@@ -164,3 +164,42 @@ export function StatusPill({
     </span>
   );
 }
+
+/** "1–50 of 1,234" with Previous / Next, for server-paged lists ({ rows, total, page, pageSize }). */
+export function Pager({
+  page,
+  pageSize,
+  total,
+  onPage,
+  className,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPage: (page: number) => void;
+  className?: string;
+}) {
+  if (total <= pageSize && page === 1) return null;
+  const first = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const last = Math.min(page * pageSize, total);
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const n = (x: number) => x.toLocaleString('en-IN');
+  return (
+    <nav aria-label="Pages" className={cn('mt-3 flex items-center justify-between gap-3 text-sm', className)}>
+      <span className="text-muted-foreground tabular-nums">
+        {n(first)}–{n(last)} of {n(total)}
+      </span>
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+          Previous
+        </Button>
+        <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => onPage(page + 1)}>
+          Next
+        </Button>
+      </div>
+    </nav>
+  );
+}
+
+/** Server-paged list response. */
+export type Paged<T> = { rows: T[]; total: number; page: number; pageSize: number };

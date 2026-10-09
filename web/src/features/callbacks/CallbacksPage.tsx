@@ -1,6 +1,6 @@
 // Callbacks: everything agents scheduled from the Callback disposition.
-// Filters run in the browser - the API returns the whole (capped) list.
-import { useMemo, useState } from 'react';
+// Filters and paging run on the server (GET /admin/callbacks).
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { CalendarClock, RefreshCw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -9,15 +9,13 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/form-controls';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ConfirmDialog, EmptyState, Field, SectionHeader, StatusPill } from '@/components/common';
+import { ConfirmDialog, EmptyState, Field, Pager, SectionHeader, StatusPill } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
 import { formatDateTime } from '@/lib/format';
+import { useDebouncedValue } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
-import { useCallbacks, useCancelCallback, type Callback } from './api';
-
-type StatusFilter = '' | 'pending' | 'overdue' | 'done' | 'cancelled';
-
-const LIMIT = 300; // the route's LIMIT
+import { useCampaigns } from '@/features/campaigns/api';
+import { useCallbacks, useCancelCallback, type Callback, type CallbackFilters, type StatusFilter } from './api';
 
 const isOverdue = (c: Callback, now: number) => c.status === 'pending' && new Date(c.callback_at).getTime() < now;
 
@@ -28,30 +26,27 @@ const STATUS_TONE: Record<string, 'green' | 'grey' | 'blue'> = {
 };
 
 export function CallbacksPage() {
-  const callbacks = useCallbacks();
+  const campaigns = useCampaigns();
   const cancel = useCancelCallback();
   const [status, setStatus] = useState<StatusFilter>('');
   const [campaign, setCampaign] = useState('');
   const [search, setSearch] = useState('');
   const [cancelling, setCancelling] = useState<Callback | null>(null);
+
+  // Only the search box is debounced; the selects apply at once.
+  const q = useDebouncedValue(search.trim(), 300);
+  const filters: CallbackFilters = { status, campaignId: campaign, q };
+  // The page belongs to one set of filters: any filter change means page 1.
+  const filtersKey = JSON.stringify(filters);
+  const [paging, setPaging] = useState({ key: filtersKey, page: 1 });
+  const page = paging.key === filtersKey ? paging.page : 1;
+  const setPage = (p: number) => setPaging({ key: filtersKey, page: p });
+
+  const callbacks = useCallbacks(filters, page);
+  const rows = callbacks.data?.rows ?? [];
   // "Overdue" is judged against the time the list was fetched, so rows
   // don't flip state mid-render.
   const now = callbacks.dataUpdatedAt;
-
-  const campaigns = useMemo(
-    () => [...new Set((callbacks.data ?? []).map((c) => c.campaign_name).filter((n): n is string => !!n))].sort(),
-    [callbacks.data],
-  );
-
-  const rows = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return (callbacks.data ?? []).filter((c) => {
-      if (status === 'overdue' ? !isOverdue(c, now) : status && c.status !== status) return false;
-      if (campaign && c.campaign_name !== campaign) return false;
-      if (q && !`${c.name ?? ''} ${c.phone}`.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [callbacks.data, status, campaign, search, now]);
 
   const filtered = status !== '' || campaign !== '' || search.trim() !== '';
 
@@ -81,9 +76,9 @@ export function CallbacksPage() {
           <Field id="cb-campaign" label="Campaign">
             <Select id="cb-campaign" value={campaign} onChange={(e) => setCampaign(e.target.value)}>
               <option value="">All campaigns</option>
-              {campaigns.map((n) => (
-                <option key={n} value={n}>
-                  {n}
+              {campaigns.data?.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
                 </option>
               ))}
             </Select>
@@ -119,71 +114,71 @@ export function CallbacksPage() {
           </div>
         ) : callbacks.error ? (
           <ErrorState message={callbacks.error.message} onRetry={() => callbacks.refetch()} />
-        ) : callbacks.data.length === 0 ? (
-          <EmptyState icon={CalendarClock} title="No callbacks yet">
-            They appear here when an agent saves a call with the Callback disposition.
-          </EmptyState>
         ) : rows.length === 0 ? (
-          <EmptyState icon={CalendarClock} title="No callbacks match these filters" />
+          filtered ? (
+            <EmptyState icon={CalendarClock} title="No callbacks match these filters" />
+          ) : (
+            <EmptyState icon={CalendarClock} title="No callbacks yet">
+              They appear here when an agent saves a call with the Callback disposition.
+            </EmptyState>
+          )
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>When</TableHead>
-                <TableHead>Lead</TableHead>
-                <TableHead>Campaign</TableHead>
-                <TableHead>Assigned to</TableHead>
-                <TableHead>Note</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Created by</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((c) => {
-                const overdue = isOverdue(c, now);
-                return (
-                  <TableRow key={c.id}>
-                    <TableCell className={cn('whitespace-nowrap', overdue && 'font-bold text-destructive')}>
-                      {formatDateTime(c.callback_at)}
-                      {overdue && ' (overdue)'}
-                    </TableCell>
-                    <TableCell>
-                      {c.name && <div className="font-semibold">{c.name}</div>}
-                      <div className="tabular-nums">{c.phone}</div>
-                    </TableCell>
-                    <TableCell>{c.campaign_name ?? <span className="text-muted-foreground">—</span>}</TableCell>
-                    <TableCell>{c.assigned_to ?? 'Anyone'}</TableCell>
-                    <TableCell className="max-w-64">
-                      {c.note ?? <span className="text-muted-foreground">—</span>}
-                    </TableCell>
-                    <TableCell>
-                      <StatusPill tone={overdue ? 'red' : (STATUS_TONE[c.status] ?? 'grey')}>{c.status}</StatusPill>
-                    </TableCell>
-                    <TableCell>{c.created_by_name}</TableCell>
-                    <TableCell className="text-right whitespace-nowrap">
-                      {c.status === 'pending' && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive"
-                          onClick={() => setCancelling(c)}
-                          aria-label={`Cancel callback for ${c.phone}`}
-                        >
-                          <X /> Cancel
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-        {callbacks.data?.length === LIMIT && (
-          <p className="mt-3 text-xs text-muted-foreground">
-            Showing the first {LIMIT} callbacks (pending first, soonest first).
-          </p>
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>When</TableHead>
+                  <TableHead>Lead</TableHead>
+                  <TableHead>Campaign</TableHead>
+                  <TableHead>Assigned to</TableHead>
+                  <TableHead>Note</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Created by</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((c) => {
+                  const overdue = isOverdue(c, now);
+                  return (
+                    <TableRow key={c.id}>
+                      <TableCell className={cn('whitespace-nowrap', overdue && 'font-bold text-destructive')}>
+                        {formatDateTime(c.callback_at)}
+                        {overdue && ' (overdue)'}
+                      </TableCell>
+                      <TableCell>
+                        {c.name && <div className="font-semibold">{c.name}</div>}
+                        <div className="tabular-nums">{c.phone}</div>
+                      </TableCell>
+                      <TableCell>{c.campaign_name ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                      <TableCell>{c.assigned_to ?? 'Anyone'}</TableCell>
+                      <TableCell className="max-w-64">
+                        {c.note ?? <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell>
+                        <StatusPill tone={overdue ? 'red' : (STATUS_TONE[c.status] ?? 'grey')}>{c.status}</StatusPill>
+                      </TableCell>
+                      <TableCell>{c.created_by_name}</TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        {c.status === 'pending' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive"
+                            onClick={() => setCancelling(c)}
+                            aria-label={`Cancel callback for ${c.phone}`}
+                          >
+                            <X /> Cancel
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            <Pager page={page} pageSize={callbacks.data.pageSize} total={callbacks.data.total} onPage={setPage} />
+          </>
         )}
       </CardContent>
 
@@ -210,6 +205,8 @@ export function CallbacksPage() {
             onSuccess: () => {
               toast.success('Callback cancelled');
               setCancelling(null);
+              // With a Pending/Overdue filter the row leaves the list: don't strand the user on an empty last page.
+              if (rows.length === 1 && page > 1) setPage(page - 1);
             },
           })
         }

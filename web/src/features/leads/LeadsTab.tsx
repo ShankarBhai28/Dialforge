@@ -1,6 +1,6 @@
-// All leads (latest 200 from the server), filtered in the browser, with edit
-// and delete.
-import { useMemo, useState, type FormEvent } from 'react';
+// All leads, searched, filtered and paged on the server (GET /admin/leads),
+// with edit and delete.
+import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import { BookUser, Pencil, Search, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -17,11 +17,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader } from '@/components/common';
+import { ConfirmDialog, EmptyState, Field, FormError, Pager, SectionHeader } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
 import { formatDateTime } from '@/lib/format';
+import { useDebouncedValue } from '@/lib/hooks';
 import { useCampaigns } from '@/features/campaigns/api';
-import { useDeleteLead, useDispositions, useLeads, useLists, useSaveLead, type Lead } from './api';
+import {
+  NO_LEAD_FILTERS,
+  useDeleteLead,
+  useDispositions,
+  useLeads,
+  useLists,
+  useSaveLead,
+  type Lead,
+  type LeadFilters,
+} from './api';
 import { DEFAULT_DISPOSITIONS, statusLabel } from './statuses';
 
 const muted = (text: string) => <span className="text-muted-foreground">{text}</span>;
@@ -137,43 +147,89 @@ function LeadDialog({ lead, onOpenChange }: { lead: Lead; onOpenChange: (open: b
 }
 
 export function LeadsTab() {
-  const leads = useLeads();
+  const campaigns = useCampaigns();
+  const lists = useLists();
   const remove = useDeleteLead();
   const [editing, setEditing] = useState<Lead | null>(null);
   const [deleting, setDeleting] = useState<Lead | null>(null);
-  const [search, setSearch] = useState('');
-  const [campaign, setCampaign] = useState('');
-  const [list, setList] = useState('');
-  const [status, setStatus] = useState('');
+  const [form, setForm] = useState<LeadFilters>(NO_LEAD_FILTERS);
 
-  // Filter choices come from the leads actually loaded.
-  const options = useMemo(() => {
-    const rows = leads.data ?? [];
-    const uniq = <T,>(pairs: [string, T][]) => [...new Map(pairs).entries()];
-    return {
-      campaigns: uniq(rows.map((l) => [String(l.campaign_id ?? ''), l.campaign_name ?? 'Unassigned'])),
-      lists: uniq(rows.filter((l) => l.list_id).map((l) => [String(l.list_id), l.list_name ?? `#${l.list_id}`])),
-      statuses: [...new Set(rows.map((l) => l.status))],
-    };
-  }, [leads.data]);
+  // Only the search box is debounced; the selects apply at once.
+  const q = useDebouncedValue(form.q.trim(), 300);
+  const filters: LeadFilters = { ...form, q };
+  const filtered = Object.values(form).some((v) => v.trim() !== '');
+  // The page belongs to one set of filters: any filter change means page 1.
+  const filtersKey = JSON.stringify(filters);
+  const [paging, setPaging] = useState({ key: filtersKey, page: 1 });
+  const page = paging.key === filtersKey ? paging.page : 1;
+  const setPage = (p: number) => setPaging({ key: filtersKey, page: p });
 
-  const shown = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return (leads.data ?? []).filter(
-      (l) =>
-        (!q || l.phone.includes(q) || (l.name ?? '').toLowerCase().includes(q)) &&
-        (campaign === '' || String(l.campaign_id ?? '') === campaign.slice(1)) &&
-        (list === '' || String(l.list_id) === list) &&
-        (status === '' || l.status === status),
-    );
-  }, [leads.data, search, campaign, list, status]);
+  const leads = useLeads(filters, page);
+  const rows = leads.data?.rows ?? [];
+
+  // Lists offered are those of the chosen campaign (a list belongs to one campaign).
+  const listOptions = (lists.data ?? []).filter((l) => !form.campaignId || form.campaignId === String(l.campaign_id));
+  // Statuses come from the server (within the chosen campaign); keep the
+  // current choice visible even if the new campaign has none of it.
+  const statuses = leads.data?.statuses ?? [];
+  const statusOptions = form.status && !statuses.includes(form.status) ? [form.status, ...statuses] : statuses;
 
   return (
     <>
       <SectionHeader
         title="All leads"
-        description="The latest 200 leads across every campaign. Add leads by importing a file into a list."
+        description="Every lead across all campaigns, newest first. Add leads by importing a file into a list."
       />
+      <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            aria-label="Search name or phone"
+            placeholder="Search name or phone"
+            className="pl-9"
+            value={form.q}
+            onChange={(e) => setForm((f) => ({ ...f, q: e.target.value }))}
+          />
+        </div>
+        <Select
+          aria-label="Filter by campaign"
+          value={form.campaignId}
+          // A list from another campaign would match nothing, so the list choice resets.
+          onChange={(e) => setForm((f) => ({ ...f, campaignId: e.target.value, listId: '' }))}
+        >
+          <option value="">All campaigns</option>
+          <option value="none">Unassigned</option>
+          {campaigns.data?.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </Select>
+        <Select
+          aria-label="Filter by list"
+          value={form.listId}
+          onChange={(e) => setForm((f) => ({ ...f, listId: e.target.value }))}
+        >
+          <option value="">All lists</option>
+          {listOptions.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.name}
+            </option>
+          ))}
+        </Select>
+        <Select
+          aria-label="Filter by status"
+          value={form.status}
+          onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
+        >
+          <option value="">All statuses</option>
+          {statusOptions.map((s) => (
+            <option key={s} value={s}>
+              {statusLabel(s)}
+            </option>
+          ))}
+        </Select>
+      </div>
       {leads.isPending ? (
         <div className="space-y-2">
           {[0, 1, 2].map((i) => (
@@ -182,51 +238,15 @@ export function LeadsTab() {
         </div>
       ) : leads.error ? (
         <ErrorState message={leads.error.message} onRetry={() => leads.refetch()} />
-      ) : leads.data.length === 0 ? (
+      ) : leads.data.total === 0 && !filtered ? (
         <EmptyState icon={BookUser} title="No leads yet">
           Create a list, then import an .xlsx or .csv file into it.
         </EmptyState>
       ) : (
         <>
-          <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="relative">
-              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                aria-label="Search name or phone"
-                placeholder="Search name or phone"
-                className="pl-9"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            {/* "c" prefix: an empty campaign id (Unassigned) must differ from "all" */}
-            <Select aria-label="Filter by campaign" value={campaign} onChange={(e) => setCampaign(e.target.value)}>
-              <option value="">All campaigns</option>
-              {options.campaigns.map(([id, label]) => (
-                <option key={id} value={`c${id}`}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-            <Select aria-label="Filter by list" value={list} onChange={(e) => setList(e.target.value)}>
-              <option value="">All lists</option>
-              {options.lists.map(([id, label]) => (
-                <option key={id} value={id}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-            <Select aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="">All statuses</option>
-              {options.statuses.map((s) => (
-                <option key={s} value={s}>
-                  {statusLabel(s)}
-                </option>
-              ))}
-            </Select>
-          </div>
           <p className="mb-2 text-xs text-muted-foreground">
-            Showing {shown.length} of {leads.data.length}
+            {leads.data.total.toLocaleString('en-IN')} {leads.data.total === 1 ? 'lead' : 'leads'}
+            {filtered && ' match these filters'}
           </p>
           <Table>
             <TableHeader>
@@ -242,14 +262,14 @@ export function LeadsTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {shown.length === 0 ? (
+              {rows.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="py-6 text-center text-muted-foreground">
                     No leads match these filters.
                   </TableCell>
                 </TableRow>
               ) : (
-                shown.map((l) => (
+                rows.map((l) => (
                   <TableRow key={l.id}>
                     <TableCell className="font-semibold">{l.name || muted('—')}</TableCell>
                     <TableCell className="tabular-nums">{l.phone}</TableCell>
@@ -277,6 +297,7 @@ export function LeadsTab() {
               )}
             </TableBody>
           </Table>
+          <Pager page={page} pageSize={leads.data.pageSize} total={leads.data.total} onPage={setPage} />
         </>
       )}
 
@@ -301,6 +322,8 @@ export function LeadsTab() {
             onSuccess: () => {
               toast.success('Lead deleted');
               setDeleting(null);
+              // Deleting the last row of the last page: step back so the table isn't empty.
+              if (rows.length === 1 && page > 1) setPage(page - 1);
             },
           })
         }

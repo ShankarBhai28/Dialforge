@@ -1,7 +1,10 @@
 const express = require('express');
 const pool = require('../../db');
+const { normalizePhone } = require('../../dialer-common');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { findCurrentCampaign } = require('../services/agents');
+
+const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
 
 const router = express.Router();
 
@@ -26,19 +29,42 @@ router.get('/agent/callbacks', requireAuth, async (req, res) => {
   res.json(rows);
 });
 
+// ?status= pending|overdue|done|cancelled &campaignId= &q= (lead name or phone) &page= &pageSize=
 router.get('/admin/callbacks', requireRole('admin'), async (req, res) => {
-  const [rows] = await pool.query(`
-    SELECT cb.id, cb.callback_at, cb.status, cb.note, l.name, l.phone, c.name AS campaign_name,
-      u.username AS assigned_to, cu.username AS created_by_name
-    FROM callbacks cb
+  const paging = parsePaging(req.query);
+  const { status, campaignId, q } = req.query;
+  const digits = normalizePhone(q || '');
+  const where = whereClause([
+    [
+      status === 'overdue'
+        ? "cb.status = 'pending' AND cb.callback_at <= NOW()"
+        : ['pending', 'done', 'cancelled'].includes(status)
+          ? 'cb.status = ?'
+          : '',
+      status === 'overdue' ? [] : [status],
+    ],
+    [campaignId ? 'cb.campaign_id = ?' : '', [campaignId]],
+    [
+      q ? `(l.name LIKE ?${digits ? ' OR l.phone LIKE ?' : ''})` : '',
+      q ? [likeTerm(q.trim()), ...(digits ? [likeTerm(digits)] : [])] : [],
+    ],
+  ]);
+  const from = `FROM callbacks cb
     JOIN leads l ON l.id = cb.lead_id
     LEFT JOIN campaigns c ON c.id = cb.campaign_id
     LEFT JOIN users u ON u.id = cb.user_id
     JOIN users cu ON cu.id = cb.created_by
-    ORDER BY cb.status = 'pending' DESC, cb.callback_at
-    LIMIT 300
-  `);
-  res.json(rows);
+    ${where.sql}`;
+  const [rows] = await pool.query(
+    `SELECT cb.id, cb.callback_at, cb.status, cb.note, cb.campaign_id, l.name, l.phone, c.name AS campaign_name,
+      u.username AS assigned_to, cu.username AS created_by_name
+     ${from}
+     ORDER BY cb.status = 'pending' DESC, cb.callback_at
+     LIMIT ? OFFSET ?`,
+    [...where.params, paging.pageSize, paging.offset],
+  );
+  const [[count]] = await pool.query(`SELECT COUNT(*) AS n ${from}`, where.params);
+  res.json(pageResult(rows, count.n, paging));
 });
 
 router.post('/admin/callbacks/:id/cancel', requireRole('admin'), async (req, res) => {

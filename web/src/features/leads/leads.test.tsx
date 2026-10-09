@@ -38,38 +38,41 @@ const LISTS = {
   ],
 };
 
-const LEADS = {
-  body: [
-    {
-      id: 31,
-      phone: '9840012345',
-      alt_phone: null,
-      name: 'Ravi Kumar',
-      campaign_id: 1,
-      campaign_name: 'Predictive_Test',
-      list_id: 7,
-      list_name: 'October cold',
-      status: 'no_answer',
-      attempts: 2,
-      priority: 0,
-      created_at: '2026-10-03T10:00:00.000Z',
-    },
-    {
-      id: 32,
-      phone: '9840099999',
-      alt_phone: null,
-      name: null,
-      campaign_id: null,
-      campaign_name: null,
-      list_id: null,
-      list_name: null,
-      status: 'new',
-      attempts: 0,
-      priority: 0,
-      created_at: '2026-10-04T10:00:00.000Z',
-    },
-  ],
+const RAVI = {
+  id: 31,
+  phone: '9840012345',
+  alt_phone: null,
+  name: 'Ravi Kumar',
+  campaign_id: 1,
+  campaign_name: 'Predictive_Test',
+  list_id: 7,
+  list_name: 'October cold',
+  status: 'no_answer',
+  attempts: 2,
+  priority: 0,
+  created_at: '2026-10-03T10:00:00.000Z',
 };
+const UNASSIGNED = {
+  id: 32,
+  phone: '9840099999',
+  alt_phone: null,
+  name: null,
+  campaign_id: null,
+  campaign_name: null,
+  list_id: null,
+  list_name: null,
+  status: 'new',
+  attempts: 0,
+  priority: 0,
+  created_at: '2026-10-04T10:00:00.000Z',
+};
+
+/** GET /admin/leads reply: one page plus the statuses for the filter. */
+const page = (rows: unknown[], { total = rows.length, page = 1, statuses = ['new', 'no_answer'] } = {}) => ({
+  body: { rows, total, page, pageSize: 50, statuses },
+});
+const FIRST = 'GET /admin/leads?page=1&pageSize=50';
+const LEADS = page([RAVI, UNASSIGNED]);
 
 /** fakeApi JSON-parses request bodies; the import sends FormData, so record those separately. */
 function fakeApiWithUploads(table: FakeApi) {
@@ -86,7 +89,7 @@ function fakeApiWithUploads(table: FakeApi) {
   return { calls, uploads };
 }
 
-const base = { 'GET /admin/lists': LISTS, 'GET /admin/campaigns': CAMPAIGNS, 'GET /leads': LEADS };
+const base = { 'GET /admin/lists': LISTS, 'GET /admin/campaigns': CAMPAIGNS, [FIRST]: LEADS };
 
 describe('Leads & Lists - lists', () => {
   it('shows lists with dialable counts and dialer state', async () => {
@@ -228,16 +231,80 @@ describe('Leads & Lists - recycle', () => {
 });
 
 describe('Leads & Lists - leads', () => {
-  it('shows leads and filters them', async () => {
+  it('shows leads', async () => {
     fakeApi(base);
     renderPage(<LeadsPage />);
     await userEvent.click(await screen.findByRole('tab', { name: 'Leads' }));
     const row = (await screen.findByText('Ravi Kumar')).closest('tr')!;
     expect(within(row).getByText('No Answer')).toBeInTheDocument();
     expect(within(screen.getByText('9840099999').closest('tr')!).getByText('Unassigned')).toBeInTheDocument();
+    expect(screen.getByText('2 leads')).toBeInTheDocument();
+  });
+
+  it('sends search and filters to the server, starting at page 1', async () => {
+    const calls = fakeApi({
+      ...base,
+      [FIRST]: page([RAVI, UNASSIGNED], { total: 120 }),
+      'GET /admin/leads?page=2&pageSize=50': page([RAVI], { total: 120, page: 2 }),
+      'GET /admin/leads?campaignId=1&page=1&pageSize=50': page([RAVI], { statuses: ['no_answer'] }),
+      'GET /admin/leads?campaignId=1&listId=7&page=1&pageSize=50': page([RAVI], { statuses: ['no_answer'] }),
+      'GET /admin/leads?campaignId=1&listId=7&status=no_answer&page=1&pageSize=50': page([RAVI], {
+        statuses: ['no_answer'],
+      }),
+      'GET /admin/leads?q=99999&page=1&pageSize=50': page([UNASSIGNED]),
+      'GET /admin/leads?campaignId=none&page=1&pageSize=50': page([UNASSIGNED]),
+    });
+    renderPage(<LeadsPage />);
+    await userEvent.click(await screen.findByRole('tab', { name: 'Leads' }));
+    await screen.findByText('Ravi Kumar');
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(screen.queryByText('9840099999')).not.toBeInTheDocument());
+
+    // picking a campaign narrows the list choices to that campaign's lists
+    await userEvent.selectOptions(screen.getByLabelText('Filter by campaign'), 'Predictive_Test');
+    expect(within(screen.getByLabelText('Filter by list')).queryByRole('option', { name: 'Referrals' })).toBeNull();
+    await userEvent.selectOptions(screen.getByLabelText('Filter by list'), 'October cold');
+    await userEvent.selectOptions(screen.getByLabelText('Filter by status'), 'No Answer');
+    await waitFor(() =>
+      expect(calls.at(-1)?.key).toBe('GET /admin/leads?campaignId=1&listId=7&status=no_answer&page=1&pageSize=50'),
+    );
+
+    // "Unassigned" is campaignId=none; changing campaign resets the list
+    await userEvent.selectOptions(screen.getByLabelText('Filter by status'), '');
+    await userEvent.selectOptions(screen.getByLabelText('Filter by campaign'), 'Unassigned');
+    expect(screen.getByLabelText('Filter by list')).toHaveValue('');
+    await waitFor(() => expect(screen.queryByText('Ravi Kumar')).not.toBeInTheDocument());
+
+    await userEvent.selectOptions(screen.getByLabelText('Filter by campaign'), '');
     await userEvent.type(screen.getByLabelText('Search name or phone'), '99999');
+    await waitFor(() => expect(calls.at(-1)?.key).toBe('GET /admin/leads?q=99999&page=1&pageSize=50'));
+    expect(await screen.findByText('9840099999')).toBeInTheDocument();
     expect(screen.queryByText('Ravi Kumar')).not.toBeInTheDocument();
-    expect(screen.getByText('9840099999')).toBeInTheDocument();
+    // every filtered request asked for page 1
+    expect(
+      calls.filter(
+        (c) =>
+          c.key.startsWith('GET /admin/leads?') &&
+          /(q|campaignId|listId|status)=/.test(c.key) &&
+          !c.key.includes('page=1&'),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('asks the server for the next page', async () => {
+    const calls = fakeApi({
+      ...base,
+      [FIRST]: page([RAVI], { total: 51 }),
+      'GET /admin/leads?page=2&pageSize=50': page([UNASSIGNED], { total: 51, page: 2 }),
+    });
+    renderPage(<LeadsPage />);
+    await userEvent.click(await screen.findByRole('tab', { name: 'Leads' }));
+    await screen.findByText('Ravi Kumar');
+    expect(screen.getByText('1–50 of 51')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('9840099999')).toBeInTheDocument();
+    expect(screen.queryByText('Ravi Kumar')).not.toBeInTheDocument();
+    expect(calls.some((c) => c.key === 'GET /admin/leads?page=2&pageSize=50')).toBe(true);
   });
 
   it('edits a lead: picking a list also sets its campaign', async () => {
@@ -267,6 +334,19 @@ describe('Leads & Lists - leads', () => {
       listId: 8,
       status: 'sale',
     });
+    // the leads table reloads after the edit
+    await waitFor(() => expect(calls.filter((c) => c.key === FIRST)).toHaveLength(2));
+  });
+
+  it('deletes a lead and reloads the table', async () => {
+    const calls = fakeApi({ ...base, 'DELETE /admin/leads/31': { body: { status: 'ok' } } });
+    renderPage(<LeadsPage />);
+    await userEvent.click(await screen.findByRole('tab', { name: 'Leads' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete 9840012345' }));
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(calls.some((c) => c.key === 'DELETE /admin/leads/31')).toBe(true);
+    await waitFor(() => expect(calls.filter((c) => c.key === FIRST)).toHaveLength(2));
   });
 
   it("shows the server's reason when a lead can't be deleted", async () => {
@@ -286,7 +366,7 @@ describe('Leads & Lists - leads', () => {
   });
 
   it('shows an error state with retry when leads fail to load', async () => {
-    fakeApi({ ...base, 'GET /leads': { status: 500, body: { error: 'database is down' } } });
+    fakeApi({ ...base, [FIRST]: { status: 500, body: { error: 'database is down' } } });
     renderPage(<LeadsPage />);
     await userEvent.click(await screen.findByRole('tab', { name: 'Leads' }));
     expect(await screen.findByText('database is down')).toBeInTheDocument();
