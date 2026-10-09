@@ -104,7 +104,10 @@ Set up: two agents logged in and **Available** (e.g. agent04 on 1003 + agent1001
 Same setup as above: two agents in **two different browsers** (or one normal + one incognito), your mobile as the customer. Each agent logs in at `https://dialforge.ddnsfree.com:3000/app`.
 - [ ] Login as an agent → **Connect your line** → enter the extension → Connect → the workbench opens (tiles, leads, dialpad). Refresh the page (F5) → it reconnects by itself.
 - [ ] Second agent tries the **same** extension while the first is connected → refused with "in use by …". (Use a different extension each.)
-- [ ] Status pill → **Available** → queue picker → pick the queue → pill turns green "Available - <queue>". Break → Lunch → amber "Lunch".
+- [ ] Status pill → **Available** → queue picker → pick the queue → pill turns green "Available - <queue>". Break → Lunch → amber "Lunch". The menu items are readable (dark text on white).
+- [ ] **Dialpad** → type your mobile → Call → answer → hang up → the **Call outcome** dialog opens (now for every answered call, not only lead calls) → pick one → Leads shows the number as a lead with that status.
+- [ ] Call an inbound DID from a number that isn't a lead → answer → hang up → the outcome dialog opens.
+- [ ] **Call history** (right column) → the green phone button on a row → that number is dialled.
 - [ ] Click a lead → details + form open in the middle → **Call** → your mobile rings (the browser line is answered by itself) → panel says "Ringing customer…" → answer the mobile → **Live call** + timer.
 - [ ] In the call: **Mute** (red warning; mobile can't hear you) → Unmute. **Hold** → mobile hears music → Resume. **Keypad** → tones heard.
 - [ ] Fill the form → **Save Form** → "Form saved." Hang up → **Call outcome** dialog → pick one → it closes. Try **Callback** once → pick a time → it appears under Callbacks.

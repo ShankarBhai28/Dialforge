@@ -85,10 +85,11 @@ router.get('/agent/active-call', requireAuth, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const [rows] = await pool.query(
     `
-    SELECT c.id AS call_id, c.lead_id, l.name, l.phone, l.alt_phone, l.status, l.attempts, l.custom_data, ls.name AS list_name,
+    SELECT c.id AS call_id, c.lead_id, l.name, COALESCE(l.phone, c.to_number) AS phone, l.alt_phone, l.status,
+      l.attempts, l.custom_data, ls.name AS list_name,
       (c.from_extension = ?) AS owner, (c.dial_attempt_id IS NOT NULL) AS from_dialer
     FROM calls c
-    JOIN leads l ON l.id = c.lead_id
+    LEFT JOIN leads l ON l.id = c.lead_id
     LEFT JOIN lists ls ON ls.id = l.list_id
     WHERE (c.from_extension = ? OR c.transfer_ext = ?) AND c.end_time IS NULL
       AND c.start_time > NOW() - INTERVAL 3 HOUR

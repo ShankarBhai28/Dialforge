@@ -69,7 +69,7 @@ function StatusMenu({ stats }: { stats: AgentStats | undefined }) {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-40 mt-2 w-56 overflow-hidden rounded-lg border bg-card py-1 shadow-xl"
+          className="absolute right-0 z-40 mt-2 w-56 overflow-hidden rounded-lg border bg-card py-1 text-card-foreground shadow-xl"
         >
           <button role="menuitem" className={item} onClick={() => choose('available')}>
             <span className="size-2 rounded-full bg-status-available" /> Available

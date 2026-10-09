@@ -61,6 +61,7 @@ function Dialpad() {
 type Filter = 'all' | 'ended' | 'none';
 
 function CallHistory() {
+  const { controller } = useController();
   const calls = useAgentCalls();
   const [filter, setFilter] = useState<Filter>('all');
   const rows = (calls.data ?? []).filter((c) =>
@@ -104,6 +105,18 @@ function CallHistory() {
                       </span>
                     </div>
                   </div>
+                  {c.to_number && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 shrink-0 text-status-available hover:bg-status-available/10"
+                      aria-label={`Call ${c.to_number}`}
+                      title={`Call ${c.to_number}`}
+                      onClick={() => void controller.callLead(null, c.to_number)}
+                    >
+                      <Phone />
+                    </Button>
+                  )}
                 </li>
               );
             })}

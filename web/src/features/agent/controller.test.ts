@@ -1,5 +1,5 @@
 // The agent call workflow against a fake phone line and a fake backend.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
 import { fakeApi, type FakeApi } from '@/test/render';
 import { AgentController } from './controller';
@@ -87,9 +87,9 @@ describe('click-to-call', () => {
     expect(t.state().call?.talkStartedAt).toBeTypeOf('number');
 
     s.remoteHangup();
-    expect(t.state().outcomeFor).toEqual(LEAD);
+    expect(t.state().outcomeFor).toEqual({ leadId: 7, callId: 42, name: 'Ravi', phone: '9840012345' });
 
-    await t.controller.saveOutcome(7, 'interested');
+    await t.controller.saveOutcome(t.state().outcomeFor!, 'interested');
     expect(t.state().outcomeFor).toBeNull();
     await settle();
     // Progressive campaign: back to Available by itself after wrap-up (here 0 s).
@@ -161,7 +161,7 @@ describe('queue / dialer calls', () => {
     expect(t.state().workspace).toMatchObject({ callId: 55, contextText: 'Meena (9876543210)' });
     expect(t.state().workspace.lead).toMatchObject({ id: 9, custom_data: { amount: 5000 } });
     s.remoteHangup();
-    expect(t.state().outcomeFor?.id).toBe(9);
+    expect(t.state().outcomeFor?.leadId).toBe(9);
   });
 
   it('without auto-answer: popup, then Accept answers', async () => {
@@ -202,7 +202,82 @@ describe('queue / dialer calls', () => {
     await settle();
     expect(t.state().call?.kind).toBe('Transferred call');
     s.remoteHangup();
-    expect(t.state().outcomeFor?.id).toBe(9);
+    expect(t.state().outcomeFor?.leadId).toBe(9);
+  });
+});
+
+describe('every answered call gets an outcome', () => {
+  it('a number typed on the dialpad (no lead): the outcome is saved on the call', async () => {
+    const t = setup({
+      'POST /calls/click2call': { status: 202, body: { callId: 43, status: 'ringing_agent' } },
+      'GET /agent/call-state/43': { body: { answered: true, ended: false } },
+      'POST /agent/calls/43/disposition': { body: { status: 'ok', leadId: 80 } },
+      'GET /agent/campaign-info': { body: null },
+    });
+    await t.controller.callLead(null, '9000000001');
+    const s = t.ua.ring(new FakeSession('1003'));
+    s.up();
+    await settle();
+    s.remoteHangup();
+    expect(t.state().outcomeFor).toEqual({ leadId: null, callId: 43, name: null, phone: '9000000001' });
+    await t.controller.saveOutcome(t.state().outcomeFor!, 'not_interested');
+    expect(t.calls.find((c) => c.key === 'POST /agent/calls/43/disposition')?.body).toEqual({
+      status: 'not_interested',
+    });
+    expect(t.state().outcomeFor).toBeNull();
+  });
+
+  it('an inbound caller who is not a lead: screen pop gives the call, outcome on the call', async () => {
+    const t = setup({
+      'GET /agent/call-policy': { body: { autoAnswer: true } },
+      'GET /agent/active-call': {
+        body: {
+          ...ACTIVE,
+          lead_id: null,
+          name: null,
+          status: null,
+          attempts: null,
+          custom_data: null,
+          from_dialer: false,
+        },
+      },
+    });
+    const s = t.ua.ring(new FakeSession('9876543210'));
+    await settle();
+    s.up();
+    await settle();
+    expect(t.state().workspace).toMatchObject({ lead: null, callId: 55 });
+    s.remoteHangup();
+    expect(t.state().outcomeFor).toEqual({ leadId: null, callId: 55, name: null, phone: '9876543210' });
+  });
+
+  it('screen pop found nothing: the call is matched by number from our call history', async () => {
+    const t = setup({
+      'GET /agent/call-policy': { body: { autoAnswer: true } },
+      'GET /agent/active-call': { body: null },
+      'GET /calls': {
+        body: [
+          { id: 61, to_number: '919876543210' },
+          { id: 60, to_number: '9000000001' },
+        ],
+      },
+    });
+    const s = t.ua.ring(new FakeSession('9876543210'));
+    await settle();
+    s.up();
+    await settle();
+    s.remoteHangup();
+    await vi.waitFor(() => expect(t.state().outcomeFor).toMatchObject({ leadId: null, callId: 61 }));
+  });
+
+  it('a call that was never answered gets no outcome', async () => {
+    const t = setup({ 'GET /agent/call-policy': { body: { autoAnswer: false } } });
+    const s = t.ua.ring(new FakeSession('9876543210'));
+    await settle();
+    t.controller.reject();
+    s.remoteHangup();
+    await settle();
+    expect(t.state().outcomeFor).toBeNull();
   });
 });
 

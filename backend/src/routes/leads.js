@@ -98,7 +98,6 @@ router.post('/leads', requireAuth, async (req, res) => {
 // disposition config: final (lead done), retry after N minutes, schedule a
 // callback, and/or add the number to the DNC list (click2call then refuses it).
 router.post('/leads/:id/disposition', requireAuth, async (req, res) => {
-  const { status, callbackAt, callbackMine, note } = req.body;
   const [leadRows] = await pool.query('SELECT id, phone, campaign_id FROM leads WHERE id = ?', [req.params.id]);
   const lead = leadRows[0];
   if (!lead) return res.status(404).json({ error: 'lead not found' });
@@ -108,6 +107,57 @@ router.post('/leads/:id/disposition', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'that lead is not in your current campaign' });
     }
   }
+  return saveDisposition(req, res, lead);
+});
+
+// --- Outcome of a call that has no lead (a number typed on the dialpad, an
+// unknown inbound caller): every call gets an outcome. The number becomes a
+// lead in the call's campaign - or the lead already there with that number
+// is used - the call is linked to it, and the outcome is saved on it like
+// any lead's. Only the agent who had the call may do this.
+router.post('/agent/calls/:callId/disposition', requireAuth, async (req, res) => {
+  const ext = req.session.user.extensionName;
+  const [callRows] = await pool.query(
+    'SELECT id, lead_id, to_number, campaign_id FROM calls WHERE id = ? AND (from_extension = ? OR transfer_ext = ?)',
+    [req.params.callId, ext, ext],
+  );
+  const call = callRows[0];
+  if (!call) return res.status(404).json({ error: 'call not found' });
+  if (call.lead_id) {
+    const [rows] = await pool.query('SELECT id, phone, campaign_id FROM leads WHERE id = ?', [call.lead_id]);
+    if (rows[0]) return saveDisposition(req, res, rows[0]);
+  }
+  let campaignId = call.campaign_id;
+  if (!campaignId && req.session.user.role === 'agent') {
+    const campaign = await findCurrentCampaign(req.session.user.id);
+    campaignId = campaign ? campaign.id : null;
+  }
+  const phone = normalizePhone(call.to_number);
+  if (!phone) return res.status(400).json({ error: 'this call has no number to save the outcome on' });
+  // Check the outcome before creating anything, so a bad request leaves no lead behind.
+  const codes = (await getDispositions(campaignId)).map((x) => x.code);
+  if (!codes.includes(req.body.status))
+    return res.status(400).json({ error: `status must be one of: ${codes.join(', ')}` });
+
+  const [existing] = await pool.query(
+    'SELECT id, phone, campaign_id FROM leads WHERE phone = ? AND campaign_id <=> ? ORDER BY id DESC LIMIT 1',
+    [phone, campaignId],
+  );
+  let lead = existing[0];
+  if (!lead) {
+    const [result] = await pool.query('INSERT INTO leads (tenant_id, phone, campaign_id) VALUES (1, ?, ?)', [
+      phone,
+      campaignId,
+    ]);
+    lead = { id: result.insertId, phone, campaign_id: campaignId };
+  }
+  await pool.query('UPDATE calls SET lead_id = ? WHERE id = ? AND lead_id IS NULL', [lead.id, call.id]);
+  return saveDisposition(req, res, lead);
+});
+
+/** Applies the agent's outcome to a lead (shared by both routes above). */
+async function saveDisposition(req, res, lead) {
+  const { status, callbackAt, callbackMine, note } = req.body;
   const dispositions = await getDispositions(lead.campaign_id);
   const d = dispositions.find((x) => x.code === status);
   if (!d)
@@ -161,8 +211,8 @@ router.post('/leads/:id/disposition', requireAuth, async (req, res) => {
     conn.release();
   }
   if (d.marks_dnc) await addDnc(lead.phone, 'disposition', req.session.user.id);
-  res.json({ status: 'ok' });
-});
+  res.json({ status: 'ok', leadId: lead.id });
+}
 
 // --- Admin: full lead edit/delete (distinct from the agent-facing
 // disposition endpoint above, which only ever touches status) ---

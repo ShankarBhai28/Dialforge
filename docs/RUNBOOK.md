@@ -1276,3 +1276,13 @@ The user tested manual dialling on the new agent screen and reported a delay, wi
 - **Screen:** the Edit lead dialog shows a "Form: <name>" section with the campaign form's fields, plus a read-only line for saved values not on the form. The inputs are now one shared component (`features/forms/FieldInput.tsx`) used by both this dialog and the agent's call form.
 - No DB change. Tests: 64 backend, 136 web.
 - **This closes the follow-up list** from the rebuild (`docs/APP_REBUILD_PLAN.md`).
+
+## Agent screen fixes from testing (2026-10-10)
+Reported by the user after trying the agent panel:
+- **Status menu unreadable:** the Available / Break menu sits inside the dark top bar and inherited its white text, so items were white on white. The menu now sets its own text colour (`text-card-foreground`).
+- **Outcome after every call:** the outcome dialog only opened for calls with a lead (lead list, dialer, known inbound). Now every *answered* call of ours gets it; rejected / missed calls and a colleague's transfer offer still don't.
+  - New `POST /agent/calls/:callId/disposition` (only the agent who had the call): if the call has a lead, the outcome goes on it. Otherwise the number becomes a lead in the call's campaign (or the existing lead with that number there is used), the call is linked to it (`calls.lead_id`), and the outcome is saved the same way as `/leads/:id/disposition` (shared `saveDisposition`). A bad status is refused before anything is created.
+  - `/agent/active-call` now also returns calls without a lead (LEFT JOIN; phone falls back to the call's number), so an unknown inbound caller gets the call id from screen pop. If screen pop finds nothing, the screen matches the number in the agent's call history.
+  - The dialog shows a retry instead of an empty list if the outcomes can't load (it can't be closed without an outcome).
+- **Redial from call history:** each row in Call history has a green phone button that dials that number (`to_number` is the customer for inbound and outbound).
+- Tests: 64 backend, 142 web.

@@ -80,14 +80,15 @@ export type PreviewState = {
 };
 
 /** GET /agent/active-call - the lead call the agent is on (dialer, transfer). */
+/** The lead fields are null when the call has no lead (phone is then the call's number). */
 export type ActiveCall = {
   call_id: number;
-  lead_id: number;
+  lead_id: number | null;
   name: string | null;
   phone: string;
   alt_phone: string | null;
-  status: string;
-  attempts: number;
+  status: string | null;
+  attempts: number | null;
   custom_data: Record<string, unknown> | null;
   list_name: string | null;
   /** false while a colleague is still consulting us about it */

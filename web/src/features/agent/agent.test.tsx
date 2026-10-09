@@ -101,6 +101,39 @@ describe('agent screen', () => {
     expect(uas.last().options).toMatchObject({ extension: '1003' });
   });
 
+  it('call history: the call button dials that number again', async () => {
+    const { calls } = await connect(
+      backend({
+        'GET /calls': {
+          body: [
+            {
+              id: 5,
+              direction: 'inbound',
+              to_number: '9840012345',
+              start_time: '2026-10-09T05:00:00.000Z',
+              disposition: 'ended',
+            },
+          ],
+        },
+        'POST /calls/click2call': { status: 202, body: { callId: 44, status: 'ringing_agent' } },
+      }),
+    );
+    await userEvent.click(await screen.findByRole('button', { name: 'Call 9840012345' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.key === 'POST /calls/click2call')?.body).toEqual({
+        toNumber: '9840012345',
+        leadId: null,
+      }),
+    );
+  });
+
+  it('status menu items use the menu text colour, not the top bar white', async () => {
+    await connect(backend());
+    await userEvent.click(await screen.findByRole('button', { name: /available - support queue/i }));
+    expect(screen.getByRole('menu')).toHaveClass('text-card-foreground');
+    expect(screen.getByRole('menuitem', { name: /break — lunch/i })).toBeInTheDocument();
+  });
+
   it('a busy extension: shows why it was refused', async () => {
     fakeApi(
       backend({

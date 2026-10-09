@@ -8,8 +8,10 @@
 //   campaign); once answered, ask the server which lead it is (screen pop).
 // - A colleague consulting us: shown as an offer until they complete the
 //   transfer, then it becomes our call.
-// - When a lead call ends: the outcome dialog. After saving it, auto-dial
-//   campaigns put the agent back to Available after the wrap-up time.
+// - When any answered call of ours ends: the outcome dialog (calls without
+//   a lead save it on the call; the server makes the number a lead). After
+//   saving it, auto-dial campaigns put the agent back to Available after
+//   the wrap-up time.
 // - Preview campaigns: claim the next lead whenever the agent is free.
 import { ApiError, get, post } from '@/lib/api';
 import type { QueryClient } from '@tanstack/react-query';
@@ -26,6 +28,9 @@ export type CallInfo = {
   /** When talk time starts (customer answered) - may be later than the SIP answer. */
   talkStartedAt: number | null;
 };
+
+/** The call whose outcome the agent gives: on its lead, or on the call when there's no lead yet. */
+export type OutcomeTarget = { leadId: number | null; callId: number | null; name: string | null; phone: string };
 
 export type Workspace = {
   /** Lead whose details + form are open (null = form without a lead). */
@@ -46,8 +51,8 @@ export type ControllerState = {
   incoming: { number: string; name: string } | null;
   call: CallInfo | null;
   workspace: Workspace;
-  /** Lead whose call just ended - the outcome dialog is open for it. */
-  outcomeFor: Lead | null;
+  /** Call that just ended - the outcome dialog is open for it. */
+  outcomeFor: OutcomeTarget | null;
   message: { text: string; error: boolean } | null;
   preview: PreviewState;
   previewBusy: boolean;
@@ -84,8 +89,9 @@ export class AgentController {
 
   // Workflow flags (not shown on screen).
   private expectingOwnLeg = false;
-  /** Lead that gets the outcome dialog when the current call ends. */
-  private outcomeLead: Lead | null = null;
+  /** What gets the outcome dialog when the current call ends (if it was answered). */
+  private outcomeTarget: OutcomeTarget | null = null;
+  private callAnswered = false;
   private pendingCall: CallInfo | null = null;
   private watchingCallId: number | null = null;
   private wrapupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -148,7 +154,13 @@ export class AgentController {
         this.phone.answer();
         return;
       }
-      this.outcomeLead = null;
+      // Every answered call gets an outcome; screen pop adds the call id and lead.
+      this.outcomeTarget = {
+        leadId: null,
+        callId: null,
+        name: e.call.remote.name || null,
+        phone: e.call.remote.number,
+      };
       this.set({ call: { ...this.callFromRemote(e.call.remote), kind: 'Incoming call' } });
       let autoAnswer = false;
       try {
@@ -162,6 +174,7 @@ export class AgentController {
       return;
     }
     if (e.type === 'answered') {
+      this.callAnswered = true;
       this.set({ incoming: null });
       const call = this.state.call;
       if (call && !call.callId && call.kind === 'Incoming call') {
@@ -175,13 +188,31 @@ export class AgentController {
     }
     // ended
     this.watchingCallId = null;
+    const target = this.outcomeTarget;
+    const answered = this.callAnswered;
+    this.outcomeTarget = null;
+    this.callAnswered = false;
     this.set({ incoming: null, call: null });
-    if (this.outcomeLead) {
-      this.set({ outcomeFor: this.outcomeLead });
-      this.outcomeLead = null;
-      this.refresh('dispositions');
-    }
     this.refresh('calls', 'stats');
+    if (target && answered) {
+      const resolved = target.leadId || target.callId ? target : await this.findCall(target);
+      if (resolved) {
+        this.set({ outcomeFor: resolved });
+        this.refresh('dispositions');
+      }
+    }
+  }
+
+  /** Screen pop never learnt the call id: take it from our newest call to that number. */
+  private async findCall(target: OutcomeTarget): Promise<OutcomeTarget | null> {
+    const last10 = (n: string) => n.replace(/\D/g, '').slice(-10);
+    try {
+      const calls = await get<{ id: number; to_number: string | null }[]>('/calls');
+      const match = calls.find((c) => c.to_number && last10(c.to_number) === last10(target.phone));
+      return match ? { ...target, callId: match.id } : null;
+    } catch {
+      return null;
+    }
   }
 
   private callFromRemote(remote: { number: string; name: string }): CallInfo {
@@ -206,7 +237,7 @@ export class AgentController {
     if (this.phone.getSnapshot().call) return this.say('Finish the current call first.', true);
     this.say(`Calling ${phone}...`);
     this.expectingOwnLeg = true;
-    this.outcomeLead = lead;
+    this.outcomeTarget = { leadId: lead?.id ?? null, callId: null, name: lead?.name ?? null, phone };
     this.openWorkspace(lead, null, describe(lead ?? {}, phone));
     this.pendingCall = {
       number: phone,
@@ -222,6 +253,7 @@ export class AgentController {
         leadId: lead?.id ?? null,
       });
       this.set({ workspace: { ...this.state.workspace, callId } });
+      if (this.outcomeTarget && !this.outcomeTarget.callId) this.outcomeTarget = { ...this.outcomeTarget, callId };
       if (this.pendingCall) this.pendingCall = { ...this.pendingCall, callId };
       else if (this.state.call) {
         this.setCall({ callId });
@@ -232,7 +264,7 @@ export class AgentController {
     } catch (err) {
       this.say(`Call failed: ${(err as Error).message}`, true);
       this.pendingCall = null;
-      this.outcomeLead = null;
+      this.outcomeTarget = null;
       this.expectingOwnLeg = false;
     }
     setTimeout(() => this.refresh('calls', 'stats'), 2000);
@@ -260,7 +292,7 @@ export class AgentController {
     if (!waiting()) return;
     this.expectingOwnLeg = false;
     this.pendingCall = null;
-    this.outcomeLead = null;
+    this.outcomeTarget = null;
     this.say(endedMessage('agent_unanswered'), true);
     this.refresh('calls');
   }
@@ -297,18 +329,26 @@ export class AgentController {
         call = null;
       }
       if (!this.state.call) return;
-      if (call) {
-        const lead: Lead = { ...call, id: call.lead_id };
+      if (call?.call_id) {
+        const lead: Lead | null = call.lead_id ? { ...call, id: call.lead_id, status: call.status ?? 'new' } : null;
         this.openWorkspace(lead, call.call_id, describe(call, call.phone));
         const name = call.name ?? '';
+        const target: OutcomeTarget = {
+          leadId: call.lead_id,
+          callId: call.call_id,
+          name: call.name,
+          phone: call.phone,
+        };
         if (!call.owner) {
-          // A colleague is consulting us / adding us before handing it over.
+          // A colleague is consulting us / adding us before handing it over:
+          // their outcome, not ours, until the transfer completes.
+          this.outcomeTarget = null;
           this.setCall({ number: call.phone, name, kind: 'Transfer offered by a colleague', callId: call.call_id });
           this.say(`Transfer offered: ${name} ${call.phone}`.trim());
-          void this.waitForOwnership(call.call_id, lead);
+          void this.waitForOwnership(call.call_id, target);
           return;
         }
-        this.outcomeLead = lead;
+        this.outcomeTarget = target;
         this.setCall({
           number: call.phone,
           name,
@@ -325,7 +365,7 @@ export class AgentController {
   }
 
   /** Once the colleague completes the transfer the call is ours (and gets our outcome). */
-  private async waitForOwnership(callId: number, lead: Lead) {
+  private async waitForOwnership(callId: number, target: OutcomeTarget) {
     while (this.state.call) {
       await this.sleep(2000);
       if (!this.state.call) return;
@@ -337,7 +377,7 @@ export class AgentController {
       }
       if (!call || call.call_id !== callId) return;
       if (call.owner) {
-        this.outcomeLead = lead;
+        this.outcomeTarget = target;
         this.setCall({ kind: 'Transferred call' });
         this.say(`Transfer completed - ${call.name || call.phone} is now your call`);
         return;
@@ -438,11 +478,13 @@ export class AgentController {
 
   // --- Outcome (disposition) ---
   async saveOutcome(
-    leadId: number,
+    target: OutcomeTarget,
     status: string,
     extra?: { callbackAt: string; callbackMine: boolean; note: string },
   ) {
-    await post(`/leads/${leadId}/disposition`, { status, ...(extra ?? {}) });
+    const body = { status, ...(extra ?? {}) };
+    if (target.leadId) await post(`/leads/${target.leadId}/disposition`, body);
+    else await post(`/agent/calls/${target.callId}/disposition`, body);
     this.set({ outcomeFor: null });
     this.refresh('leads', 'callbacks');
     await this.scheduleAutoAvailable();
@@ -484,7 +526,7 @@ export class AgentController {
     return (
       status === 'available' &&
       !this.phone.getSnapshot().call &&
-      !this.outcomeLead &&
+      !this.outcomeTarget &&
       !this.state.outcomeFor &&
       !this.expectingOwnLeg
     );

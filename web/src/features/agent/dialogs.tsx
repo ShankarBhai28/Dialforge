@@ -18,6 +18,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { toDateTimeLocal } from '@/lib/format';
 import { useAgentDispositions, useAgentQueues, type Disposition } from './api';
 import { useController } from './AgentProvider';
+import type { OutcomeTarget } from './controller';
 import { startRingtone, stopRingtone } from './softphone/ringtone';
 
 /** Accept / Reject for calls in campaigns without auto-answer. Rings and flashes the tab title. */
@@ -117,26 +118,26 @@ export function QueuePickerDialog() {
 /** Suggested callback time, for <input type="datetime-local">. */
 const oneHourFromNow = () => toDateTimeLocal(Date.now() + 60 * 60 * 1000);
 
-/** After a lead call: what happened? Callback outcomes ask for a time. */
+/** After every answered call: what happened? Callback outcomes ask for a time. */
 export function OutcomeDialog() {
   const { controller, state } = useController();
-  const lead = state.outcomeFor;
+  const target = state.outcomeFor;
   const dispositions = useAgentDispositions();
   const [callbackFor, setCallbackFor] = useState<Disposition | null>(null);
   const [at, setAt] = useState('');
   const [note, setNote] = useState('');
   const [mine, setMine] = useState(true);
-  const [forLead, setForLead] = useState<number | null>(null);
+  const [forTarget, setForTarget] = useState<OutcomeTarget | null>(null);
   // A new outcome starts clean (adjusted during render).
-  if ((lead?.id ?? null) !== forLead) {
-    setForLead(lead?.id ?? null);
+  if (target !== forTarget) {
+    setForTarget(target);
     setCallbackFor(null);
     setNote('');
     setMine(true);
   }
   const save = useMutation({
     mutationFn: (v: { status: string; extra?: { callbackAt: string; callbackMine: boolean; note: string } }) =>
-      controller.saveOutcome(lead!.id, v.status, v.extra),
+      controller.saveOutcome(target!, v.status, v.extra),
     meta: { errorInline: true },
   });
 
@@ -159,7 +160,7 @@ export function OutcomeDialog() {
   }
 
   return (
-    <Dialog open={!!lead} onOpenChange={() => {}}>
+    <Dialog open={!!target} onOpenChange={() => {}}>
       <DialogContent
         size="sm"
         onEscapeKeyDown={(e) => e.preventDefault()}
@@ -167,11 +168,14 @@ export function OutcomeDialog() {
       >
         <DialogHeader>
           <DialogTitle>Call outcome</DialogTitle>
-          <DialogDescription>What happened on the call with {lead?.name || lead?.phone}?</DialogDescription>
+          <DialogDescription>What happened on the call with {target?.name || target?.phone}?</DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-2 pb-5">
           {dispositions.isPending ? (
             <Skeleton className="h-24" />
+          ) : dispositions.error ? (
+            // The dialog can't be closed without an outcome, so never leave it empty.
+            <ErrorState message={dispositions.error.message} onRetry={() => dispositions.refetch()} />
           ) : (
             (dispositions.data ?? []).map((d) => (
               <button
