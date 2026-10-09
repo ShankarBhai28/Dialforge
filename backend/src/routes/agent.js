@@ -8,6 +8,8 @@ const {
   setAgentStatus,
 } = require('../services/agents');
 const { getDispositions } = require('../services/dispositions');
+const { findOtherActiveHolder } = require('../services/extensionGuard');
+const { buildWebrtcConfig } = require('../services/webrtc');
 
 const router = express.Router();
 
@@ -195,6 +197,12 @@ router.get('/agent/extension-credentials/:extension', requireAuth, async (req, r
   if (!rows[0] || !rows[0].sip_password) {
     return res.status(404).json({ error: 'unknown extension' });
   }
+  const holder = await findOtherActiveHolder(rows[0].name, req.session.user.id);
+  if (holder) {
+    return res
+      .status(409)
+      .json({ error: `Extension ${rows[0].name} is in use by ${holder} right now - pick another one.` });
+  }
   // This is the moment the agent commits to an extension for this session -
   // everything downstream (queue membership, click2call's fromExtension,
   // stats, live-agents display) reads this session field, so it must match
@@ -203,6 +211,11 @@ router.get('/agent/extension-credentials/:extension', requireAuth, async (req, r
   req.session.user.extensionName = rows[0].name;
   req.session.user.extensionId = rows[0].id;
   res.json({ extension: rows[0].name, sipPassword: rows[0].sip_password });
+});
+
+// --- Agent: how the browser softphone reaches Asterisk (see services/webrtc.js) ---
+router.get('/agent/webrtc-config', requireAuth, (req, res) => {
+  res.json(buildWebrtcConfig(process.env, req.hostname));
 });
 
 module.exports = router;

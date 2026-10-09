@@ -17,7 +17,7 @@ import { UsersPage } from '@/features/users/UsersPage';
 import { TeamsPage } from '@/features/teams/TeamsPage';
 import { ReportsPage } from '@/features/reports/ReportsPage';
 import { ClassicScreenPage } from '@/features/placeholder/ClassicScreenPage';
-import { AgentHomePage } from '@/features/agent/AgentHomePage';
+import { AgentPage } from '@/features/agent/AgentPage';
 import { FullPageSpinner } from '@/components/FullPageSpinner';
 import { AdminLayout } from './AdminLayout';
 import { NotFoundPage } from './NotFoundPage';
@@ -69,7 +69,7 @@ export const routes: RouteObject[] = [
     path: '/agent',
     element: (
       <RequireRole role="agent">
-        <AgentHomePage />
+        <AgentPage />
       </RequireRole>
     ),
   },

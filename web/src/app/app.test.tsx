@@ -63,7 +63,7 @@ describe('login', () => {
   it('keeps agents out of admin screens', async () => {
     fakeApi({ 'GET /auth/me': { body: AGENT } });
     const { router } = renderAt('/admin/users');
-    expect(await screen.findByRole('link', { name: /open agent screen/i })).toHaveAttribute('href', '/agent.html');
+    expect(await screen.findByRole('heading', { name: /connect your line/i })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/agent');
   });
 });
