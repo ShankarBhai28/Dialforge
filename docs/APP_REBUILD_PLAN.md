@@ -90,7 +90,7 @@ Backend gaps the new screens work around. None of them blocks the switchover.
 
 **Security / correctness**
 - `GET /agent/extension-credentials/:extension` gives any logged-in agent the SIP password of *any* extension. It should only answer for the extension the agent is connecting with.
-- `POST /admin/users` doesn't check that the extension exists or is free. Users can't be edited or deleted, and there is no password reset or role change.
+- ~~Users can't be edited, no password reset~~ — **done 2026-10-09**: edit role and extension, reset password, deactivate (no delete, by design), and create checks that the extension exists.
 - Team create/update don't validate member and campaign ids, so a bad id becomes a generic "failed to save team".
 - `POST /admin/lists` with an unknown campaign gives a raw 500 (foreign-key error).
 - `PUT /admin/leads/:id` doesn't check that the list belongs to the chosen campaign, and can't edit `alt_phone`, `priority` or `custom_data`.

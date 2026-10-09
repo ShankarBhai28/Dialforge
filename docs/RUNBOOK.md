@@ -1223,3 +1223,14 @@ The user tested manual dialling on the new agent screen and reported a delay, wi
 - **Rollback:** copy the two configs back to `/etc/`, restore `env.bak` to `~/dialforge-backend/.env`, then `sudo systemctl restart coturn coturn-443 dialforge-backend`.
 - **Rotating the secret later:** run `openssl rand -hex 32` and put the new value in both coturn configs and `.env` (`TURN_SECRET`). Restart coturn, coturn-443 and dialforge-backend. Agents get new credentials on their next connect.
 
+## User management: edit, password reset, deactivate (2026-10-09)
+- **DB:** `migration-user-status.sql` adds `users.status` (`active` | `inactive`). It was applied on dev; backup of the `users` table at `~/backups/pre-user-status-20261009-152330/`.
+- **API:**
+  - `PUT /admin/users/:id` changes role, extension or status.
+  - `POST /admin/users/:id/password` sets a new password.
+  - Create now checks the username format, an 8+ character password, and that the extension exists.
+  - Rules (`services/users.js`, tested): you can't remove your own admin access, and there is always at least one active admin.
+- **Deactivate, not delete:** calls, status history, form answers and callbacks reference users. A deactivated agent is taken out of their queues like a logout, and login answers "this account is disabled".
+- **Sessions end on change:** a role or status change, or a password reset, records a revocation time (`services/sessions.js`). The auth middleware drops any session that logged in before it, and that user's `/ws` connection is closed. This is in memory, which is fine: a backend restart drops every session anyway (MemoryStore).
+- **Users screen:** a Status column, plus Edit, Password and Deactivate/Activate per user (no self-deactivate). Teams marks inactive agents.
+
