@@ -37,11 +37,11 @@ npm run build:web --silent
 
 step "Package"
 PKG=$(mktemp -d)/dialforge-deploy.tgz
-# What runs on the server: entry points, root modules, src/, classic pages,
-# the built React app, and the dependency manifest. Never .env, certs or logs.
+# What runs on the server: entry points, root modules, src/, the built React
+# app, and the dependency manifest. Never .env, certs or logs.
 (cd backend && tar czf "$PKG" \
   server.js dialer-engine.js dialer-common.js call-control.js ari.js ami.js db.js seed-users.js \
-  package.json package-lock.json src public web-dist)
+  package.json package-lock.json src web-dist)
 echo "package: $(du -h "$PKG" | cut -f1)"
 if [ "${DRY_RUN:-}" = 1 ]; then
   tar tzf "$PKG" | sed 's#/.*##' | sort | uniq -c

@@ -87,12 +87,12 @@ describe('admin sidebar', () => {
     expect(scope.queryByRole('link', { name: 'Teams' })).not.toBeInTheDocument();
   });
 
-  it('every menu entry opens a rebuilt screen, not the classic placeholder', async () => {
+  it('every menu entry opens its screen', async () => {
     fakeApi({ 'GET /auth/me': { body: ADMIN } });
     for (const item of allNavItems()) {
       const { unmount } = renderAt(item.to);
       await screen.findByRole('heading', { level: 1, name: item.label });
-      expect(screen.queryByText(/moving here soon/i), item.to).not.toBeInTheDocument();
+      expect(screen.queryByText("That page doesn't exist."), item.to).not.toBeInTheDocument();
       unmount();
     }
   });

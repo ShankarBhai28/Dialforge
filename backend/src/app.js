@@ -1,6 +1,5 @@
 // Builds the Express app: middleware + every route module. No network
 // connections are opened here, so tests can create an app freely.
-const path = require('path');
 const express = require('express');
 const session = require('express-session');
 const { mountWebApp } = require('./webApp');
@@ -42,7 +41,6 @@ function createSessionMiddleware() {
 function createApp({ sessionMiddleware = createSessionMiddleware(), webDistDir } = {}) {
   const app = express();
   app.use(express.json());
-  app.use(express.static(path.join(__dirname, '..', 'public')));
   mountWebApp(app, webDistDir);
   app.use(sessionMiddleware);
   for (const name of ROUTERS) app.use(require(`./routes/${name}`));

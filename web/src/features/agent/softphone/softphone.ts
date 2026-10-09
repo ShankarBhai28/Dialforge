@@ -8,6 +8,9 @@
 
 export type RegState = 'idle' | 'connecting' | 'registered' | 'failed';
 
+/** Longest we wait for network routes (ICE candidates) before answering. */
+export const ICE_WAIT_MS = 1000;
+
 export type CallSnapshot = {
   /** Increments per call, so listeners can tell calls apart. */
   id: number;
@@ -159,6 +162,23 @@ export class Softphone {
     session.on('peerconnection', (d) => playRemote((d as { peerconnection: RTCPeerConnection }).peerconnection));
     if (session.connection) playRemote(session.connection);
 
+    // Answer fast. JsSIP sends the SDP answer only once ICE gathering has
+    // *finished*; with STUN/TURN servers that can take seconds, or until an
+    // unreachable server times out - long enough for Asterisk to give up on
+    // the call. Send it as soon as a TURN relay route is in, or ICE_WAIT_MS
+    // after the first route (direct routes come first and are usually enough:
+    // Asterisk has a public address).
+    let iceTimer: ReturnType<typeof setTimeout> | null = null;
+    session.on('icecandidate', (d) => {
+      const { candidate, ready } = d as { candidate: RTCIceCandidate; ready: () => void };
+      if (candidate.type === 'relay' || / typ relay /.test(candidate.candidate)) {
+        if (iceTimer) clearTimeout(iceTimer);
+        ready();
+      } else if (!iceTimer) {
+        iceTimer = setTimeout(ready, ICE_WAIT_MS);
+      }
+    });
+
     const answered = () => {
       if (this.session !== session || this.snapshot.call?.phase === 'live') return;
       this.setCall({ phase: 'live', answeredAt: Date.now() });
@@ -171,6 +191,7 @@ export class Softphone {
     session.on('muted', () => this.session === session && this.setCall({ muted: true }));
     session.on('unmuted', () => this.session === session && this.setCall({ muted: false }));
     const ended = () => {
+      if (iceTimer) clearTimeout(iceTimer);
       if (this.session !== session) return;
       const last = this.snapshot.call!;
       this.session = null;

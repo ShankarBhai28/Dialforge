@@ -111,6 +111,32 @@ describe('click-to-call', () => {
     expect(s.answered).toBeNull();
   });
 
+  it("our line never rings: says so and resets (instead of 'Call started' forever)", async () => {
+    const t = setup({
+      'POST /calls/click2call': { status: 202, body: { callId: 42 } },
+      'GET /agent/call-state/42': { body: { answered: false, ended: true, disposition: 'agent_unanswered' } },
+    });
+    await t.controller.callLead(LEAD, LEAD.phone);
+    await settle();
+    expect(t.state().message?.error).toBe(true);
+    expect(t.state().message?.text).toMatch(/your line didn't answer/i);
+    // Reset: the next ring is a normal incoming call, not treated as ours.
+    const s = t.ua.ring(new FakeSession('1001'));
+    expect(s.answered).toBeNull();
+  });
+
+  it('customer busy: the agent is told why', async () => {
+    const t = setup({
+      'POST /calls/click2call': { status: 202, body: { callId: 42 } },
+      'GET /agent/call-state/42': { body: { answered: false, ended: true, disposition: 'busy' } },
+    });
+    await t.controller.callLead(LEAD, LEAD.phone);
+    const s = t.ua.ring(new FakeSession('1003'));
+    s.up();
+    await settle();
+    expect(t.state().message).toEqual({ text: 'The customer is busy.', error: true });
+  });
+
   it('refuses to start a second call', async () => {
     const t = setup({ 'GET /agent/call-policy': { body: { autoAnswer: false } } });
     t.ua.ring(new FakeSession('1001'));

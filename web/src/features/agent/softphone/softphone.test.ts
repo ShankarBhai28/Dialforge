@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { Softphone, type SoftphoneEvent } from './softphone';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ICE_WAIT_MS, Softphone, type SoftphoneEvent } from './softphone';
 import { FakeSession, fakeUAFactory } from './fakes';
 
 const OPTS = {
@@ -79,5 +79,35 @@ describe('Softphone', () => {
     const s = new FakeSession('');
     ua.ring(s);
     expect(phone.getSnapshot().call?.remote.number).toBe('Unknown number');
+  });
+
+  describe('answers without waiting for slow network routes', () => {
+    afterEach(() => vi.useRealTimers());
+    const cand = (type: string) => ({ type, candidate: `candidate:1 1 udp 1 1.2.3.4 5 typ ${type}` });
+
+    it('right away once a TURN relay route is found', () => {
+      const { ua } = setup();
+      const s = ua.ring(new FakeSession('1001'));
+      let readyCalls = 0;
+      const ready = () => readyCalls++;
+      s.emit('icecandidate', { candidate: cand('host'), ready });
+      expect(readyCalls).toBe(0);
+      s.emit('icecandidate', { candidate: cand('relay'), ready });
+      expect(readyCalls).toBe(1);
+    });
+
+    it(`at most ${ICE_WAIT_MS} ms after the first route when no relay comes (e.g. TURN blocked)`, () => {
+      vi.useFakeTimers();
+      const { ua } = setup();
+      const s = ua.ring(new FakeSession('1001'));
+      let readyCalls = 0;
+      const ready = () => readyCalls++;
+      s.emit('icecandidate', { candidate: cand('host'), ready });
+      s.emit('icecandidate', { candidate: cand('srflx'), ready });
+      vi.advanceTimersByTime(ICE_WAIT_MS - 1);
+      expect(readyCalls).toBe(0);
+      vi.advanceTimersByTime(1);
+      expect(readyCalls).toBe(1);
+    });
   });
 });

@@ -8,6 +8,19 @@ const { findAgentIdByExtension, setAgentStatus } = require('../services/agents')
 const { logEvent, resolveDestination } = require('../services/calls');
 const { activeCalls, queueCallChannels } = require('../state');
 
+// Q.850 cause of a failed customer leg -> calls.disposition.
+const DEST_FAILURE = {
+  1: 'invalid_number',
+  17: 'busy',
+  18: 'no_answer',
+  19: 'no_answer',
+  21: 'rejected',
+  34: 'congestion',
+  38: 'congestion',
+  41: 'congestion',
+  42: 'congestion',
+};
+
 // Wires Asterisk events (ARI Stasis + AMI queue events) to our call tracking.
 // Called once by server.js at startup - never from tests or scripts, since
 // connecting a second process to ARI app "dialforge-app" would steal its calls.
@@ -126,6 +139,7 @@ function start() {
         if (!state) return;
 
         if (leg === 'agent') {
+          state.agentUp = true;
           await ari.answer(event.channel.id);
           await logEvent(callId, 'agent_answered', { channelId: event.channel.id });
 
@@ -205,7 +219,10 @@ function start() {
             }
 
             const [callRows] = await pool.query('SELECT from_extension FROM calls WHERE id = ?', [callId]);
-            await pool.query("UPDATE calls SET end_time = NOW(), disposition = 'ended' WHERE id = ?", [callId]);
+            await pool.query('UPDATE calls SET end_time = NOW(), disposition = ? WHERE id = ?', [
+              state.endReason || 'ended',
+              callId,
+            ]);
             await logEvent(callId, 'ended', { channelId: event.channel.id });
 
             // Automatically move the agent into after-call-work (ACW) status
@@ -214,6 +231,36 @@ function start() {
             const acwUserId = await findAgentIdByExtension(callRows[0].from_extension);
             if (acwUserId) {
               await setAgentStatus(acwUserId, 'acw', null, null, callRows[0].from_extension);
+            }
+            break;
+          }
+        }
+      } else if (event.type === 'ChannelDestroyed') {
+        // A click-to-call leg that never entered Stasis never gets a
+        // StasisEnd - without this the call stayed open forever.
+        for (const [callId, state] of activeCalls.entries()) {
+          if (state.agentChannelId === event.channel.id && !state.agentUp) {
+            // The agent's own line never answered (browser not registered,
+            // answer too slow, rejected): nothing to bridge, no ACW.
+            activeCalls.delete(callId);
+            const cause = { cause: event.cause, causeText: event.cause_txt };
+            await pool.query("UPDATE calls SET end_time = NOW(), disposition = 'agent_unanswered' WHERE id = ?", [
+              callId,
+            ]);
+            await logEvent(callId, 'agent_unanswered', cause);
+            console.error(`[click2call ${callId}] agent line did not answer:`, event.cause, event.cause_txt);
+            break;
+          }
+          if (state.destChannelId === event.channel.id && !state.bridgeId) {
+            // The customer's leg failed or wasn't answered: tell the agent
+            // at once by ending their leg, instead of leaving them on a
+            // silent line. StasisEnd for the agent leg does the cleanup.
+            state.endReason = DEST_FAILURE[event.cause] || 'failed';
+            await logEvent(callId, 'dest_failed', { cause: event.cause, causeText: event.cause_txt });
+            try {
+              await ari.hangup(state.agentChannelId);
+            } catch (err) {
+              // agent already gone
             }
             break;
           }

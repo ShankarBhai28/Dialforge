@@ -228,6 +228,7 @@ export class AgentController {
         if (this.phone.getSnapshot().call?.phase === 'live') void this.watchCustomerAnswer(callId);
       }
       this.say(`Call started (id ${callId}) — your line rings first, then the customer.`);
+      void this.watchOwnLeg(callId);
     } catch (err) {
       this.say(`Call failed: ${(err as Error).message}`, true);
       this.pendingCall = null;
@@ -237,21 +238,49 @@ export class AgentController {
     setTimeout(() => this.refresh('calls', 'stats'), 2000);
   }
 
-  /** "Ringing customer…" until the server sees the customer answer. */
+  /**
+   * Until our own line rings: if the server gives up on it first (line not
+   * registered, answer too slow), say so and reset instead of waiting forever.
+   */
+  private async watchOwnLeg(callId: number) {
+    // Still waiting for *this* call's leg (pendingCall is cleared when it rings).
+    const waiting = () => this.expectingOwnLeg && this.pendingCall?.callId === callId;
+    // Asterisk gives up on an unanswered line after 30 s; stop looking after ~45.
+    for (let i = 0; i < 30; i++) {
+      await this.sleep(1500);
+      if (!waiting()) return;
+      let st: CallState | null = null;
+      try {
+        st = await get<CallState>('/agent/call-state/' + callId);
+      } catch {
+        continue;
+      }
+      if (st.ended && waiting()) break;
+    }
+    if (!waiting()) return;
+    this.expectingOwnLeg = false;
+    this.pendingCall = null;
+    this.outcomeLead = null;
+    this.say(endedMessage('agent_unanswered'), true);
+    this.refresh('calls');
+  }
+
+  /** "Ringing customer…" until the server sees the customer answer (or the call fails). */
   private async watchCustomerAnswer(callId: number) {
     if (this.watchingCallId === callId) return;
     this.watchingCallId = callId;
     this.setCall({ ringingCustomer: true });
     while (this.state.call && this.watchingCallId === callId) {
-      let st: { answered: boolean; ended: boolean } | null = null;
+      let st: CallState | null = null;
       try {
-        st = await get('/agent/call-state/' + callId);
+        st = await get<CallState>('/agent/call-state/' + callId);
       } catch {
         st = null;
       }
       if (this.watchingCallId !== callId) return;
       if (!st || st.answered || st.ended) {
         this.setCall({ ringingCustomer: false, talkStartedAt: st?.answered ? Date.now() : null });
+        if (st?.ended && !st.answered) this.say(endedMessage(st.disposition), true);
         return;
       }
       await this.sleep(1000);
@@ -521,6 +550,28 @@ export class AgentController {
     this.phone.disconnect();
     this.saveQueue(null);
     this.clearWrapup();
+  }
+}
+
+type CallState = { answered: boolean; ended: boolean; disposition: string | null };
+
+/** Why a click-to-call ended before anyone talked (calls.disposition). */
+export function endedMessage(disposition: string | null) {
+  switch (disposition) {
+    case 'agent_unanswered':
+      return "Your line didn't answer, so the call was not placed. Check the line is connected (refresh the page to reconnect) and try again.";
+    case 'busy':
+      return 'The customer is busy.';
+    case 'no_answer':
+      return "The customer didn't answer.";
+    case 'rejected':
+      return 'The customer rejected the call.';
+    case 'invalid_number':
+      return 'That number is not reachable - check it.';
+    case 'congestion':
+      return 'The network is busy - try again in a moment.';
+    default:
+      return 'The call could not be connected.';
   }
 }
 

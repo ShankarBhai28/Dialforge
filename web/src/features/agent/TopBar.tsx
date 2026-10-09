@@ -1,16 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  ChevronDown,
-  Clock,
-  Coffee,
-  ExternalLink,
-  Headset,
-  LogOut,
-  PhoneOff,
-  Timer,
-  Users2,
-  type LucideIcon,
-} from 'lucide-react';
+import { ChevronDown, Clock, Coffee, Headset, LogOut, PhoneOff, Timer, Users2, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useLogout, useMe } from '@/features/auth/auth';
@@ -132,9 +121,6 @@ export function TopBar({ stats }: { stats: AgentStats | undefined }) {
         <div className="font-semibold">{me?.username}</div>
         <div className="text-white/70">ext {line.extension}</div>
       </div>
-      <a href="/agent.html" className="hidden text-xs text-white/60 hover:text-white xl:flex xl:items-center xl:gap-1">
-        <ExternalLink className="size-3.5" /> Classic
-      </a>
       <Button variant="ghost" size="sm" className="text-white hover:bg-white/10" onClick={onLogout}>
         <LogOut /> <span className="hidden sm:inline">Log out</span>
       </Button>

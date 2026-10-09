@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router';
-import { ChevronRight, ExternalLink } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ADMIN_NAV, isGroup, type NavGroup, type NavItem } from './nav';
 
@@ -105,13 +105,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </div>
-
-      <a
-        href="/admin.html"
-        className="mt-3 flex items-center gap-2 rounded-md px-3.5 py-2 text-xs font-medium text-white/60 hover:bg-white/10 hover:text-white"
-      >
-        <ExternalLink className="size-3.5" /> Classic admin
-      </a>
     </nav>
   );
 }

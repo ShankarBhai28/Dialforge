@@ -1,6 +1,6 @@
 # DialForge — Frontend guide (web/)
 
-The React app lives in `web/` and is served by the backend at **`/app`**. The classic pages (`/admin.html`, `/agent.html`) keep working until each screen is rebuilt; see `docs/APP_REBUILD_PLAN.md` for the order.
+The React app lives in `web/` and is the only UI: the backend serves it at **`/app`**, and the old page addresses (`/`, `/login.html`, `/admin.html`, `/agent.html`) redirect into it.
 
 Stack: React 19, TypeScript, Vite, Tailwind CSS 4, shadcn-style components, React Router 7, TanStack Query 5, Vitest + Testing Library. The reasons are in `docs/adr/0002`.
 
@@ -38,15 +38,14 @@ web/src/
 - Components read both through `useController()` / `usePhone()` (`AgentProvider.tsx`).
 - Never call JsSIP from a component. Add a method to the softphone or the controller, plus a test.
 
-## How to move a classic screen into the app (the Stage 3 recipe)
+## How to add a screen
 
 1. **Types + data hooks**: `features/<area>/api.ts`. Define the response types to match exactly what the backend returns, then one `useQuery` hook per GET and one `useMutation` per change. Copy the pattern in `features/dashboard/api.ts`.
 2. **Page**: `features/<area>/<Area>Page.tsx`. Use `Card`, `Button` and the other components in `components/ui`. Handle all three states: loading (`Skeleton`), error (`ErrorState` with retry), and empty ("No campaigns yet").
-3. **Route**: add it to `REBUILT` in `app/routes.tsx`, using the same path as its entry in `app/nav.ts`. The classic placeholder disappears for that screen.
+3. **Menu + route**: add an entry to `app/nav.ts` and the page to `SCREENS` in `app/routes.tsx` under the same path (`app.test.tsx` fails if a menu entry has no screen).
 4. **After a change**, call `queryClient.invalidateQueries({ queryKey })` so lists refresh, and show `toast.success('Saved')`. Errors from mutations become toasts automatically.
 5. **Live data**: `useRealtime('agent.status', () => invalidate…)`. If the backend doesn't publish what you need, add a `hub.publish(...)` server-side (ARCHITECTURE §8).
 6. **Test**: `features/<area>/<area>.test.tsx` with `fakeApi({ 'GET /admin/...': { body } })` and `renderAt('/admin/...')`. At minimum: it shows the data, it saves, and it shows the server's error message.
-7. **Compare** the new screen with the classic one using the same data before calling it done.
 
 ## Rules
 - Call the backend only through `lib/api.ts`, never `fetch` directly. That keeps errors and the 401-to-login handling in one place. File uploads: `post(path, formData)`.

@@ -12,8 +12,6 @@ module.exports = [
       '**/dist/**',
       'backend/web-dist/**',
       'Credentials-Dialforge/**',
-      // Legacy pages, being replaced by web/ - see docs/APP_REBUILD_PLAN.md.
-      'backend/public/**',
       'phase0/**',
       'ari-hello-world/**',
     ],

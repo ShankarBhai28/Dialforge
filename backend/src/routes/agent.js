@@ -103,12 +103,13 @@ router.get('/agent/active-call', requireAuth, async (req, res) => {
 // In-call panel: has the customer on the agent's click-to-call answered
 // yet? (The agent's own leg answers first, so the browser can't tell.)
 router.get('/agent/call-state/:callId', requireAuth, async (req, res) => {
-  const [rows] = await pool.query('SELECT answer_time, end_time FROM calls WHERE id = ? AND from_extension = ?', [
-    req.params.callId,
-    req.session.user.extensionName,
-  ]);
+  const [rows] = await pool.query(
+    'SELECT answer_time, end_time, disposition FROM calls WHERE id = ? AND from_extension = ?',
+    [req.params.callId, req.session.user.extensionName],
+  );
   if (!rows[0]) return res.status(404).json({ error: 'call not found' });
-  res.json({ answered: !!rows[0].answer_time, ended: !!rows[0].end_time });
+  // disposition says why it ended: ended | busy | no_answer | agent_unanswered | ...
+  res.json({ answered: !!rows[0].answer_time, ended: !!rows[0].end_time, disposition: rows[0].disposition });
 });
 
 router.get('/agent/campaign-info', requireAuth, async (req, res) => {

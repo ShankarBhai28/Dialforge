@@ -16,7 +16,6 @@ import { QueuesPage } from '@/features/queues/QueuesPage';
 import { UsersPage } from '@/features/users/UsersPage';
 import { TeamsPage } from '@/features/teams/TeamsPage';
 import { ReportsPage } from '@/features/reports/ReportsPage';
-import { ClassicScreenPage } from '@/features/placeholder/ClassicScreenPage';
 import { AgentPage } from '@/features/agent/AgentPage';
 import { FullPageSpinner } from '@/components/FullPageSpinner';
 import { AdminLayout } from './AdminLayout';
@@ -29,9 +28,8 @@ function Home() {
   return <Navigate to={user ? homeFor(user.role) : '/login'} replace />;
 }
 
-// Admin screens by nav path. A screen missing here shows a link to the
-// classic admin instead (how screens were moved one by one in Stage 3).
-const REBUILT: Record<string, RouteObject['element']> = {
+// Admin screens by nav path (app/nav.ts). app.test.tsx checks every menu entry has one.
+const SCREENS: Record<string, RouteObject['element']> = {
   '/admin': <DashboardPage />,
   '/admin/live': <LiveAgentsPage />,
   '/admin/dialer': <DialerPage />,
@@ -49,7 +47,7 @@ const REBUILT: Record<string, RouteObject['element']> = {
 };
 
 const adminChildren: RouteObject[] = allNavItems().map((item) => {
-  const element = REBUILT[item.to] ?? <ClassicScreenPage item={item} />;
+  const element = SCREENS[item.to] ?? <NotFoundPage />;
   return item.to === '/admin' ? { index: true, element } : { path: item.to.replace('/admin/', ''), element };
 });
 

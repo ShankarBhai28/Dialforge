@@ -95,7 +95,6 @@ Every table has `tenant_id` (always 1 today; multi-tenant is planned). The schem
 | `backend/dialer-engine.js` | Dialer process |
 | `backend/dialer-common.js` | Code shared by both processes (attempt results, recycle rules) |
 | `backend/ari.js`, `backend/ami.js` | Thin Asterisk clients (no third-party ARI/AMI library) |
-| `backend/public/` | Current admin and agent pages (plain HTML/JS) — being replaced by `web/` |
 | `backend/tests/` | `node:test` suites run with fakes; no Asterisk or DB needed |
 | `bot-service/` | AI voice-bot audio plumbing (proof of concept) |
 | `docs/` | This file, RUNBOOK, DEPLOY, STATUS, plans, checklists, ADRs |

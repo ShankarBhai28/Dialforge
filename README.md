@@ -28,7 +28,6 @@ Running the full system needs Asterisk and MySQL on a server; see `docs/DEPLOY.m
 | Path | What it is |
 |---|---|
 | `backend/` | Express REST API, ARI/AMI call control, dialer engine, MySQL schema and migrations, tests |
-| `backend/public/` | Current admin and agent pages (plain HTML) — being replaced by `web/` |
 | `backend/asterisk/` | Dialplan files the app depends on |
 | `web/` | React + TypeScript app, served at `/app` (see docs/FRONTEND.md) |
 | `bot-service/` | AI voice-bot audio plumbing (proof of concept) |

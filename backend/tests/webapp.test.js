@@ -53,9 +53,20 @@ test('built assets are served with a long cache; a missing one is a 404', async 
   assert.strictEqual((await fetch(base + '/app/assets/missing.js')).status, 404);
 });
 
-test('API routes and classic pages are unaffected', async () => {
+test('API routes are unaffected', async () => {
   assert.strictEqual((await fetch(base + '/admin/campaigns')).status, 401);
   assert.strictEqual((await fetch(base + '/auth/me')).status, 401);
+});
+
+test('old page addresses open the app', async () => {
+  const where = async (url) => {
+    const res = await fetch(base + url, { redirect: 'manual' });
+    return [res.status, res.headers.get('location')];
+  };
+  assert.deepStrictEqual(await where('/'), [302, '/app/']);
+  assert.deepStrictEqual(await where('/login.html'), [302, '/app/login']);
+  assert.deepStrictEqual(await where('/admin.html'), [302, '/app/admin']);
+  assert.deepStrictEqual(await where('/agent.html'), [302, '/app/agent']);
 });
 
 test('a clear message when the app has not been built', async () => {

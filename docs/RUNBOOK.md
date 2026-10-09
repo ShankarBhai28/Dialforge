@@ -1192,3 +1192,21 @@ Plan: `docs/APP_REBUILD_PLAN.md`. Branch `react-frontend`, cut from `predictive-
   - Server checks: `webrtc-config` resolves correctly (TURN credential masked), the new routes return 401 without login, `/app/agent` → 200.
 - **Not yet done:** real calls. The classic `/agent.html` remains what agents use until the checklist section "New agent screen" passes.
 
+## Classic pages removed + softphone connect fix (2026-10-09)
+The user tested manual dialling on the new agent screen and reported a delay, with calls sometimes not connecting. They also asked to remove the classic HTML pages.
+- **Evidence:**
+  - calls 40–42 on the new screen were `originated` but never `agent_answered`;
+  - Asterisk's `full` log for call 42: `PJSIP/1001 is ringing`, then nothing for 20 s;
+  - call 39, on the classic page, answered within 1 s.
+- **Cause:** the new softphone gives the browser STUN/TURN servers (the classic one never did). JsSIP sends the 200 OK only after ICE gathering *finishes*, which takes seconds, or until a route the network blocks times out. Asterisk's originate times out after 30 s.
+- **Checks:** TURN itself works. `turnutils_uclient` allocated on UDP 3478, and TLS on 443 has a valid certificate.
+- **Fixes:**
+  - **Softphone:** answers as soon as a TURN relay candidate is gathered, or `ICE_WAIT_MS` (1 s) after the first candidate, using JsSIP's `icecandidate` `ready()`.
+  - **Server (`events.js`):** handles `ChannelDestroyed` for click-to-call legs that never entered Stasis. Before, those calls stayed open forever.
+    - The agent's own line not answering → the call is closed as `agent_unanswered`, the cause is logged, and there is no ACW.
+    - A customer leg that fails before answer → `busy` / `no_answer` / `rejected` / `invalid_number` / `congestion` / `failed` from the Q.850 cause. The agent's leg is hung up at once instead of being left on a silent line.
+  - `/agent/call-state` now returns `disposition`.
+  - **Agent screen:** says why a call didn't connect ("Your line didn't answer…", "The customer is busy.", …) and resets, instead of showing "Call started" forever.
+- **Classic pages removed:** `backend/public/` (`admin.html`, `agent.html`, `login.html`, `index.html`) and every "Classic" link and placeholder in the app. `/`, `/index.html`, `/login.html`, `/admin.html` and `/agent.html` now 302 to the matching `/app` screen. The old pages are in git history and in the deploy backup.
+- Tests: 44 backend (3 click-to-call teardown, 1 redirects), 123 web (2 ICE timing, 2 call-failure messages).
+
