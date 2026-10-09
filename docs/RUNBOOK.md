@@ -1234,3 +1234,18 @@ The user tested manual dialling on the new agent screen and reported a delay, wi
 - **Sessions end on change:** a role or status change, or a password reset, records a revocation time (`services/sessions.js`). The auth middleware drops any session that logged in before it, and that user's `/ws` connection is closed. This is in memory, which is fine: a backend restart drops every session anyway (MemoryStore).
 - **Users screen:** a Status column, plus Edit, Password and Deactivate/Activate per user (no self-deactivate). Teams marks inactive agents.
 
+## Server-side search + paging; lazy-loaded screens (2026-10-09)
+- **Why:** admin lists only ever showed the newest 200 leads, 100 calls, 500 DNC numbers or 300 callbacks; anything older couldn't be found.
+- **API:** one shape for all four lists, `{ rows, total, page, pageSize }` with `?page=&pageSize=` (default 50, max 200), from `services/paging.js`. In LIKE searches `%` and `_` are taken literally.
+  - `GET /admin/leads?q=&campaignId=(id|none)&listId=&status=`. Also returns `statuses` for the filter. The agent's `GET /leads` is unchanged.
+  - `GET /admin/calls?q=&direction=&disposition=(…|none)&extension=&from=&to=`. The agent's `GET /calls` is unchanged.
+  - `GET /admin/dnc?q=`: `total` = matching the search, `all` = the whole list.
+  - `GET /admin/callbacks?status=(pending|overdue|done|cancelled)&campaignId=&q=`. **This changed from a plain array.**
+- **Verified before deploy:** 19 queries against the dev DB, read-only, in a localhost-only process. All returned 200 with consistent totals, and page 1 + page 2 at size 2 equal page 1 at size 4.
+- **Screens:**
+  - Leads, Call Log, DNC and Callbacks filter and page on the server, using the shared `Pager`, debounced search and `keepPreviousData`.
+  - Any filter change returns to page 1; deleting the last row on a page steps back one page.
+  - Call Log gained number, direction, outcome and date filters.
+- **Lazy loading:** every screen is its own chunk (`page()` in `app/routes.tsx`). The first load went from 615 kB to 370 kB (116 kB gzipped). The softphone (JsSIP, 304 kB) loads only for agents.
+- Tests: 52 backend, 133 web.
+

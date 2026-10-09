@@ -97,13 +97,9 @@ Backend gaps the new screens work around. None of them blocks the switchover.
 - `POST /admin/campaigns` ignores `status` (new campaigns are always active).
 
 **Scale (needed before real volume)**
-- Server-side paging and filtering:
-  - `GET /leads` returns the newest 200;
-  - `GET /calls` returns 100, with no filters;
-  - DNC returns 500, and its total ignores the search;
-  - callbacks return 300.
+- ~~Server-side paging and filtering~~ — **done 2026-10-09**: leads, calls, DNC and callbacks page and filter on the server.
 - The dialer engine publishes nothing on `/ws`, so the Dialer screen polls every 3 s. A `dialer.status` event from the engine (via the DB or a small HTTP hook into the backend) would make it live.
-- JS bundle is 615 kB (180 kB gzipped): lazy-load each screen with React Router `lazy`.
+- ~~JS bundle 615 kB~~ — **done 2026-10-09**: each screen is lazy-loaded; first load 370 kB (116 kB gzipped).
 
 **Done during Stage 3:** `/admin/extensions` no longer returns `sip_password`, and queue settings are validated before they are written to `queues.conf`.
 
