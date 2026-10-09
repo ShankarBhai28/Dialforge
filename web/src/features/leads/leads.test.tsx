@@ -319,17 +319,26 @@ describe('Leads & Lists - leads', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Edit 9840012345' }));
     const dialog = screen.getByRole('dialog');
     await within(dialog).findByRole('option', { name: 'Referrals (Support)' });
+    // another campaign drops the list, which belongs to the old one
+    expect(within(dialog).getByLabelText('List')).toHaveValue('7');
+    await userEvent.selectOptions(within(dialog).getByLabelText('Campaign'), 'Support');
+    expect(within(dialog).getByLabelText('List')).toHaveValue('');
     await userEvent.selectOptions(within(dialog).getByLabelText('List'), 'Referrals (Support)');
     expect(within(dialog).getByLabelText('Campaign')).toHaveValue('4');
     await within(dialog).findByRole('option', { name: 'Sale' });
     await userEvent.selectOptions(within(dialog).getByLabelText('Status'), 'Sale');
     await userEvent.clear(within(dialog).getByLabelText('Name'));
     await userEvent.type(within(dialog).getByLabelText('Name'), 'Ravi K');
+    await userEvent.type(within(dialog).getByLabelText('Alt phone'), ' 9840099999 ');
+    await userEvent.clear(within(dialog).getByLabelText('Priority'));
+    await userEvent.type(within(dialog).getByLabelText('Priority'), '5');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(calls.find((c) => c.key === 'PUT /admin/leads/31')?.body).toEqual({
       name: 'Ravi K',
       phone: '9840012345',
+      altPhone: '9840099999',
+      priority: 5,
       campaignId: 4,
       listId: 8,
       status: 'sale',

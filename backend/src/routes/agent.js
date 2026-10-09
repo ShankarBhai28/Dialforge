@@ -8,7 +8,7 @@ const {
   setAgentStatus,
 } = require('../services/agents');
 const { getDispositions } = require('../services/dispositions');
-const { findOtherActiveHolder } = require('../services/extensionGuard');
+const { allowedExtensions, findOtherActiveHolder } = require('../services/extensionGuard');
 const { buildWebrtcConfig } = require('../services/webrtc');
 
 const router = express.Router();
@@ -188,10 +188,22 @@ router.get('/agent/stats', requireAuth, async (req, res) => {
   });
 });
 
+// --- Agent: the extensions they may connect with (null = any free one) ---
+router.get('/agent/extensions', requireAuth, async (req, res) => {
+  res.json({ allowed: await allowedExtensions(req.session.user) });
+});
+
 // --- Agent: SIP credentials for the browser to register a WebRTC line ---
 // The extension an agent connects with is a per-session device choice
-// (like picking a desk phone for a shift), not tied to their login account.
+// (like picking a desk phone for a shift), limited to the ones their
+// team allows (see services/extensionGuard.js).
 router.get('/agent/extension-credentials/:extension', requireAuth, async (req, res) => {
+  const allowed = await allowedExtensions(req.session.user);
+  if (allowed && !allowed.includes(req.params.extension)) {
+    return res
+      .status(403)
+      .json({ error: `Extension ${req.params.extension} isn't one your team may use - pick ${allowed.join(', ')}.` });
+  }
   const [rows] = await pool.query('SELECT id, name, sip_password FROM extensions WHERE name = ?', [
     req.params.extension,
   ]);

@@ -143,6 +143,10 @@ export function useLeads(f: LeadFilters, page: number) {
 export type LeadInput = {
   name: string;
   phone: string;
+  /** '' clears it. */
+  altPhone: string;
+  /** -100..100; higher is dialled earlier. */
+  priority: number;
   campaignId: number | null;
   listId: number | null;
   status: string;

@@ -85,6 +85,22 @@ describe('agent screen', () => {
     expect(localStorage.getItem('dialforge_extension')).toBe('1003');
   });
 
+  it('a team that limits extensions: the agent picks from that list', async () => {
+    fakeApi(backend({ 'GET /agent/extensions': { body: { allowed: ['1003', '1005'] } } }));
+    const uas = fakeUAFactory();
+    renderPage(<AgentPage createUA={uas.factory} />);
+    const ext = await screen.findByRole('combobox', { name: 'Extension' });
+    expect(
+      within(ext)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Choose…', '1003', '1005']);
+    await userEvent.selectOptions(ext, '1003');
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await waitFor(() => expect(uas.made.length).toBe(1));
+    expect(uas.last().options).toMatchObject({ extension: '1003' });
+  });
+
   it('a busy extension: shows why it was refused', async () => {
     fakeApi(
       backend({

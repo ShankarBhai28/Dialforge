@@ -1249,3 +1249,16 @@ The user tested manual dialling on the new agent screen and reported a delay, wi
 - **Lazy loading:** every screen is its own chunk (`page()` in `app/routes.tsx`). The first load went from 615 kB to 370 kB (116 kB gzipped). The softphone (JsSIP, 304 kB) loads only for agents.
 - Tests: 52 backend, 133 web.
 
+## Backend validation follow-ups + team extensions (2026-10-10)
+- **Team extensions (security):** before this, any logged-in agent could fetch the SIP password of any free extension.
+  - `migration-team-extensions.sql` adds `team_extensions` (team ↔ extension, cascades on delete).
+  - Rule (`services/extensionGuard.js`, tested): if any of an agent's *active* teams ticks extensions, the agent may use only those plus their own assigned extension. If none does, any free extension is allowed, as before. Admins aren't limited.
+  - `GET /agent/extensions` returns `{ allowed: [...] | null }`; `/agent/extension-credentials/:ext` answers 403 for an extension outside the list. The Connect screen shows a dropdown when the list exists.
+  - Nothing changes on deploy: no team has extensions ticked until an admin does it in Teams.
+- **Validation:**
+  - Teams: unknown agent / campaign / extension ids → 400 naming them (was a generic 500). Only agents can be members. Links are inserted in one statement per table.
+  - Lists: unknown campaign → 400 (was a raw foreign-key 500).
+  - Leads edit: the list must belong to the chosen campaign; alt phone and priority are editable (left out = unchanged). The dialog drops the list when the campaign changes.
+  - Campaigns: create takes `status` (active / paused); edit with no status keeps the current one (it used to reset to active).
+- **Checked on the dev DB first (read-only):** no admins in teams, all campaigns active, no lead whose list is in another campaign, so nothing existing breaks the new rules.
+- Tests: 57 backend, 134 web.

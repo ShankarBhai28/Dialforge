@@ -42,6 +42,8 @@ function LeadDialog({ lead, onOpenChange }: { lead: Lead; onOpenChange: (open: b
   const save = useSaveLead();
   const [name, setName] = useState(lead.name ?? '');
   const [phone, setPhone] = useState(lead.phone);
+  const [altPhone, setAltPhone] = useState(lead.alt_phone ?? '');
+  const [priority, setPriority] = useState(String(lead.priority ?? 0));
   const [campaignId, setCampaignId] = useState(lead.campaign_id ? String(lead.campaign_id) : '');
   const [listId, setListId] = useState(lead.list_id ? String(lead.list_id) : '');
   const [status, setStatus] = useState(lead.status);
@@ -60,6 +62,13 @@ function LeadDialog({ lead, onOpenChange }: { lead: Lead; onOpenChange: (open: b
     if (l) setCampaignId(String(l.campaign_id));
   }
 
+  // A list belongs to one campaign, so a different campaign drops the list.
+  function onCampaignChange(value: string) {
+    setCampaignId(value);
+    const l = lists.data?.find((x) => String(x.id) === listId);
+    if (l && String(l.campaign_id) !== value) setListId('');
+  }
+
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     save.mutate(
@@ -67,6 +76,8 @@ function LeadDialog({ lead, onOpenChange }: { lead: Lead; onOpenChange: (open: b
         id: lead.id,
         name: name.trim(),
         phone: phone.trim(),
+        altPhone: altPhone.trim(),
+        priority: Number(priority),
         campaignId: campaignId ? Number(campaignId) : null,
         listId: listId ? Number(listId) : null,
         status,
@@ -101,8 +112,30 @@ function LeadDialog({ lead, onOpenChange }: { lead: Lead; onOpenChange: (open: b
                 required
               />
             </Field>
+            <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
+              <Field id="lead-alt-phone" label="Alt phone" hint="Optional second number.">
+                <Input
+                  id="lead-alt-phone"
+                  value={altPhone}
+                  onChange={(e) => setAltPhone(e.target.value)}
+                  inputMode="tel"
+                />
+              </Field>
+              <Field id="lead-priority" label="Priority" hint="-100 to 100, higher first.">
+                <Input
+                  id="lead-priority"
+                  type="number"
+                  min={-100}
+                  max={100}
+                  step={1}
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value)}
+                  required
+                />
+              </Field>
+            </div>
             <Field id="lead-campaign" label="Campaign">
-              <Select id="lead-campaign" value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
+              <Select id="lead-campaign" value={campaignId} onChange={(e) => onCampaignChange(e.target.value)}>
                 <option value="">Unassigned</option>
                 {campaigns.data?.map((c) => (
                   <option key={c.id} value={c.id}>

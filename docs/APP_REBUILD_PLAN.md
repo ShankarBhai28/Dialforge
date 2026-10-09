@@ -89,12 +89,12 @@ Dashboard + Live Agents → Campaigns (settings, dispositions, recycle rules) �
 Backend gaps the new screens work around. None of them blocks the switchover.
 
 **Security / correctness**
-- `GET /agent/extension-credentials/:extension` gives any logged-in agent the SIP password of *any* extension. It should only answer for the extension the agent is connecting with.
+- ~~`GET /agent/extension-credentials/:extension` gives any agent any extension's SIP password~~ — **done 2026-10-10**: a team can list the extensions its agents may use (see Stage 4 follow-ups).
 - ~~Users can't be edited, no password reset~~ — **done 2026-10-09**: edit role and extension, reset password, deactivate (no delete, by design), and create checks that the extension exists.
-- Team create/update don't validate member and campaign ids, so a bad id becomes a generic "failed to save team".
-- `POST /admin/lists` with an unknown campaign gives a raw 500 (foreign-key error).
-- `PUT /admin/leads/:id` doesn't check that the list belongs to the chosen campaign, and can't edit `alt_phone`, `priority` or `custom_data`.
-- `POST /admin/campaigns` ignores `status` (new campaigns are always active).
+- ~~Team ids not validated~~ — **done 2026-10-10**: unknown agent, campaign or extension ids get a 400 naming them.
+- ~~`POST /admin/lists` unknown campaign = raw 500~~ — **done 2026-10-10**: 400 "campaign not found" (create and edit).
+- ~~`PUT /admin/leads/:id` list/campaign mismatch, no `alt_phone` / `priority`~~ — **done 2026-10-10**: the list must belong to the chosen campaign, and alt phone and priority are editable. `custom_data` is still import-only; editing it needs the campaign form's fields in the dialog.
+- ~~`POST /admin/campaigns` ignores `status`~~ — **done 2026-10-10**: create takes active or paused; both create and edit check it.
 
 **Scale (needed before real volume)**
 - ~~Server-side paging and filtering~~ — **done 2026-10-09**: leads, calls, DNC and callbacks page and filter on the server.
@@ -106,5 +106,5 @@ Backend gaps the new screens work around. None of them blocks the switchover.
 ## Follow-ups found in Stage 4
 - ~~TURN password is public~~ — **done 2026-10-09**: coturn now uses `use-auth-secret`. `/agent/webrtc-config` signs a per-login password that expires after 12 h, and the old fixed password is refused.
 - The classic agent page sets ICE servers on the UA, where JsSIP ignores them, so it has never used STUN/TURN. The new screen passes them per call. Not worth fixing in the classic page; it is being retired.
-- Extension choice is still open to any agent for any extension that is free. A proper fix is a per-team (or per-agent) list of allowed extensions.
+- ~~Extension choice open to any agent~~ — **done 2026-10-10**: Teams → Extensions. A team with none ticked doesn't limit anyone (no change on deploy); once ticked, its agents may use only those plus their own extension, and the Connect screen shows them as a list.
 

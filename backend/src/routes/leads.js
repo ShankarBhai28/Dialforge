@@ -17,6 +17,8 @@ const {
 
 const router = express.Router();
 
+const PHONE_RE = /^\+?[0-9]{7,15}$/;
+
 // --- Leads (campaign-scoped for agents - admins see everything) ---
 router.get('/leads', requireAuth, async (req, res) => {
   if (req.session.user.role === 'admin') {
@@ -164,21 +166,53 @@ router.post('/leads/:id/disposition', requireAuth, async (req, res) => {
 // --- Admin: full lead edit/delete (distinct from the agent-facing
 // disposition endpoint above, which only ever touches status) ---
 router.put('/admin/leads/:id', requireRole('admin'), async (req, res) => {
-  const { name, phone, campaignId, listId, status } = req.body;
-  if (!phone || !/^\+?[0-9]{7,15}$/.test(phone)) {
+  const { name, phone, status } = req.body;
+  const campaignId = req.body.campaignId ? Number(req.body.campaignId) : null;
+  const listId = req.body.listId ? Number(req.body.listId) : null;
+  if (!phone || !PHONE_RE.test(phone)) {
     return res.status(400).json({ error: 'a valid phone is required' });
   }
+  // altPhone / priority left out = unchanged ('' clears the alt phone).
+  const altPhone = req.body.altPhone === undefined ? undefined : req.body.altPhone || null;
+  if (altPhone && !PHONE_RE.test(altPhone)) {
+    return res.status(400).json({ error: 'alt phone must be 7-15 digits, optional leading +' });
+  }
+  const priority = req.body.priority === undefined || req.body.priority === '' ? undefined : Number(req.body.priority);
+  if (priority !== undefined && !(Number.isInteger(priority) && priority >= -100 && priority <= 100)) {
+    return res.status(400).json({ error: 'priority must be a whole number -100..100' });
+  }
   if (status && status !== 'new') {
-    const codes = (await getDispositions(campaignId || null)).map((x) => x.code);
+    const codes = (await getDispositions(campaignId)).map((x) => x.code);
     if (!codes.includes(status))
       return res.status(400).json({ error: `status must be new or one of: ${codes.join(', ')}` });
   }
-  const [rows] = await pool.query('SELECT id FROM leads WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query('SELECT id, alt_phone, priority FROM leads WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'lead not found' });
+  if (campaignId) {
+    const [c] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [campaignId]);
+    if (!c[0]) return res.status(400).json({ error: 'campaign not found' });
+  }
+  if (listId) {
+    // The dialer takes a list's leads for the list's campaign, so the two must agree.
+    const [l] = await pool.query('SELECT name, campaign_id FROM lists WHERE id = ?', [listId]);
+    if (!l[0]) return res.status(400).json({ error: 'list not found' });
+    if (l[0].campaign_id !== campaignId)
+      return res.status(400).json({ error: `list "${l[0].name}" belongs to a different campaign` });
+  }
 
   await pool.query(
-    'UPDATE leads SET name = ?, phone = ?, campaign_id = ?, list_id = ?, status = COALESCE(?, status), updated_by = ? WHERE id = ?',
-    [name || null, phone, campaignId || null, listId || null, status || null, req.session.user.id, req.params.id],
+    'UPDATE leads SET name = ?, phone = ?, alt_phone = ?, priority = ?, campaign_id = ?, list_id = ?, status = COALESCE(?, status), updated_by = ? WHERE id = ?',
+    [
+      name || null,
+      phone,
+      altPhone === undefined ? rows[0].alt_phone : altPhone,
+      priority === undefined ? rows[0].priority : priority,
+      campaignId,
+      listId,
+      status || null,
+      req.session.user.id,
+      req.params.id,
+    ],
   );
   res.json({ status: 'ok' });
 });

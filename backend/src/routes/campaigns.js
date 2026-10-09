@@ -23,9 +23,19 @@ router.get('/admin/campaigns', requireRole('admin'), async (req, res) => {
   res.json(rows);
 });
 
+// A campaign is active or paused. Edit also accepts the status it already
+// has, so an older value doesn't block saving other changes.
+const CAMPAIGN_STATUSES = ['active', 'paused'];
+function checkCampaignStatus(status, current) {
+  if (status === undefined || status === '' || CAMPAIGN_STATUSES.includes(status) || status === current) return null;
+  return 'status must be active or paused';
+}
+
 router.post('/admin/campaigns', requireRole('admin'), async (req, res) => {
-  const { name, queueId, outboundCallerId, autoAnswer, formId } = req.body;
+  const { name, queueId, outboundCallerId, autoAnswer, formId, status } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
+  const statusError = checkCampaignStatus(status);
+  if (statusError) return res.status(400).json({ error: statusError });
   const formError = await checkCampaignForm(formId);
   if (formError) return res.status(400).json({ error: formError });
   const { error, settings } = parseCampaignSettings(req.body);
@@ -41,6 +51,7 @@ router.post('/admin/campaigns', requireRole('admin'), async (req, res) => {
         queue_id: queueId || null,
         outbound_caller_id: outboundCallerId || null,
         auto_answer: autoAnswer ? 1 : 0,
+        status: status || 'active',
         form_id: formId || null,
         ...settings,
       },
@@ -60,8 +71,10 @@ router.post('/admin/campaigns', requireRole('admin'), async (req, res) => {
 router.put('/admin/campaigns/:id', requireRole('admin'), async (req, res) => {
   const { name, queueId, outboundCallerId, autoAnswer, status, formId } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
-  const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query('SELECT id, status FROM campaigns WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'campaign not found' });
+  const statusError = checkCampaignStatus(status, rows[0].status);
+  if (statusError) return res.status(400).json({ error: statusError });
   const formError = await checkCampaignForm(formId);
   if (formError) return res.status(400).json({ error: formError });
   const { error, settings } = parseCampaignSettings(req.body);
@@ -73,7 +86,7 @@ router.put('/admin/campaigns/:id', requireRole('admin'), async (req, res) => {
       queue_id: queueId || null,
       outbound_caller_id: outboundCallerId || null,
       auto_answer: autoAnswer ? 1 : 0,
-      status: status || 'active',
+      status: status || rows[0].status,
       form_id: formId || null,
       ...settings,
     },

@@ -21,6 +21,12 @@ router.get('/admin/lists', requireRole('admin'), async (req, res) => {
   res.json(rows);
 });
 
+// A list must belong to a real campaign (the FK would otherwise give a raw 500).
+async function campaignExists(id) {
+  const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [id]);
+  return !!rows[0];
+}
+
 // is_active decides whether the dialer takes leads from a list;
 // priority orders lists within a campaign (higher first).
 function parseListPriority(v) {
@@ -34,6 +40,7 @@ router.post('/admin/lists', requireRole('admin'), async (req, res) => {
   if (!campaignId) return res.status(400).json({ error: 'campaignId is required' });
   const priority = parseListPriority(req.body.priority);
   if (priority === null) return res.status(400).json({ error: 'priority must be a whole number -100..100' });
+  if (!(await campaignExists(campaignId))) return res.status(400).json({ error: 'campaign not found' });
   const [result] = await pool.query(
     'INSERT INTO lists (tenant_id, campaign_id, name, is_active, priority) VALUES (1, ?, ?, ?, ?)',
     [campaignId, name, isActive === false ? 0 : 1, priority],
@@ -47,6 +54,7 @@ router.put('/admin/lists/:id', requireRole('admin'), async (req, res) => {
   if (!campaignId) return res.status(400).json({ error: 'campaignId is required' });
   const priority = parseListPriority(req.body.priority);
   if (priority === null) return res.status(400).json({ error: 'priority must be a whole number -100..100' });
+  if (!(await campaignExists(campaignId))) return res.status(400).json({ error: 'campaign not found' });
   const [rows] = await pool.query('SELECT id FROM lists WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'list not found' });
   await pool.query('UPDATE lists SET name = ?, campaign_id = ?, is_active = ?, priority = ? WHERE id = ?', [

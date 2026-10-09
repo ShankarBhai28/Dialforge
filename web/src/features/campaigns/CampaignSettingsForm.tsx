@@ -167,16 +167,13 @@ export function CampaignSettingsForm({ campaign, onDone }: { campaign: Campaign 
               onChange={(e) => set('outboundCallerId', e.target.value)}
             />
           </Field>
-          {/* POST ignores status (new campaigns start active), so it's only offered on edit. */}
-          {campaign && (
-            <Field id="c-status" label="Status">
-              <Select id="c-status" value={form.status} onChange={(e) => set('status', e.target.value)}>
-                <option value="active">Active</option>
-                <option value="paused">Paused</option>
-                {!['active', 'paused'].includes(form.status) && <option value={form.status}>{form.status}</option>}
-              </Select>
-            </Field>
-          )}
+          <Field id="c-status" label="Status">
+            <Select id="c-status" value={form.status} onChange={(e) => set('status', e.target.value)}>
+              <option value="active">Active</option>
+              <option value="paused">Paused</option>
+              {!['active', 'paused'].includes(form.status) && <option value={form.status}>{form.status}</option>}
+            </Select>
+          </Field>
           <CheckField
             id="c-autoanswer"
             label="Auto Answer"

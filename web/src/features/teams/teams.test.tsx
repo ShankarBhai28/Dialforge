@@ -24,12 +24,20 @@ const TEAM = {
   created_at: '',
   members: [{ id: 7, username: 'agent04' }],
   campaigns: [{ id: 1, name: 'Sales' }],
+  extensions: [],
+};
+const EXTENSIONS = {
+  body: [
+    { id: 2, name: '1002', label: null },
+    { id: 5, name: '1005', label: 'Desk 5' },
+  ],
 };
 const api = (extra = {}) =>
   fakeApi({
     'GET /admin/teams': { body: [TEAM] },
     'GET /admin/users': USERS,
     'GET /admin/campaigns': CAMPAIGNS,
+    'GET /admin/extensions': EXTENSIONS,
     ...extra,
   });
 
@@ -41,6 +49,7 @@ describe('Teams', () => {
     expect(within(row).getByText('agent04')).toBeInTheDocument();
     expect(within(row).getByText('Sales')).toBeInTheDocument();
     expect(within(row).getByText('active')).toBeInTheDocument();
+    expect(within(row).getByText('Any')).toBeInTheDocument(); // no extensions ticked
   });
 
   it('shows the empty state', async () => {
@@ -60,6 +69,8 @@ describe('Teams', () => {
     expect(within(dialog).queryByLabelText('Agents: admin')).not.toBeInTheDocument();
     await userEvent.click(await within(dialog).findByLabelText('Campaigns: Old'));
     expect(within(dialog).getByText('(inactive)')).toBeInTheDocument();
+    await userEvent.click(await within(dialog).findByLabelText('Extensions: 1005'));
+    expect(within(dialog).getByText('1005 - Desk 5')).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole('button', { name: 'Create team' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(calls.find((c) => c.key === 'POST /admin/teams')?.body).toEqual({
@@ -67,6 +78,7 @@ describe('Teams', () => {
       status: 'inactive',
       memberIds: [8],
       campaignIds: [4],
+      extensionIds: [5],
     });
   });
 
@@ -86,6 +98,7 @@ describe('Teams', () => {
       status: 'active',
       memberIds: [7, 8],
       campaignIds: [],
+      extensionIds: [],
     });
   });
 

@@ -13,6 +13,9 @@ Server: **dialforge-dev** (`https://dialforge.ddnsfree.com:3000`). Tick each box
 - [ ] Admin → Teams shows **Default Team** with all agents and campaigns.
 - [ ] Create team **Test Team**: one agent (e.g. agent1003) + one campaign (e.g. Real Test Campaign). Untick that agent in Default Team.
 - [ ] Agent1003 → Available → queue list shows **only** Real Test Campaign's queue.
+- [ ] Edit **Test Team** → Extensions: tick one extension other than agent1003's own (e.g. 1005) → Save. The table shows it.
+- [ ] Agent1003 logs out of the line and back in → the Extension box is now a list: their own extension + 1005 only.
+- [ ] Untick all extensions on Test Team → agent1003 can type any free extension again.
 - [ ] Put agent1003 back how you want it afterwards.
 
 ## D2 — Custom Forms

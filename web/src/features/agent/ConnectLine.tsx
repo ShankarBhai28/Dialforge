@@ -1,10 +1,11 @@
 // Step 1 of a shift: pick the extension (desk phone) to use and register it.
 // The choice is remembered, so a page refresh reconnects by itself.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Headset, LoaderCircle, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/form-controls';
 import { Field, FormError } from '@/components/common';
 import { get } from '@/lib/api';
 import { meKey, useLogout, useMe } from '@/features/auth/auth';
@@ -50,8 +51,20 @@ export function useRememberLine() {
   }, [line.reg, line.extension, qc]);
 }
 
+/** The extensions this agent may use; null = any (their teams don't limit it). */
+function useAllowedExtensions() {
+  return useQuery({
+    queryKey: ['agent', 'extensions'],
+    queryFn: () => get<{ allowed: string[] | null }>('/agent/extensions'),
+    select: (d) => d.allowed,
+  });
+}
+
 export function ConnectLine() {
   const { data: me } = useMe();
+  // On error this stays undefined and the free-text box is shown; the
+  // server still refuses an extension the agent may not use.
+  const { data: allowed } = useAllowedExtensions();
   const { phone, line } = usePhone();
   const logout = useLogout();
   const [extension, setExtension] = useState(() => savedExtension() ?? me?.extensionName ?? '');
@@ -82,7 +95,9 @@ export function ConnectLine() {
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    void connect(extension.trim());
+    const ext = extension.trim();
+    // A remembered extension the team no longer allows shows as "Choose…" - send what is shown.
+    void connect(allowed && !allowed.includes(ext) ? '' : ext);
   }
 
   const connecting = busy || line.reg === 'connecting';
@@ -98,14 +113,30 @@ export function ConnectLine() {
           Hi {me?.username}. Choose the extension for this shift; calls ring here in the browser.
         </p>
         <Field id="ext" label="Extension" className="mb-4">
-          <Input
-            id="ext"
-            value={extension}
-            onChange={(e) => setExtension(e.target.value)}
-            placeholder="e.g. 1001"
-            inputMode="numeric"
-            autoFocus
-          />
+          {allowed ? (
+            <Select
+              id="ext"
+              value={allowed.includes(extension) ? extension : ''}
+              onChange={(e) => setExtension(e.target.value)}
+              autoFocus
+            >
+              <option value="">Choose…</option>
+              {allowed.map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <Input
+              id="ext"
+              value={extension}
+              onChange={(e) => setExtension(e.target.value)}
+              placeholder="e.g. 1001"
+              inputMode="numeric"
+              autoFocus
+            />
+          )}
         </Field>
         <FormError message={error ?? regError} />
         <Button type="submit" className="mt-4 w-full" disabled={connecting}>

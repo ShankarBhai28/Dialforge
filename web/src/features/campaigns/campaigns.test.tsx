@@ -117,6 +117,7 @@ describe('Campaigns', () => {
     await userEvent.clear(within(dialog).getByLabelText('Dial ratio'));
     await userEvent.type(within(dialog).getByLabelText('Dial ratio'), '2');
     await userEvent.click(within(dialog).getByLabelText('Answering-machine detection'));
+    await userEvent.selectOptions(within(dialog).getByLabelText('Status'), 'paused');
 
     await userEvent.click(within(dialog).getByRole('button', { name: 'Create campaign' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -126,7 +127,7 @@ describe('Campaigns', () => {
       formId: 7,
       outboundCallerId: '8065098690',
       autoAnswer: false,
-      status: 'active',
+      status: 'paused',
       dialMode: 'progressive',
       dialRatio: 2,
       maxDialRatio: 2.5,
