@@ -51,4 +51,16 @@ Editor: install the **ESLint**, **Prettier** and **EditorConfig** extensions, an
 - Production access is limited to the people who deploy. Developers work on test servers.
 
 ## 6. Deploying
-Follow `docs/DEPLOY.md` §15. Every deploy: backup → copy files → apply migrations → restart → check `/health` → check the screen you changed → add a `RUNBOOK.md` entry.
+Only people with server access deploy. Use the script, so every deploy follows the same steps:
+```
+DEPLOY_KEY=~/path/to/key.pem scripts/deploy-dev.sh      # DRY_RUN=1 to only build and package
+```
+It runs `npm run check` and builds the web app. On the server it then:
+- refuses if calls are active;
+- backs up to `~/backups/pre-deploy-<time>/`;
+- reinstalls dependencies only if the lockfile changed;
+- restarts the backend, and the dialer only if dialer code changed;
+- checks `/health` and `/app`;
+- prints the rollback command.
+
+The script does **not** apply database migrations: run the new `backend/migration-*.sql` by hand first (see `docs/DEPLOY.md` §15). After deploying, check the screen you changed and add a `RUNBOOK.md` entry.

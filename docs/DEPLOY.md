@@ -607,6 +607,8 @@ environment on a new server.
 
 ## 15. Deploying an update to an existing server
 
+**Preferred:** `scripts/deploy-dev.sh` from a developer machine. It does the backup, the build of the React app (`backend/web-dist`), the install, a restart of only what changed, and the health checks; see `docs/CONTRIBUTING.md` §6. The `git pull` route below is for a server that has the repo checked out. Either way, the React app has to be built (`npm run build:web`), because `backend/web-dist` is not in git.
+
 Once a server is set up per sections 1-14, day-to-day updates are a normal
 git pull, not a file-by-file push:
 ```
