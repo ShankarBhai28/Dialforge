@@ -883,6 +883,10 @@ async function checkAuth() {
   loadDashboard();
   loadCampaigns();
   dashboardPoll = setInterval(loadDashboard, 10000);
+  // Deep link from the new app (/app): /admin.html#campaigns opens that section.
+  const linked = location.hash.slice(1);
+  const navEl = /^[a-z]+$/.test(linked) && document.querySelector(`.navitem[data-section="${linked}"]`);
+  if (navEl) navEl.click();
 }
 
 async function doLogout() {

@@ -11,3 +11,4 @@ ari-hello-world/
 *.md
 *.sql
 *.conf
+backend/web-dist/

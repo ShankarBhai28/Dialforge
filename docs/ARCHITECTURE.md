@@ -86,6 +86,8 @@ Every table has `tenant_id` (always 1 today; multi-tenant is planned). The schem
 | `backend/src/routes/*.js` | One Express router per area (campaigns, leads, forms, dialer, agent, reports…). Full URL paths are written in each file, so grep for a URL finds its handler |
 | `backend/src/services/*.js` | Logic shared by several routes: agent status and queue membership, dispositions, forms validation, DNC, lead import, campaign settings |
 | `backend/src/telephony/events.js` | `start()`: ARI Stasis handler (inbound, click-to-call) and AMI queue event handlers. Called once by `server.js` only |
+| `backend/src/webApp.js` | Serves the built React app (`backend/web-dist`) at `/app`; unknown `/app/...` URLs get `index.html` |
+| `web/` | React app; see `docs/FRONTEND.md` |
 | `backend/src/realtime/hub.js` | WebSocket `/ws`: pushes live updates to logged-in browsers (§8) |
 | `backend/src/middleware/auth.js` | `requireAuth`, `requireRole('admin')` |
 | `backend/src/config.js`, `src/state.js` | Settings from `.env`; in-memory call maps shared by routes and telephony |

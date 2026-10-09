@@ -1,6 +1,8 @@
 // ESLint flat config. `npm run lint` from the repo root checks everything below.
 const js = require('@eslint/js');
 const globals = require('globals');
+const tseslint = require('typescript-eslint');
+const reactHooks = require('eslint-plugin-react-hooks');
 const prettier = require('eslint-config-prettier');
 
 module.exports = [
@@ -8,6 +10,7 @@ module.exports = [
     ignores: [
       '**/node_modules/**',
       '**/dist/**',
+      'backend/web-dist/**',
       'Credentials-Dialforge/**',
       // Legacy pages, being replaced by web/ - see docs/APP_REBUILD_PLAN.md.
       'backend/public/**',
@@ -30,6 +33,18 @@ module.exports = [
       eqeqeq: ['error', 'smart'],
       'prefer-const': 'error',
       'no-var': 'error',
+    },
+  },
+  // React app (web/): TypeScript + the rules of hooks.
+  ...tseslint.configs.recommended.map((c) => ({ ...c, files: ['web/**/*.{ts,tsx}'] })),
+  {
+    files: ['web/**/*.{ts,tsx}'],
+    languageOptions: { globals: { ...globals.browser } },
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', ignoreRestSiblings: true }],
+      eqeqeq: ['error', 'smart'],
     },
   },
   prettier,

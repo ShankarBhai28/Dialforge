@@ -10,15 +10,16 @@ A dialer CRM built from scratch on Asterisk 22. It has:
 ## New here? Read in this order
 1. **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how the pieces fit together and how a call flows.
 2. **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** — setup, branches, PR checklist, safety rules.
-3. **[docs/APP_REBUILD_PLAN.md](docs/APP_REBUILD_PLAN.md)** — the move to a React frontend that is in progress now.
-4. **[docs/adr/](docs/adr/)** — why the big technical choices were made.
+3. **[docs/FRONTEND.md](docs/FRONTEND.md)** — the React app: run it, folder layout, how to add a screen.
+4. **[docs/APP_REBUILD_PLAN.md](docs/APP_REBUILD_PLAN.md)** — the move to a React frontend that is in progress now.
+5. **[docs/adr/](docs/adr/)** — why the big technical choices were made.
 
 Reference: [RUNBOOK](docs/RUNBOOK.md) (history of every build step and bug fix) · [STATUS](docs/STATUS.md) (phase dashboard, server versions) · [DEPLOY](docs/DEPLOY.md) (fresh server and updates) · [Dialer test checklist](docs/PREDICTIVE_DIALER_TEST_CHECKLIST.md)
 
 ## Quick start (developers)
 ```
-npm install && npm --prefix backend install
-npm run check        # lint + formatting + tests
+npm install && npm --prefix backend install && npm --prefix web install
+npm run check        # lint + formatting + type check + tests
 ```
 Running the full system needs Asterisk and MySQL on a server; see `docs/DEPLOY.md`.
 
@@ -29,7 +30,7 @@ Running the full system needs Asterisk and MySQL on a server; see `docs/DEPLOY.m
 | `backend/` | Express REST API, ARI/AMI call control, dialer engine, MySQL schema and migrations, tests |
 | `backend/public/` | Current admin and agent pages (plain HTML) — being replaced by `web/` |
 | `backend/asterisk/` | Dialplan files the app depends on |
-| `web/` | React + TypeScript app (from Stage 2 of the rebuild) |
+| `web/` | React + TypeScript app, served at `/app` (see docs/FRONTEND.md) |
 | `bot-service/` | AI voice-bot audio plumbing (proof of concept) |
 | `docs/` | Architecture, contributing, plans, runbook, deploy guide, decision records |
 | `ari-hello-world/`, `phase0/` | Early experiments, kept for reference only |
@@ -38,7 +39,9 @@ Running the full system needs Asterisk and MySQL on a server; see `docs/DEPLOY.m
 
 | Command | Does |
 |---|---|
-| `npm run check` | Everything CI runs: lint, formatting check, tests |
+| `npm run check` | Everything CI runs (except the build): lint, formatting, type check, tests |
 | `npm run lint` | ESLint |
 | `npm run format` | Rewrites files with Prettier |
-| `npm test` | Backend tests (`backend/tests/`, no Asterisk or DB needed) |
+| `npm test` | Backend tests + React app tests (no Asterisk or DB needed) |
+| `npm run dev:web` | React app on http://localhost:5173/app, using the dev server API |
+| `npm run build:web` | Builds the React app into `backend/web-dist` |

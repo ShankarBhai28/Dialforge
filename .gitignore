@@ -3,3 +3,6 @@ node_modules/
 backend/certs/
 Credentials-Dialforge/
 *.log
+
+# React app build output (served by the backend at /app)
+backend/web-dist/

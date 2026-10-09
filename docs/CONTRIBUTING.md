@@ -9,6 +9,7 @@ git clone https://github.com/ShankarBhai28/Dialforge.git
 cd Dialforge
 npm install                 # repo tools: ESLint, Prettier
 npm --prefix backend install
+npm --prefix web install
 npm run check               # lint + format check + tests - must pass before you start
 ```
 
@@ -19,7 +20,7 @@ Editor: install the **ESLint**, **Prettier** and **EditorConfig** extensions, an
 | You are working on | How to run it |
 |---|---|
 | Backend logic (dialer rules, call control, validation) | Write or extend a test in `backend/tests/` and run `npm test`. The tests use fake Asterisk and fake DB objects, so nothing else is needed. |
-| Screens (React app, from Stage 2) | `npm --prefix web run dev` — the dev server sends API calls to the dev server, so you need no Asterisk on your laptop. |
+| Screens (React app) | `npm run dev:web`, then open http://localhost:5173/app. API calls go to the dev server, so you need no Asterisk on your laptop. Read `docs/FRONTEND.md` first. |
 | Backend against real Asterisk | Use **your own test server** (see `docs/DEPLOY.md`). Never point a local backend at the shared dev server's Asterisk: two processes using the same ARI app name steal each other's calls. |
 
 ## 2. Branches and commits

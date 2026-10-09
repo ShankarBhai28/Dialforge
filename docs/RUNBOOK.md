@@ -1132,3 +1132,26 @@ Plan: `docs/APP_REBUILD_PLAN.md`. Branch `react-frontend`, cut from `predictive-
   - 0 active calls at the time. Both services restarted, ARI apps reconnected, AMI logged in.
   - `/health` ok. Pages 200. Protected routes 401 without login. `/ws` 401 without login.
 - **Rollback:** `cd ~/dialforge-backend && tar xzf ~/backups/pre-stage1-20261009-131010/backend-files.tgz && sudo systemctl restart dialforge-backend dialforge-dialer`. The old `server.js` doesn't use `src/`, so leaving `src/` in place is harmless.
+
+## App rebuild — Stage 2: React app shell at /app (2026-10-09, deployed)
+- New `web/`: React 19, TypeScript 5.9, Vite 8, Tailwind 4, shadcn-style components, React Router 7, TanStack Query 5, Vitest. Guide for developers: `docs/FRONTEND.md`.
+  - TypeScript 7 and React Router 8 were skipped deliberately: typescript-eslint doesn't support TS 7 yet, and RR 7 is the well-known API.
+- In the app:
+  - Login (same session cookie as the classic pages).
+  - Role-based routes: admins get `/app/admin/...`, agents get a page that sends them to the classic agent screen until Stage 4.
+  - Admin layout with the collapsible sidebar groups; it becomes a drawer on phones.
+  - A 401 anywhere returns to login. Mutation errors show as toasts.
+  - Live updates over `/ws`, with automatic reconnect.
+- First real screen: **Dashboard**. Stat tiles plus a Live agents table that refreshes the moment an agent changes status (`agent.status` over `/ws`), with a 15 s fallback poll. Every other menu entry shows "moving here soon" with a button to that section of the classic admin.
+- Classic admin: `/admin.html#<section>` now opens that section, for those buttons. Only lowercase section names are accepted; anything else stays on the Dashboard. Checked in jsdom.
+- Backend:
+  - `src/webApp.js` serves `backend/web-dist` at `/app`. Hashed assets are cached for 1 year; `index.html` is `no-cache`; unknown `/app/...` URLs get `index.html`. If the app isn't built, it returns a clear 503.
+  - The build output is git-ignored. Deploying means `npm run build:web` locally, then copying `backend/web-dist`.
+- Checks:
+  - 34 backend tests (4 new in `webapp.test.js`) and 9 React tests: login, wrong password, admin lands on the dashboard, agents can't open admin screens, sidebar groups, classic links, logout.
+  - CI now also installs `web/`, type-checks, runs its tests and builds it.
+- Deploy:
+  - Backup `~/backups/pre-stage2-20261009-143635/`. 0 active calls; only `dialforge-backend` was restarted.
+  - Results: `/app/`, `/app/admin/users` and `/app/login` → 200. The asset → 200 with `immutable`. Classic pages → 200. `/admin/campaigns` without login → 401.
+- Rollback: restore `backend-files.tgz` from that backup and restart `dialforge-backend`.
+

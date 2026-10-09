@@ -1,0 +1,54 @@
+@import 'tailwindcss';
+
+/* DialForge theme. Colours are named by role (primary, muted…) the
+   shadcn/ui way, so components never hard-code a hex value. */
+@theme {
+  --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+
+  --color-background: #eef2f6;
+  --color-foreground: #0f172a;
+  --color-card: #ffffff;
+  --color-card-foreground: #0f172a;
+  --color-border: #e2e8f0;
+  --color-input: #cbd5e1;
+  --color-ring: #14b8a6;
+
+  --color-primary: #0d9488;
+  --color-primary-hover: #0f766e;
+  --color-primary-foreground: #ffffff;
+  --color-muted: #f1f5f9;
+  --color-muted-foreground: #64748b;
+  --color-accent: #ccfbf1;
+  --color-accent-foreground: #115e59;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+
+  /* sidebar */
+  --color-ink: #0f2027;
+  --color-ink-2: #0f766e;
+
+  /* agent states - same colours as the classic screens */
+  --color-status-available: #16a34a;
+  --color-status-break: #d97706;
+  --color-status-acw: #ea580c;
+  --color-status-talk: #7c3aed;
+  --color-status-offline: #94a3b8;
+
+  --radius-lg: 0.75rem;
+  --radius-md: 0.5rem;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px rgb(15 23 42 / 0.06);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  * {
+    @apply border-border;
+  }
+}

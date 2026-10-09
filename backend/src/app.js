@@ -3,6 +3,7 @@
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
+const { mountWebApp } = require('./webApp');
 
 // Order matters only where two routes could match the same URL; the
 // original single-file order is preserved for those (see tests/routes.test.js).
@@ -38,10 +39,11 @@ function createSessionMiddleware() {
   });
 }
 
-function createApp({ sessionMiddleware = createSessionMiddleware() } = {}) {
+function createApp({ sessionMiddleware = createSessionMiddleware(), webDistDir } = {}) {
   const app = express();
   app.use(express.json());
   app.use(express.static(path.join(__dirname, '..', 'public')));
+  mountWebApp(app, webDistDir);
   app.use(sessionMiddleware);
   for (const name of ROUTERS) app.use(require(`./routes/${name}`));
   return app;
