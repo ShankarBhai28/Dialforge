@@ -138,6 +138,4 @@ function on(eventName, handler) {
   events.on(eventName, handler);
 }
 
-connect();
-
-module.exports = { queueAdd, queueRemove, queuePause, queueReload, redirect, on };
+module.exports = { connect, queueAdd, queueRemove, queuePause, queueReload, redirect, on };
