@@ -26,12 +26,13 @@ const ACTION_LABELS = {
   cancel: 'Cancel',
   password: 'Reset password',
   export: 'Export CSV',
+  logout: 'Force logout',
 };
 
 const CRUD = ['view', 'create', 'edit', 'delete'];
 const SCREENS = [
   { key: 'dashboard', label: 'Dashboard', actions: ['view'] },
-  { key: 'live', label: 'Live Agents', actions: ['view'] },
+  { key: 'live', label: 'Live Agents', actions: ['view', 'logout'] },
   { key: 'dialer', label: 'Dialer', actions: ['view', 'control'] },
   { key: 'calls', label: 'Call Log', actions: ['view'] },
   { key: 'campaigns', label: 'Campaigns', actions: CRUD },
@@ -44,6 +45,7 @@ const SCREENS = [
   { key: 'users', label: 'Users', actions: ['view', 'create', 'edit', 'password'] },
   { key: 'teams', label: 'Teams', actions: CRUD },
   { key: 'reports', label: 'Reports', actions: ['view', 'export'] },
+  { key: 'audit', label: 'Audit Log', actions: ['view'] },
 ];
 const SCREEN_KEYS = SCREENS.map((s) => s.key);
 const SCREEN_ACTIONS = Object.fromEntries(SCREENS.map((s) => [s.key, s.actions]));
@@ -54,6 +56,8 @@ const TEAM_SCOPE_BLOCKED = {
   campaigns: ['create', 'delete'],
   users: ['create', 'edit', 'password'],
   teams: ['create', 'edit', 'delete'],
+  // Every team's changes are in one log, so it's all-teams only.
+  audit: ['view'],
 };
 
 /** Stored rights -> { screen: [actions] }. Also reads the first format ('none' | 'view' | 'manage'). */

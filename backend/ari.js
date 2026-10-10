@@ -114,6 +114,18 @@ async function isEndpointOnline(techResource) {
   }
 }
 
+// 'online' | 'offline', or null when ARI couldn't be asked - callers that
+// act on "offline" (e.g. the stale-agent cleanup) must not treat an ARI
+// hiccup as everyone being offline.
+async function endpointState(techResource) {
+  try {
+    const endpoint = await ariRequest('GET', `/endpoints/${techResource}`);
+    return endpoint.state === 'online' ? 'online' : 'offline';
+  } catch (err) {
+    return /404|not found/i.test(err.message) ? 'offline' : null;
+  }
+}
+
 // Reconnects by itself (e.g. after an Asterisk restart) - without this the
 // app silently stops receiving events until the Node process restarts.
 // onStateChange(true|false) lets callers know whether events are flowing.
@@ -153,6 +165,7 @@ module.exports = {
   stopPlayback,
   destroyBridge,
   isEndpointOnline,
+  endpointState,
   setChannelVar,
   continueInDialplan,
   connectEvents,

@@ -6,6 +6,7 @@ const { requirePermission, requireCaller } = require('../middleware/auth');
 const { findCurrentCampaign } = require('../services/agents');
 const { getDispositions } = require('../services/dispositions');
 const { addDnc } = require('../services/dnc');
+const { audit } = require('../services/audit');
 const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
 const {
   LEAD_BASE_COLUMNS,
@@ -102,7 +103,7 @@ router.post('/leads', requireCaller, async (req, res) => {
 // disposition config: final (lead done), retry after N minutes, schedule a
 // callback, and/or add the number to the DNC list (click2call then refuses it).
 router.post('/leads/:id/disposition', requireCaller, async (req, res) => {
-  const [leadRows] = await pool.query('SELECT id, phone, campaign_id FROM leads WHERE id = ?', [req.params.id]);
+  const [leadRows] = await pool.query('SELECT id, phone, campaign_id, status FROM leads WHERE id = ?', [req.params.id]);
   const lead = leadRows[0];
   if (!lead) return res.status(404).json({ error: 'lead not found' });
   if (req.session.user.role === 'agent') {
@@ -128,7 +129,7 @@ router.post('/agent/calls/:callId/disposition', requireCaller, async (req, res) 
   const call = callRows[0];
   if (!call) return res.status(404).json({ error: 'call not found' });
   if (call.lead_id) {
-    const [rows] = await pool.query('SELECT id, phone, campaign_id FROM leads WHERE id = ?', [call.lead_id]);
+    const [rows] = await pool.query('SELECT id, phone, campaign_id, status FROM leads WHERE id = ?', [call.lead_id]);
     if (rows[0]) return saveDisposition(req, res, rows[0]);
   }
   let campaignId = call.campaign_id;
@@ -144,7 +145,7 @@ router.post('/agent/calls/:callId/disposition', requireCaller, async (req, res) 
     return res.status(400).json({ error: `status must be one of: ${codes.join(', ')}` });
 
   const [existing] = await pool.query(
-    'SELECT id, phone, campaign_id FROM leads WHERE phone = ? AND campaign_id <=> ? ORDER BY id DESC LIMIT 1',
+    'SELECT id, phone, campaign_id, status FROM leads WHERE phone = ? AND campaign_id <=> ? ORDER BY id DESC LIMIT 1',
     [phone, campaignId],
   );
   let lead = existing[0];
@@ -153,7 +154,7 @@ router.post('/agent/calls/:callId/disposition', requireCaller, async (req, res) 
       phone,
       campaignId,
     ]);
-    lead = { id: result.insertId, phone, campaign_id: campaignId };
+    lead = { id: result.insertId, phone, campaign_id: campaignId, status: 'new' };
   }
   await pool.query('UPDATE calls SET lead_id = ? WHERE id = ? AND lead_id IS NULL', [lead.id, call.id]);
   return saveDisposition(req, res, lead);
@@ -215,6 +216,19 @@ async function saveDisposition(req, res, lead) {
     conn.release();
   }
   if (d.marks_dnc) await addDnc(lead.phone, 'disposition', req.session.user.id);
+  // The lead keeps only its latest status; this keeps every outcome given.
+  void audit({
+    user: req.session.user,
+    action: 'leads.outcome',
+    entity: 'leads',
+    entityId: lead.id,
+    status: 200,
+    summary: `${d.code}${req.params.callId ? ` (call ${req.params.callId})` : ''}`,
+    request: { status, callbackAt: callbackAt || undefined, callbackMine, note },
+    before: { status: lead.status ?? null },
+    after: { status: d.code, next_call_at: nextCallAt, is_final: d.is_final ? 1 : 0 },
+    ip: req.ip,
+  });
   res.json({ status: 'ok', leadId: lead.id });
 }
 

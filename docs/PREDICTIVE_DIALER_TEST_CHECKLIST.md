@@ -127,5 +127,15 @@ Same setup as above: two agents in **two different browsers** (or one normal + o
 - [ ] Give the Supervisor role to another login: Campaigns shows Create campaign + Edit but no Delete; Leads shows the Import tab but no Edit / Delete on leads.
 - [ ] Super Admin tries to delete the role while `tl.test` has it → refused, naming `tl.test`.
 
+## Audit log, logins, stuck agents
+- [ ] Deploy / restart the backend while logged in (admin and agent) → nobody is logged out any more.
+- [ ] Edit a campaign (e.g. change its status) → **Audit Log** → newest row `campaigns.edit` by you → open it: the old value struck through, the new one in green.
+- [ ] Log in with a wrong password → Audit Log shows `auth.login_failed` with the name typed. Log in / out → `auth.login` / `auth.logout`.
+- [ ] As a role without Campaigns Delete, try a delete (or any refused action) → row with result **Refused** and the reason.
+- [ ] Agent saves an outcome after a call → `leads.outcome` row: status before → after.
+- [ ] Agent goes Available, then just closes the browser tab → Live Agents still shows them → after ~10–11 min they turn Offline by themselves → Audit Log `agent.auto_logout` (user "system").
+- [ ] Agent Available → supervisor clicks **Force logout** on Live Agents → confirm → agent shows Offline, their screen goes to the login page; `live-agents.logout` in the Audit Log. During a call it's refused ("on a call right now").
+- [ ] On the server: `cd ~/dialforge-backend && npm run db:check` → all OK (shared extensions show as CHECK until fixed in Users).
+
 ## After testing
 - [ ] Tell Claude what failed (step + what you saw) — fixes go in before the live trunk.

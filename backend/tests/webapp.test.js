@@ -22,8 +22,8 @@ let base;
 let serverMissing;
 let baseMissing;
 before(async () => {
-  server = createApp({ sessionMiddleware: noSession, webDistDir: dist }).listen(0, '127.0.0.1');
-  serverMissing = createApp({ sessionMiddleware: noSession, webDistDir: path.join(dist, 'nope') }).listen(
+  server = createApp({ audit: false, sessionMiddleware: noSession, webDistDir: dist }).listen(0, '127.0.0.1');
+  serverMissing = createApp({ audit: false, sessionMiddleware: noSession, webDistDir: path.join(dist, 'nope') }).listen(
     0,
     '127.0.0.1',
   );

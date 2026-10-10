@@ -64,6 +64,8 @@ Dialplan files (installed in `/etc/asterisk/`, `#include`d from `extensions.conf
 
 Agent status lives in `agent_status_log` (latest row per agent). The values are `available`, `break`, `acw` (after-call work) and `logout`. Every change also drives real Asterisk queue membership (`QueueAdd` / `QueuePause` / `QueueRemove`), so `queue show` on the server always matches the UI. After a call the agent goes to ACW, and back to Available after the campaign's wrap-up time.
 
+An agent who never logs out is taken offline in two ways (`src/services/agentLogout.js`): a supervisor's **Force logout** on Live Agents (right: Live Agents → Force logout; refused during a call), and an automatic sweep every minute that logs out anyone Available / Break / ACW whose browser line has been unregistered in Asterisk for `STALE_AGENT_MINUTES` (default 10; never during a call, and never when Asterisk couldn't be asked).
+
 ## 5. Data model (main tables)
 
 | Area | Tables |
@@ -74,6 +76,8 @@ Agent status lives in `agent_status_log` (latest row per agent). The values are 
 | Forms | `forms`, `form_fields`, `form_responses` |
 | Calls | `calls`, `call_events` (append-only audit), `dial_attempts`, `dial_hopper`, `dialer_status` |
 | Agents | `agent_status_log` |
+| Access | `roles` (see ADR 0005), `sessions` (logins, so a restart doesn't log anyone out) |
+| Audit | `audit_log`: every admin-side change (who, when, request, row before / after, refused ones too), logins / logouts / failed logins, agent outcomes, automatic logouts. Written by `src/services/audit.js`; nothing in the app updates or deletes it. Viewed on the **Audit Log** screen. |
 
 Every table has `tenant_id` (always 1 today; multi-tenant is planned). The schema is `backend/schema.sql` plus `backend/migration-*.sql`, applied in order.
 
@@ -107,7 +111,9 @@ Every table has `tenant_id` (always 1 today; multi-tenant is planned). The schem
 ## 7. Configuration
 
 All settings come from `backend/.env` (template: `backend/.env.example`). Never commit `.env`.
-Extra optional setting: `DIALER_MAX_TRUNK_CHANNELS` caps how many trunk channels the dialer may use (default 4).
+Extra optional settings: `DIALER_MAX_TRUNK_CHANNELS` caps how many trunk channels the dialer may use (default 4); `STALE_AGENT_MINUTES` (default 10, `0` = off) for the automatic logout of agents whose line is gone.
+
+**Database health check:** `cd ~/dialforge-backend && npm run db:check` runs read-only consistency checks (stuck statuses and calls, leads vs lists, hopper locks, logins, setup gaps) and prints OK / CHECK per item; exit code 1 when something needs a look.
 
 ## 8. Live updates (WebSocket `/ws`)
 

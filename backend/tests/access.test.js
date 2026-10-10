@@ -89,7 +89,7 @@ test('role rules: ticked actions per screen; any action brings View; unknown one
   assert.deepStrictEqual(role.permissions.dialer, ['view', 'control']); // control brings view
   assert.deepStrictEqual(role.permissions.leads, ['view', 'edit', 'import']);
   assert.deepStrictEqual(role.permissions.users, []);
-  assert.strictEqual(Object.keys(role.permissions).length, 14);
+  assert.strictEqual(Object.keys(role.permissions).length, 15);
   assert.match(parseRole({ name: 'X', permissions: { roles: ['view'] } }).error, /unknown screen/);
   assert.match(parseRole({ name: 'X', permissions: { live: ['delete'] } }).error, /no "delete" action/);
   assert.match(parseRole({ name: 'X', permissions: { live: 'view' } }).error, /list of actions/);

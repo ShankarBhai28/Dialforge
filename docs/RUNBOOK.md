@@ -1314,3 +1314,14 @@ Reported by the user after trying the agent panel:
   - Role changes reach open screens within ~30 s (`/auth/me` re-checked every 60 s, stale after 30 s), without logging out.
 - **Roles screen:** a tick grid (screens down; View / Create / Edit / Delete across; screen-specific actions in "More"), plus "View everything" and "Clear".
 - Tests: 71 backend, 154 web.
+
+## Audit log, logins in MySQL, force logout, auto cleanup, DB check (2026-10-11)
+- **Asked by the user:** be able to verify everything from the DB; fix stuck live agents.
+- **DB audit first (read-only, 32 checks):** 30 OK. Open items: two extensions shared by two agents each (fix in Users); lead 15 status `abandoned` (system result, expected). agent1002's ACW row from 30 Sep (id 81) was found closed before the change.
+- **`migration-audit-sessions.sql`** (applied on dev after a full backup): `audit_log` and `sessions`.
+- **Audit log** (`src/services/audit.js`): `auditMiddleware` records every POST / PUT / DELETE under `/admin` after it finishes - user, action name (`campaigns.edit`, `users.password`, `leads.import`, `campaigns.dialer`...), record + id, HTTP status (refused ones too, with the reason), request body, and the row before / after. Passwords and SIP passwords are never stored. Plus `auth.login` / `auth.login_failed` / `auth.login_refused` / `auth.logout`, `leads.outcome` for every agent outcome, `agent.auto_logout`. New **Audit Log** screen (right: Audit Log → View, all-teams roles only).
+- **Logins in MySQL** (`src/services/sessionStore.js`, ~60 lines, no new package): a deploy or restart no longer logs everyone out. Ending a user's sessions also deletes their rows. (The deploy that introduced it logged everyone out once.)
+- **Force logout** on Live Agents (`POST /admin/live-agents/:id/logout`, right: Live Agents → Force logout): closes the status, removes them from the Asterisk queue, frees a preview lead, ends their login. Refused during a call.
+- **Automatic cleanup** (`startStaleAgentCleanup`): every minute; Available / Break / ACW with the line unregistered for `STALE_AGENT_MINUTES` (10) → offline. Skipped during a call and when ARI doesn't answer (new `ari.endpointState`: online / offline / unknown).
+- **`npm run db:check`** (`src/tools/db-check.js`): the 33 read-only checks, OK / CHECK per item.
+- Tests: 77 backend (`audit.test.js`: audit rows incl. refused + hidden passwords, force logout incl. during a call, stale sweep incl. ARI hiccup and coming back, session store), 158 web.

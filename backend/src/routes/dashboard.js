@@ -2,6 +2,8 @@ const express = require('express');
 const pool = require('../../db');
 const { requirePermission } = require('../middleware/auth');
 const { scopeCondition } = require('../services/access');
+const { onActiveCall, openStatus, takeOffline } = require('../services/agentLogout');
+const { revokeUserSessions } = require('../services/sessions');
 const { whereClause } = require('../services/paging');
 
 const router = express.Router();
@@ -52,6 +54,25 @@ router.get('/admin/live-agents', requirePermission('live', 'view'), async (req, 
     params,
   );
   res.json(rows);
+});
+
+// --- Force logout: a supervisor takes a stuck or absent agent offline ---
+// Same as the agent logging out (queue left, status closed), and their
+// login ends so the browser goes back to the login page. Not during a call.
+router.post('/admin/live-agents/:id/logout', requirePermission('live', 'logout'), async (req, res) => {
+  const [rows] = await pool.query("SELECT id, username FROM users WHERE id = ? AND role = 'agent'", [req.params.id]);
+  const agent = rows[0];
+  const { scope } = req.access;
+  if (!agent || (scope && !scope.agentIds.includes(agent.id))) {
+    return res.status(404).json({ error: 'agent not found' });
+  }
+  const open = await openStatus(agent.id);
+  if (open && (await onActiveCall(open.extension_name))) {
+    return res.status(409).json({ error: `${agent.username} is on a call right now - try again when it ends` });
+  }
+  if (open) await takeOffline(agent.id, open.extension_name);
+  revokeUserSessions(agent.id);
+  res.json({ id: agent.id, status: 'ok', was: open ? open.status : 'offline' });
 });
 
 module.exports = router;

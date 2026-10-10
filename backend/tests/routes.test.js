@@ -15,7 +15,7 @@ const fakeSession = (req, res, next) => {
   next();
 };
 
-const app = createApp({ sessionMiddleware: fakeSession });
+const app = createApp({ sessionMiddleware: fakeSession, audit: false });
 
 function listRoutes() {
   const routes = [];

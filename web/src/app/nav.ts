@@ -16,6 +16,7 @@ import {
   UsersRound,
   CalendarClock,
   Hash,
+  History,
   ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
@@ -73,6 +74,7 @@ export const ADMIN_NAV: NavEntry[] = [
     ],
   },
   { to: '/admin/reports', label: 'Reports', icon: BarChart3, screen: 'reports' },
+  { to: '/admin/audit', label: 'Audit Log', icon: History, screen: 'audit' },
 ];
 
 export const allNavItems = (): NavItem[] => ADMIN_NAV.flatMap((e) => (isGroup(e) ? e.items : [e]));

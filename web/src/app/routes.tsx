@@ -42,6 +42,7 @@ const SCREENS: Record<string, RouteObject['element']> = {
   '/admin/users': page(() => import('@/features/users/UsersPage'), 'UsersPage'),
   '/admin/teams': page(() => import('@/features/teams/TeamsPage'), 'TeamsPage'),
   '/admin/roles': page(() => import('@/features/roles/RolesPage'), 'RolesPage'),
+  '/admin/audit': page(() => import('@/features/audit/AuditPage'), 'AuditPage'),
   '/admin/reports': page(() => import('@/features/reports/ReportsPage'), 'ReportsPage'),
 };
 

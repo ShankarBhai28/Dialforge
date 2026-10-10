@@ -5,6 +5,7 @@ const { closeOpenStatus, syncQueueMembership } = require('../services/agents');
 const { releasePreviewLocks } = require('../services/preview');
 const { sessionUser } = require('../middleware/auth');
 const { accessFor } = require('../services/access');
+const { audit } = require('../services/audit');
 
 const router = express.Router();
 
@@ -21,9 +22,11 @@ router.post('/auth/login', async (req, res) => {
   );
   const user = rows[0];
   if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+    void audit({ username: String(username).slice(0, 50), action: 'auth.login_failed', status: 401, ip: req.ip });
     return res.status(401).json({ error: 'invalid username or password' });
   }
   if (user.status === 'inactive') {
+    void audit({ user, action: 'auth.login_refused', status: 403, summary: 'account disabled', ip: req.ip });
     return res.status(403).json({ error: 'this account is disabled - ask your admin' });
   }
   if (user.role === 'staff' && !(await accessFor({ role: 'staff', roleId: user.role_id, id: user.id }))) {
@@ -43,10 +46,28 @@ router.post('/auth/login', async (req, res) => {
 
   // No auto-Available here anymore - an agent must pick a queue first
   // (enforced client-side via a popup, and server-side below).
+  void audit({
+    user,
+    action: 'auth.login',
+    entity: 'users',
+    entityId: user.id,
+    status: 200,
+    summary: user.role,
+    ip: req.ip,
+  });
   res.json({ status: 'ok', user: await withAccess(req.session.user) });
 });
 
 router.post('/auth/logout', async (req, res) => {
+  if (req.session.user) {
+    void audit({
+      user: req.session.user,
+      action: 'auth.logout',
+      entity: 'users',
+      entityId: req.session.user.id,
+      ip: req.ip,
+    });
+  }
   if (req.session.user && req.session.user.role === 'agent') {
     await releasePreviewLocks(req.session.user.id, null);
     await closeOpenStatus(req.session.user.id);

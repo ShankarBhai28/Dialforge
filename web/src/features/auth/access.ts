@@ -20,11 +20,22 @@ export type Screen =
   | 'numbers'
   | 'users'
   | 'teams'
-  | 'reports';
+  | 'reports'
+  | 'audit';
 /** 'roles' is the Roles screen: Super Admin only, never part of a role. */
 export type NavScreen = Screen | 'roles';
 export type Action =
-  'view' | 'create' | 'edit' | 'delete' | 'control' | 'import' | 'recycle' | 'cancel' | 'password' | 'export';
+  | 'view'
+  | 'create'
+  | 'edit'
+  | 'delete'
+  | 'control'
+  | 'import'
+  | 'recycle'
+  | 'cancel'
+  | 'password'
+  | 'export'
+  | 'logout';
 
 export function canDo(user: User | null | undefined, screen: NavScreen, action: Action) {
   if (!user) return false;

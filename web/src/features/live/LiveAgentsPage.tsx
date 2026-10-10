@@ -1,13 +1,18 @@
 // Live Agents: every agent's current status, queue and active call.
 // Same data as the Dashboard's live table (GET /admin/live-agents), so the
 // query, its cache key and the status badge are reused from features/dashboard.
-import { useQueryClient } from '@tanstack/react-query';
-import { RefreshCw, Users } from 'lucide-react';
+// Force logout takes a stuck or absent agent offline (not during a call).
+import { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { LogOut, RefreshCw, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { EmptyState, SectionHeader, StatusPill } from '@/components/common';
+import { ConfirmDialog, EmptyState, SectionHeader, StatusPill } from '@/components/common';
+import { post } from '@/lib/api';
+import { useAccess } from '@/features/auth/access';
 import { ErrorState } from '@/components/ErrorState';
 import { formatTime } from '@/lib/format';
 import { useNow } from '@/lib/hooks';
@@ -44,7 +49,7 @@ function Counts({ agents }: { agents: LiveAgent[] }) {
   );
 }
 
-function AgentsTable({ agents }: { agents: LiveAgent[] }) {
+function AgentsTable({ agents, onLogout }: { agents: LiveAgent[]; onLogout?: (a: LiveAgent) => void }) {
   const now = useNow();
   return (
     <Table>
@@ -56,6 +61,7 @@ function AgentsTable({ agents }: { agents: LiveAgent[] }) {
           <TableHead>Queue</TableHead>
           <TableHead>Since</TableHead>
           <TableHead>Active call</TableHead>
+          {onLogout && <TableHead className="text-right">Actions</TableHead>}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -86,6 +92,21 @@ function AgentsTable({ agents }: { agents: LiveAgent[] }) {
                 )}
               </TableCell>
               <TableCell className="tabular-nums">{a.active_call_number ?? '—'}</TableCell>
+              {onLogout && (
+                <TableCell className="text-right">
+                  {a.status && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive"
+                      onClick={() => onLogout(a)}
+                      aria-label={`Force logout ${a.username}`}
+                    >
+                      <LogOut /> Force logout
+                    </Button>
+                  )}
+                </TableCell>
+              )}
             </TableRow>
           );
         })}
@@ -103,6 +124,18 @@ export function LiveAgentsPage() {
   const refresh = () => qc.invalidateQueries({ queryKey: dashboardKeys.liveAgents });
   useRealtime('agent.status', refresh);
   useRealtime('call.event', refresh);
+
+  const canLogout = useAccess().can('live', 'logout');
+  const [loggingOut, setLoggingOut] = useState<LiveAgent | null>(null);
+  const logout = useMutation({
+    mutationFn: (id: number) => post(`/admin/live-agents/${id}/logout`),
+    meta: { errorInline: true },
+    onSuccess: () => {
+      toast.success(`${loggingOut?.username} logged out`);
+      setLoggingOut(null);
+      void refresh();
+    },
+  });
 
   return (
     <Card>
@@ -131,10 +164,26 @@ export function LiveAgentsPage() {
         ) : (
           <>
             <Counts agents={agents.data} />
-            <AgentsTable agents={agents.data} />
+            <AgentsTable agents={agents.data} onLogout={canLogout ? setLoggingOut : undefined} />
           </>
         )}
       </CardContent>
+      <ConfirmDialog
+        open={!!loggingOut}
+        onOpenChange={(v) => {
+          if (!v) {
+            setLoggingOut(null);
+            logout.reset();
+          }
+        }}
+        title={`Force logout ${loggingOut?.username}?`}
+        description="They leave their queue at once and their screen goes back to the login page. Not possible during a call. The audit log records who did it."
+        confirmLabel="Force logout"
+        destructive
+        pending={logout.isPending}
+        error={logout.error?.message}
+        onConfirm={() => loggingOut && logout.mutate(loggingOut.id)}
+      />
     </Card>
   );
 }

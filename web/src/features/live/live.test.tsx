@@ -74,4 +74,40 @@ describe('Live Agents', () => {
     renderPage(<LiveAgentsPage />);
     expect(await screen.findByRole('alert')).toHaveTextContent('database unavailable');
   });
+
+  it('Force logout: confirm, then the agent is taken offline; the server reason shows if refused', async () => {
+    const calls = fakeApi({
+      'GET /admin/live-agents': { body: AGENTS },
+      'POST /admin/live-agents/8/logout': { body: { id: 8, status: 'ok', was: 'break' } },
+      'POST /admin/live-agents/7/logout': {
+        status: 409,
+        body: { error: 'agent04 is on a call right now - try again when it ends' },
+      },
+    });
+    renderPage(<LiveAgentsPage />);
+    // offline agents have nothing to log out of
+    await screen.findByText('agent06');
+    expect(screen.queryByRole('button', { name: 'Force logout agent06' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Force logout agent05' }));
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Force logout' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(calls.some((c) => c.key === 'POST /admin/live-agents/8/logout')).toBe(true);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Force logout agent04' }));
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Force logout' }));
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('on a call right now');
+  });
+
+  it('without the Force logout right there is no button', async () => {
+    fakeApi({
+      'GET /auth/me': {
+        body: { id: 30, username: 'tl', role: 'staff', scope: 'all', permissions: { live: ['view'] } },
+      },
+      'GET /admin/live-agents': { body: AGENTS },
+    });
+    renderPage(<LiveAgentsPage />);
+    await screen.findByText('agent05');
+    expect(screen.queryByRole('button', { name: /force logout/i })).not.toBeInTheDocument();
+  });
 });
