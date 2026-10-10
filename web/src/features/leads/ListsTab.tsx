@@ -23,7 +23,7 @@ import { formatDateTime } from '@/lib/format';
 import { useCampaigns } from '@/features/campaigns/api';
 import { useDeleteList, useLists, useSaveList, type LeadList } from './api';
 import { RecycleDialog } from './RecycleDialog';
-import { useCanManage } from '@/features/auth/access';
+import { useCan } from '@/features/auth/access';
 
 function ListDialog({ list, onOpenChange }: { list: LeadList | null; onOpenChange: (open: boolean) => void }) {
   const campaigns = useCampaigns();
@@ -113,7 +113,7 @@ function ListDialog({ list, onOpenChange }: { list: LeadList | null; onOpenChang
 }
 
 export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
-  const manages = useCanManage('leads');
+  const can = useCan('leads');
   const lists = useLists();
   const remove = useDeleteList();
   const [editing, setEditing] = useState<LeadList | 'new' | null>(null);
@@ -126,7 +126,7 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
         title="Lists"
         description="Inactive lists are skipped by the dialer; higher priority lists are dialed first."
         actions={
-          manages && (
+          can('create') && (
             <Button onClick={() => setEditing('new')}>
               <Plus /> Create list
             </Button>
@@ -178,12 +178,12 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
                 <TableCell className="tabular-nums">{l.priority}</TableCell>
                 <TableCell className="whitespace-nowrap">{formatDateTime(l.created_at)}</TableCell>
                 <TableCell className="text-right whitespace-nowrap">
-                  {manages && (
+                  {can('edit') && (
                     <Button variant="ghost" size="sm" onClick={() => setEditing(l)} aria-label={`Edit ${l.name}`}>
                       <Pencil /> Edit
                     </Button>
                   )}
-                  {manages && (
+                  {can('import') && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -193,12 +193,12 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
                       <Upload /> Import
                     </Button>
                   )}
-                  {manages && (
+                  {can('recycle') && (
                     <Button variant="ghost" size="sm" onClick={() => setRecycling(l)} aria-label={`Recycle ${l.name}`}>
                       <RotateCcw /> Recycle
                     </Button>
                   )}
-                  {manages && (
+                  {can('delete') && (
                     <Button
                       variant="ghost"
                       size="sm"

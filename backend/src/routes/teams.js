@@ -83,13 +83,13 @@ async function handleSave(req, res, teamId) {
   }
 }
 
-router.post('/admin/teams', requirePermission('teams', 'manage'), requireAllScope('change teams'), (req, res) =>
+router.post('/admin/teams', requirePermission('teams', 'create'), requireAllScope('change teams'), (req, res) =>
   handleSave(req, res, null),
 );
 
 router.put(
   '/admin/teams/:id',
-  requirePermission('teams', 'manage'),
+  requirePermission('teams', 'edit'),
   requireAllScope('change teams'),
   async (req, res) => {
     const [rows] = await pool.query('SELECT id FROM teams WHERE id = ?', [req.params.id]);
@@ -102,7 +102,7 @@ router.put(
 // or lead data references teams, so nothing needs to block it.
 router.delete(
   '/admin/teams/:id',
-  requirePermission('teams', 'manage'),
+  requirePermission('teams', 'delete'),
   requireAllScope('change teams'),
   async (req, res) => {
     const [rows] = await pool.query('SELECT id FROM teams WHERE id = ?', [req.params.id]);

@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router';
 import { LogOut, Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useLogout, useMe } from '@/features/auth/auth';
+import { useAccess } from '@/features/auth/access';
 import { cn } from '@/lib/utils';
 import { allNavItems } from './nav';
 import { Sidebar } from './Sidebar';
@@ -15,6 +16,7 @@ function usePageTitle() {
 
 export function AdminLayout() {
   const { data: user } = useMe();
+  const { inNoTeam } = useAccess();
   const logout = useLogout();
   const title = usePageTitle();
   // Phone drawer; the sidebar closes it when a screen is picked.
@@ -72,6 +74,15 @@ export function AdminLayout() {
           </Button>
         </header>
         <main className="flex-1 p-4 sm:p-6">
+          {inNoTeam && (
+            <div
+              role="status"
+              className="mb-4 rounded-md border border-status-break/40 bg-status-break/10 px-4 py-3 text-sm"
+            >
+              <strong>You&apos;re not in any team yet</strong>, so your screens show no data. Your role sees only its
+              own teams - ask your Super Admin to add you to a team (Teams screen).
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

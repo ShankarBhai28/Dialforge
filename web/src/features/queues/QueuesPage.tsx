@@ -21,7 +21,7 @@ import {
 import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
 import { RING_STRATEGIES, useDeleteQueue, useQueues, useSaveQueue, type Queue } from './api';
-import { useCanManage } from '@/features/auth/access';
+import { useCan } from '@/features/auth/access';
 
 const strategyLabel = (v: string) => RING_STRATEGIES.find((s) => s.value === v)?.label ?? v;
 const yesNo = (v: string) => (v === 'yes' ? 'Yes' : v === 'no' ? 'No' : v);
@@ -157,7 +157,7 @@ function QueueDialog({ queue, onOpenChange }: { queue: Queue | null; onOpenChang
 }
 
 export function QueuesPage() {
-  const manages = useCanManage('queues');
+  const can = useCan('queues');
   const queues = useQueues();
   const remove = useDeleteQueue();
   // null = closed, 'new' = create, Queue = edit that one.
@@ -171,7 +171,7 @@ export function QueuesPage() {
           title="Queues"
           description="Reusable ring-groups - a campaign references one, plus its own CLI and ring behavior."
           actions={
-            manages && (
+            can('create') && (
               <Button onClick={() => setEditing('new')}>
                 <Plus /> Create queue
               </Button>
@@ -219,12 +219,12 @@ export function QueuesPage() {
                   <TableCell className="tabular-nums">{q.retry}s</TableCell>
                   <TableCell>{yesNo(q.timeout_restart)}</TableCell>
                   <TableCell className="text-right whitespace-nowrap">
-                    {manages && (
+                    {can('edit') && (
                       <Button variant="ghost" size="sm" onClick={() => setEditing(q)} aria-label={`Edit ${q.name}`}>
                         <Pencil /> Edit
                       </Button>
                     )}
-                    {manages && (
+                    {can('delete') && (
                       <Button
                         variant="ghost"
                         size="sm"

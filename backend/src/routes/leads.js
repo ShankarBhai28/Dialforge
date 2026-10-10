@@ -220,7 +220,7 @@ async function saveDisposition(req, res, lead) {
 
 // --- Admin: full lead edit/delete (distinct from the agent-facing
 // disposition endpoint above, which only ever touches status) ---
-router.put('/admin/leads/:id', requirePermission('leads', 'manage'), async (req, res) => {
+router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, res) => {
   const { name, phone, status } = req.body;
   const campaignId = req.body.campaignId ? Number(req.body.campaignId) : null;
   const listId = req.body.listId ? Number(req.body.listId) : null;
@@ -288,7 +288,7 @@ router.put('/admin/leads/:id', requirePermission('leads', 'manage'), async (req,
   res.json({ status: 'ok' });
 });
 
-router.delete('/admin/leads/:id', requirePermission('leads', 'manage'), async (req, res) => {
+router.delete('/admin/leads/:id', requirePermission('leads', 'delete'), async (req, res) => {
   const [rows] = await pool.query('SELECT id, campaign_id FROM leads WHERE id = ?', [req.params.id]);
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id))
     return res.status(404).json({ error: 'lead not found' });
@@ -314,7 +314,7 @@ router.delete('/admin/leads/:id', requirePermission('leads', 'manage'), async (r
   res.json({ status: 'ok' });
 });
 
-router.post('/admin/leads/import', requirePermission('leads', 'manage'), receiveLeadFile, async (req, res) => {
+router.post('/admin/leads/import', requirePermission('leads', 'import'), receiveLeadFile, async (req, res) => {
   const { listId } = req.body;
   if (!req.file) return res.status(400).json({ error: 'choose an .xlsx or .csv file' });
   if (!listId) return res.status(400).json({ error: 'listId is required - create a list first' });

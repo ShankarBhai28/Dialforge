@@ -70,7 +70,7 @@ router.get('/admin/callbacks', requirePermission('callbacks', 'view'), async (re
   res.json(pageResult(rows, count.n, paging));
 });
 
-router.post('/admin/callbacks/:id/cancel', requirePermission('callbacks', 'manage'), async (req, res) => {
+router.post('/admin/callbacks/:id/cancel', requirePermission('callbacks', 'cancel'), async (req, res) => {
   const [cond, params] = scopeCondition(req.access.scope, 'campaigns', 'campaign_id');
   const [result] = await pool.query(
     `UPDATE callbacks SET status = 'cancelled' WHERE id = ? AND status = 'pending'${cond ? ` AND ${cond}` : ''}`,

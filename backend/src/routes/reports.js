@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../../db');
 const { requirePermission } = require('../middleware/auth');
-const { scopeCondition } = require('../services/access');
+const { can, scopeCondition } = require('../services/access');
 
 // A team-scoped role's reports cover only its teams' campaigns and agents.
 const andScope = (req, kind, column) => {
@@ -29,6 +29,9 @@ function toCsv(rows) {
 
 function sendReport(req, res, rows, filename) {
   if (req.query.format === 'csv') {
+    if (!can(req.access, 'reports', 'export')) {
+      return res.status(403).json({ error: "Your role doesn't allow: Reports - Export CSV" });
+    }
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(toCsv(rows));

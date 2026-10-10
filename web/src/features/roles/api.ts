@@ -1,21 +1,29 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, post, put } from '@/lib/api';
-import type { Level, Screen } from '@/features/auth/access';
+import type { Action, Screen } from '@/features/auth/access';
 
 export type RoleScope = 'all' | 'team';
+export type Permissions = Partial<Record<Screen, Action[]>>;
 
-// GET /admin/roles: the screens a role can cover (from the server, so this
-// list never drifts from what it checks) and the roles with their users count.
+// GET /admin/roles: the screens with the actions each one has (from the
+// server, so this list never drifts from what it checks), the actions an
+// own-teams role can't have, and the roles with how many users have them.
 export type AdminRole = {
   id: number;
   name: string;
   scope: RoleScope;
-  permissions: Record<Screen, Level>;
+  permissions: Permissions;
   userCount: number;
 };
-export type RolesResponse = { screens: { key: Screen; label: string }[]; roles: AdminRole[] };
+export type RoleScreen = { key: Screen; label: string; actions: Action[] };
+export type RolesResponse = {
+  screens: RoleScreen[];
+  actionLabels: Record<Action, string>;
+  teamScopeBlocked: Partial<Record<Screen, Action[]>>;
+  roles: AdminRole[];
+};
 
-export type RoleInput = { name: string; scope: RoleScope; permissions: Partial<Record<Screen, Level>> };
+export type RoleInput = { name: string; scope: RoleScope; permissions: Permissions };
 
 export const roleKeys = { all: ['admin', 'roles'] as const };
 

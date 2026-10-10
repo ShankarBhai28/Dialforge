@@ -22,7 +22,7 @@ import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader, StatusPill 
 import { ErrorState } from '@/components/ErrorState';
 import { useCampaigns } from '@/features/campaigns/api';
 import { useDeleteDid, useDids, useSaveDid, type Did } from './api';
-import { useCanManage } from '@/features/auth/access';
+import { useCan } from '@/features/auth/access';
 
 function DidDialog({
   did,
@@ -98,7 +98,7 @@ function DidDialog({
 }
 
 export function NumbersPage() {
-  const manages = useCanManage('numbers');
+  const can = useCan('numbers');
   const dids = useDids();
   const remove = useDeleteDid();
   // `editing`: null = closed, 'new' = add, Did = edit that one.
@@ -112,7 +112,7 @@ export function NumbersPage() {
           title="DID numbers"
           description="Which campaign an inbound number routes to. A call only reaches the right queue if its number is mapped here."
           actions={
-            manages && (
+            can('create') && (
               <Button onClick={() => setEditing('new')}>
                 <Plus /> Add number
               </Button>
@@ -151,12 +151,12 @@ export function NumbersPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-right whitespace-nowrap">
-                    {manages && (
+                    {can('edit') && (
                       <Button variant="ghost" size="sm" onClick={() => setEditing(d)} aria-label={`Edit ${d.number}`}>
                         <Pencil /> Edit
                       </Button>
                     )}
-                    {manages && (
+                    {can('delete') && (
                       <Button
                         variant="ghost"
                         size="sm"

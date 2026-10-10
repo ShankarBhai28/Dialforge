@@ -23,7 +23,7 @@ import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader, StatusPill 
 import { ErrorState } from '@/components/ErrorState';
 import { useCampaigns } from '@/features/campaigns/api';
 import { accountLabel, useUsers } from '@/features/users/api';
-import { useAccess } from '@/features/auth/access';
+import { useCan } from '@/features/auth/access';
 import { useDeleteTeam, useSaveTeam, useTeams, type Team } from './api';
 
 /** A titled box of checkboxes; `selected` holds the ticked ids. */
@@ -201,9 +201,8 @@ const names = (list: { username: string }[]) => (list.length ? list.map((m) => m
 
 export function TeamsPage() {
   const teams = useTeams();
-  const { canManage, teamScope } = useAccess();
-  // A team-scoped role sees its own teams but can't change any.
-  const manages = canManage('teams') && !teamScope;
+  // Own-teams roles never get Create / Edit / Delete here (the server refuses to save such a role).
+  const can = useCan('teams');
   const remove = useDeleteTeam();
   // null = closed, 'new' = create, Team = edit that one.
   const [editing, setEditing] = useState<Team | 'new' | null>(null);
@@ -220,7 +219,7 @@ export function TeamsPage() {
               <Button variant="outline" onClick={() => teams.refetch()}>
                 <RefreshCw /> Refresh
               </Button>
-              {manages && (
+              {can('create') && (
                 <Button onClick={() => setEditing('new')}>
                   <Plus /> Create team
                 </Button>
@@ -266,21 +265,21 @@ export function TeamsPage() {
                     <StatusPill tone={t.status === 'active' ? 'green' : 'grey'}>{t.status}</StatusPill>
                   </TableCell>
                   <TableCell className="text-right whitespace-nowrap">
-                    {manages && (
-                      <>
-                        <Button variant="ghost" size="sm" onClick={() => setEditing(t)} aria-label={`Edit ${t.name}`}>
-                          <Pencil /> Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive"
-                          onClick={() => setDeleting(t)}
-                          aria-label={`Delete ${t.name}`}
-                        >
-                          <Trash2 /> Delete
-                        </Button>
-                      </>
+                    {can('edit') && (
+                      <Button variant="ghost" size="sm" onClick={() => setEditing(t)} aria-label={`Edit ${t.name}`}>
+                        <Pencil /> Edit
+                      </Button>
+                    )}
+                    {can('delete') && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={() => setDeleting(t)}
+                        aria-label={`Delete ${t.name}`}
+                      >
+                        <Trash2 /> Delete
+                      </Button>
                     )}
                   </TableCell>
                 </TableRow>

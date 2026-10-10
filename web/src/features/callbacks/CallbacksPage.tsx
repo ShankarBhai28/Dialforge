@@ -16,7 +16,7 @@ import { useDebouncedValue } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import { useCampaigns } from '@/features/campaigns/api';
 import { useCallbacks, useCancelCallback, type Callback, type CallbackFilters, type StatusFilter } from './api';
-import { useCanManage } from '@/features/auth/access';
+import { useCan } from '@/features/auth/access';
 
 const isOverdue = (c: Callback, now: number) => c.status === 'pending' && new Date(c.callback_at).getTime() < now;
 
@@ -27,7 +27,7 @@ const STATUS_TONE: Record<string, 'green' | 'grey' | 'blue'> = {
 };
 
 export function CallbacksPage() {
-  const manages = useCanManage('callbacks');
+  const can = useCan('callbacks');
   const campaigns = useCampaigns();
   const cancel = useCancelCallback();
   const [status, setStatus] = useState<StatusFilter>('');
@@ -162,7 +162,7 @@ export function CallbacksPage() {
                       </TableCell>
                       <TableCell>{c.created_by_name}</TableCell>
                       <TableCell className="text-right whitespace-nowrap">
-                        {manages && c.status === 'pending' && (
+                        {can('cancel') && c.status === 'pending' && (
                           <Button
                             variant="ghost"
                             size="sm"

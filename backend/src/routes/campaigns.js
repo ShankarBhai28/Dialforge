@@ -40,7 +40,7 @@ function checkCampaignStatus(status, current) {
 
 router.post(
   '/admin/campaigns',
-  requirePermission('campaigns', 'manage'),
+  requirePermission('campaigns', 'create'),
   requireAllScope('create campaigns'),
   async (req, res) => {
     const { name, queueId, outboundCallerId, autoAnswer, formId, status } = req.body;
@@ -80,7 +80,7 @@ router.post(
   },
 );
 
-router.put('/admin/campaigns/:id', requirePermission('campaigns', 'manage'), async (req, res) => {
+router.put('/admin/campaigns/:id', requirePermission('campaigns', 'edit'), async (req, res) => {
   const { name, queueId, outboundCallerId, autoAnswer, status, formId } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const [rows] = await pool.query('SELECT id, status FROM campaigns WHERE id = ?', [req.params.id]);
@@ -115,7 +115,7 @@ router.put('/admin/campaigns/:id', requirePermission('campaigns', 'manage'), asy
 
 router.delete(
   '/admin/campaigns/:id',
-  requirePermission('campaigns', 'manage'),
+  requirePermission('campaigns', 'delete'),
   requireAllScope('delete campaigns'),
   async (req, res) => {
     const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [req.params.id]);
@@ -164,7 +164,7 @@ router.get('/admin/campaigns/:id/dispositions', requireAdminSide, async (req, re
 
 // Replaces the whole set. Leads keep whatever code they already have -
 // a removed code just shows as its raw code in lists.
-router.put('/admin/campaigns/:id/dispositions', requirePermission('campaigns', 'manage'), async (req, res) => {
+router.put('/admin/campaigns/:id/dispositions', requirePermission('campaigns', 'edit'), async (req, res) => {
   const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [req.params.id]);
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].id))
     return res.status(404).json({ error: 'campaign not found' });

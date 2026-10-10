@@ -42,7 +42,7 @@ function parseListPriority(v) {
   return Number.isInteger(n) && n >= -100 && n <= 100 ? n : null;
 }
 
-router.post('/admin/lists', requirePermission('leads', 'manage'), async (req, res) => {
+router.post('/admin/lists', requirePermission('leads', 'create'), async (req, res) => {
   const { name, campaignId, isActive } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (!campaignId) return res.status(400).json({ error: 'campaignId is required' });
@@ -57,7 +57,7 @@ router.post('/admin/lists', requirePermission('leads', 'manage'), async (req, re
   res.status(201).json({ id: result.insertId, name, campaignId });
 });
 
-router.put('/admin/lists/:id', requirePermission('leads', 'manage'), async (req, res) => {
+router.put('/admin/lists/:id', requirePermission('leads', 'edit'), async (req, res) => {
   const { name, campaignId, isActive } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (!campaignId) return res.status(400).json({ error: 'campaignId is required' });
@@ -78,7 +78,7 @@ router.put('/admin/lists/:id', requirePermission('leads', 'manage'), async (req,
   res.json({ id: Number(req.params.id), name, campaignId });
 });
 
-router.delete('/admin/lists/:id', requirePermission('leads', 'manage'), async (req, res) => {
+router.delete('/admin/lists/:id', requirePermission('leads', 'delete'), async (req, res) => {
   const [rows] = await pool.query('SELECT id, campaign_id FROM lists WHERE id = ?', [req.params.id]);
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id))
     return res.status(404).json({ error: 'list not found' });

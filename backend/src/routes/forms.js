@@ -85,9 +85,9 @@ async function handleFormSave(req, res, formId) {
   }
 }
 
-router.post('/admin/forms', requirePermission('forms', 'manage'), (req, res) => handleFormSave(req, res, null));
+router.post('/admin/forms', requirePermission('forms', 'create'), (req, res) => handleFormSave(req, res, null));
 
-router.put('/admin/forms/:id', requirePermission('forms', 'manage'), async (req, res) => {
+router.put('/admin/forms/:id', requirePermission('forms', 'edit'), async (req, res) => {
   const [rows] = await pool.query('SELECT id FROM forms WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'form not found' });
   return handleFormSave(req, res, Number(req.params.id));
@@ -95,7 +95,7 @@ router.put('/admin/forms/:id', requirePermission('forms', 'manage'), async (req,
 
 // Blocked while referenced: a campaign using it, or saved responses
 // (those are real call data - deactivate the form instead).
-router.delete('/admin/forms/:id', requirePermission('forms', 'manage'), async (req, res) => {
+router.delete('/admin/forms/:id', requirePermission('forms', 'delete'), async (req, res) => {
   const [rows] = await pool.query('SELECT id FROM forms WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'form not found' });
   const [campRefs] = await pool.query('SELECT name FROM campaigns WHERE form_id = ?', [req.params.id]);

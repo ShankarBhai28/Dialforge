@@ -332,10 +332,10 @@ type Open = { kind: 'create' } | { kind: 'edit' | 'password' | 'toggle'; user: U
 export function UsersPage() {
   const users = useUsers();
   const { data: me } = useMe();
-  const { canManage, isSuperAdmin, teamScope } = useAccess();
-  // Team-scoped roles only read; anyone but a Super Admin manages agent accounts only.
-  const manages = canManage('users') && !teamScope;
-  const canChange = (u: User) => manages && (isSuperAdmin || u.role === 'agent');
+  const { can, isSuperAdmin } = useAccess();
+  // Anyone but a Super Admin changes agent accounts only (own-teams roles can't
+  // change users at all - the server refuses to save such a role).
+  const canOn = (u: User, action: 'edit' | 'password') => can('users', action) && (isSuperAdmin || u.role === 'agent');
   const toggle = useUpdateUser();
   const [open, setOpen] = useState<Open>(null);
   const close = () => {
@@ -352,7 +352,7 @@ export function UsersPage() {
           title="Users"
           description="Agents, admin logins with a role, and Super Admins. People who leave are deactivated, so their call history stays."
           actions={
-            manages && (
+            can('users', 'create') && (
               <Button onClick={() => setOpen({ kind: 'create' })}>
                 <Plus /> Create user
               </Button>
@@ -405,36 +405,36 @@ export function UsersPage() {
                     </TableCell>
                     <TableCell className="whitespace-nowrap">{formatDateTime(u.created_at)}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
-                      {canChange(u) && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label={`Edit ${u.username}`}
-                            onClick={() => setOpen({ kind: 'edit', user: u })}
-                          >
-                            <Pencil /> Edit
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label={`Reset password for ${u.username}`}
-                            onClick={() => setOpen({ kind: 'password', user: u })}
-                          >
-                            <KeyRound /> Password
-                          </Button>
-                          {!isMe && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className={cn(active && 'text-destructive')}
-                              aria-label={`${active ? 'Deactivate' : 'Activate'} ${u.username}`}
-                              onClick={() => setOpen({ kind: 'toggle', user: u })}
-                            >
-                              {active ? <UserRoundX /> : <UserRoundCheck />} {active ? 'Deactivate' : 'Activate'}
-                            </Button>
-                          )}
-                        </>
+                      {canOn(u, 'edit') && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Edit ${u.username}`}
+                          onClick={() => setOpen({ kind: 'edit', user: u })}
+                        >
+                          <Pencil /> Edit
+                        </Button>
+                      )}
+                      {canOn(u, 'password') && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Reset password for ${u.username}`}
+                          onClick={() => setOpen({ kind: 'password', user: u })}
+                        >
+                          <KeyRound /> Password
+                        </Button>
+                      )}
+                      {canOn(u, 'edit') && !isMe && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={cn(active && 'text-destructive')}
+                          aria-label={`${active ? 'Deactivate' : 'Activate'} ${u.username}`}
+                          onClick={() => setOpen({ kind: 'toggle', user: u })}
+                        >
+                          {active ? <UserRoundX /> : <UserRoundCheck />} {active ? 'Deactivate' : 'Activate'}
+                        </Button>
                       )}
                     </TableCell>
                   </TableRow>

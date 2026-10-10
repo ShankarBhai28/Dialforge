@@ -30,7 +30,7 @@ router.get('/admin/dnc', requirePermission('dnc', 'view'), async (req, res) => {
 });
 
 // Bulk add: one number per line (or comma-separated).
-router.post('/admin/dnc', requirePermission('dnc', 'manage'), async (req, res) => {
+router.post('/admin/dnc', requirePermission('dnc', 'create'), async (req, res) => {
   const entries = String(req.body.phones || '')
     .split(/[\n,]+/)
     .map((p) => p.trim())
@@ -52,7 +52,7 @@ router.post('/admin/dnc', requirePermission('dnc', 'manage'), async (req, res) =
   res.json({ added, existing, invalid });
 });
 
-router.delete('/admin/dnc/:id', requirePermission('dnc', 'manage'), async (req, res) => {
+router.delete('/admin/dnc/:id', requirePermission('dnc', 'delete'), async (req, res) => {
   const [result] = await pool.query('DELETE FROM dnc_numbers WHERE id = ? AND tenant_id = 1', [req.params.id]);
   if (!result.affectedRows) return res.status(404).json({ error: 'not found' });
   res.json({ status: 'ok' });

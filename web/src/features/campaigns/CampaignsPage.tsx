@@ -15,7 +15,7 @@ import { useCampaigns, useDeleteCampaign, type Campaign } from './api';
 import { CampaignSettingsForm } from './CampaignSettingsForm';
 import { DispositionsEditor } from './DispositionsEditor';
 import { RecycleRulesEditor } from './RecycleRulesEditor';
-import { useAccess } from '@/features/auth/access';
+import { useCan } from '@/features/auth/access';
 
 type Tab = 'settings' | 'dispositions' | 'recycle';
 
@@ -86,10 +86,7 @@ function CampaignDialog({
 }
 
 export function CampaignsPage() {
-  const { canManage, teamScope } = useAccess();
-  const manages = canManage('campaigns');
-  // Creating or deleting a campaign reaches outside a team-scoped role's teams.
-  const managesAll = manages && !teamScope;
+  const can = useCan('campaigns');
   const campaigns = useCampaigns();
   const remove = useDeleteCampaign();
   // null = closed; otherwise which campaign (or 'new') and which tab to open on.
@@ -103,7 +100,7 @@ export function CampaignsPage() {
           title="Campaigns"
           description="A campaign references a queue, plus its outbound CLI, auto-answer behavior and dialer settings."
           actions={
-            managesAll && (
+            can('create') && (
               <Button onClick={() => setOpen({ campaign: 'new', tab: 'settings' })}>
                 <Plus /> Create campaign
               </Button>
@@ -152,7 +149,7 @@ export function CampaignsPage() {
                     </StatusPill>
                   </TableCell>
                   <TableCell className="text-right whitespace-nowrap">
-                    {manages && (
+                    {can('edit') && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -162,7 +159,7 @@ export function CampaignsPage() {
                         <Pencil /> Edit
                       </Button>
                     )}
-                    {manages && (
+                    {can('edit') && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -172,7 +169,7 @@ export function CampaignsPage() {
                         <ListChecks /> Dispositions
                       </Button>
                     )}
-                    {manages && (
+                    {can('edit') && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -182,7 +179,7 @@ export function CampaignsPage() {
                         <Repeat /> Recycle rules
                       </Button>
                     )}
-                    {managesAll && (
+                    {can('delete') && (
                       <Button
                         variant="ghost"
                         size="sm"

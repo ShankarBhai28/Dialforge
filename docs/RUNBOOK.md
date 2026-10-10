@@ -1302,3 +1302,15 @@ Reported by the user after trying the agent panel:
 - **Server:** every admin route now uses `requirePermission(screen, level)`. Team scope is applied in the SQL of dashboard, live agents, dialer (overview, actions, hopper), call log, campaigns, lists, leads (incl. import, template), recycle, callbacks, reports, form responses, users and teams. Out-of-scope rows answer 404. Team-scoped roles can't create or delete campaigns, manage users or change teams. Only a Super Admin manages roles and admin-side accounts. Agent routes refuse staff logins. `/auth/me` returns `roleName`, `scope` and `permissions`. `/ws` messages are filtered per staff connection.
 - **Screens:** new **Roles** screen (Super Admin only) with a None / View / Manage grid. Users has an **Account type** (Agent / Admin with a role / Super Admin) and a Role column. Teams has a **Team leaders & supervisors** list (that's how a TL gets "their" team). The menu shows only the role's screens, change buttons are hidden for View, and a typed-in screen outside the role says so. The header shows the role (e.g. "Team Leader · own teams").
 - Tests: 71 backend (incl. `access.test.js`: real routes against a fake DB, as staff and team-scoped roles), 151 web.
+
+## Admin roles: per-action rights instead of "Manage" (2026-10-10)
+- **Reported by the user:** gave a role Campaigns "Manage", but the test login couldn't create campaigns; wanted None / View / Create / Edit / Delete-style options instead of Manage.
+- **Cause (data on dev, read-only):** the role "Tesssss" was saved as *Their own teams* (the dialog's default then), and its login Test_TL was in no team. An own-teams role isn't allowed to create campaigns or manage users, and with no team it sees no data, so every button was hidden, without saying why.
+- **Fixes:**
+  - Rights are now **actions per screen**: View, Create, Edit, Delete + Dialer Start/Pause/Stop, Leads Import / Recycle, Callbacks Cancel, Users Reset password, Reports Export CSV. Every admin route checks its own action (e.g. `DELETE /admin/campaigns/:id` needs Campaigns Delete). CSV export now needs Reports Export.
+  - Stored as `{ screen: [actions] }`. Older rows (`'view'`/`'manage'`) are read as View / every action, so no DB change was needed.
+  - New roles default to **All teams**. Actions an own-teams role can't have are locked in the grid with the reason, and the server refuses to save them (no silent dropping).
+  - An own-teams login in no team sees a note: "You're not in any team yet".
+  - Role changes reach open screens within ~30 s (`/auth/me` re-checked every 60 s, stale after 30 s), without logging out.
+- **Roles screen:** a tick grid (screens down; View / Create / Edit / Delete across; screen-specific actions in "More"), plus "View everything" and "Clear".
+- Tests: 71 backend, 154 web.

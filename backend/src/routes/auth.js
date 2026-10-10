@@ -64,6 +64,8 @@ async function withAccess(user) {
     ...user,
     roleName: access.superAdmin ? 'Super Admin' : access.role.name,
     scope: access.scope ? 'team' : 'all',
+    // Own-teams role: how many teams they're in (0 = they see nothing yet).
+    teamCount: access.scope ? access.scope.teamIds.length : null,
     permissions: access.superAdmin ? null : access.role.permissions,
   };
 }

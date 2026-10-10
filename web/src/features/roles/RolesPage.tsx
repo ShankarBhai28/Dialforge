@@ -1,13 +1,14 @@
 // Roles: admin logins with restricted rights (Team Leader, Supervisor, ...).
-// Super Admin only. Per screen: None (hidden), View (read only) or Manage
-// (also change), plus whether the role sees all teams or only its own.
+// Super Admin only. Per screen, tick what the role may do: View, Create,
+// Edit, Delete and the screen's own actions (Dialer start/stop, Leads
+// import, ...). Plus whether the role sees all teams or only its own.
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
-import { Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Lock, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/form-controls';
+import { Checkbox, Select } from '@/components/ui/form-controls';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
@@ -21,91 +22,161 @@ import {
 } from '@/components/ui/dialog';
 import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader, StatusPill } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
-import { cn } from '@/lib/utils';
-import type { Level, Screen } from '@/features/auth/access';
-import { useDeleteRole, useRoles, useSaveRole, type AdminRole, type RoleScope, type RolesResponse } from './api';
+import type { Action, Screen } from '@/features/auth/access';
+import {
+  useDeleteRole,
+  useRoles,
+  useSaveRole,
+  type AdminRole,
+  type Permissions,
+  type RoleScope,
+  type RolesResponse,
+} from './api';
 
-const LEVELS: { value: Level; label: string }[] = [
-  { value: 'none', label: 'None' },
-  { value: 'view', label: 'View' },
-  { value: 'manage', label: 'Manage' },
-];
+const MAIN: Action[] = ['view', 'create', 'edit', 'delete'];
 
-/** One row per screen: None / View / Manage. */
+/** What `scope` allows for `screen` (an own-teams role can't reach outside its teams). */
+function blockedFor(meta: RolesResponse, scope: RoleScope, screen: Screen): Action[] {
+  return scope === 'team' ? (meta.teamScopeBlocked[screen] ?? []) : [];
+}
+
+/** Ticking any action ticks View; unticking View clears the row. */
+function toggle(current: Action[], action: Action, on: boolean): Action[] {
+  if (action === 'view' && !on) return [];
+  const next = new Set(current);
+  if (on) {
+    next.add(action);
+    next.add('view');
+  } else next.delete(action);
+  return [...next];
+}
+
+function ActionBox({
+  screenLabel,
+  label,
+  checked,
+  blocked,
+  onChange,
+}: {
+  screenLabel: string;
+  label: string;
+  checked: boolean;
+  blocked: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <label
+      className="inline-flex cursor-pointer items-center gap-1.5 text-xs has-disabled:cursor-not-allowed has-disabled:opacity-50"
+      title={blocked ? 'Needs a role that sees all teams' : undefined}
+    >
+      <Checkbox
+        aria-label={`${screenLabel}: ${label}`}
+        checked={checked && !blocked}
+        disabled={blocked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      {blocked && <Lock className="size-3" />}
+    </label>
+  );
+}
+
+/** Screens down, View / Create / Edit / Delete across, then each screen's own actions. */
 function PermissionGrid({
-  screens,
+  meta,
+  scope,
   value,
   onChange,
 }: {
-  screens: RolesResponse['screens'];
-  value: Partial<Record<Screen, Level>>;
-  onChange: (screen: Screen, level: Level) => void;
+  meta: RolesResponse;
+  scope: RoleScope;
+  value: Permissions;
+  onChange: (next: Permissions) => void;
 }) {
+  const set = (screen: Screen, actions: Action[]) => onChange({ ...value, [screen]: actions });
   return (
-    <fieldset className="rounded-md border">
-      <legend className="sr-only">Rights per screen</legend>
-      <div className="grid grid-cols-[1fr_auto] items-center gap-x-3 border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground">
-        <span>Screen</span>
-        <span>Access</span>
-      </div>
-      <div className="max-h-[45vh] divide-y overflow-y-auto">
-        {screens.map((s) => {
-          const current = value[s.key] ?? 'none';
-          return (
-            <div key={s.key} className="grid grid-cols-[1fr_auto] items-center gap-x-3 px-3 py-1.5">
-              <span className="text-sm font-medium">{s.label}</span>
-              <div role="radiogroup" aria-label={s.label} className="flex overflow-hidden rounded-md border text-xs">
-                {LEVELS.map((l) => (
-                  <label
-                    key={l.value}
-                    className={cn(
-                      'cursor-pointer px-2.5 py-1 font-semibold select-none',
-                      current === l.value
-                        ? l.value === 'none'
-                          ? 'bg-muted text-foreground'
-                          : 'bg-primary text-primary-foreground'
-                        : 'text-muted-foreground hover:bg-muted/60',
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      className="sr-only"
-                      name={`perm-${s.key}`}
-                      aria-label={`${s.label}: ${l.label}`}
-                      checked={current === l.value}
-                      onChange={() => onChange(s.key, l.value)}
-                    />
-                    {l.label}
-                  </label>
+    <div className="overflow-x-auto rounded-md border">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/40 text-xs text-muted-foreground">
+          <tr>
+            <th className="px-3 py-2 text-left font-semibold">Screen</th>
+            {MAIN.map((a) => (
+              <th key={a} className="px-2 py-2 text-center font-semibold">
+                {meta.actionLabels[a]}
+              </th>
+            ))}
+            <th className="px-3 py-2 text-left font-semibold">More</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {meta.screens.map((s) => {
+            const current = value[s.key] ?? [];
+            const blocked = blockedFor(meta, scope, s.key);
+            const extra = s.actions.filter((a) => !MAIN.includes(a));
+            const box = (a: Action) => (
+              <ActionBox
+                screenLabel={s.label}
+                label={meta.actionLabels[a]}
+                checked={current.includes(a)}
+                blocked={blocked.includes(a)}
+                onChange={(on) => set(s.key, toggle(current, a, on))}
+              />
+            );
+            return (
+              <tr key={s.key} className={current.length ? undefined : 'text-muted-foreground'}>
+                <td className="px-3 py-1.5 font-medium">{s.label}</td>
+                {MAIN.map((a) => (
+                  <td key={a} className="px-2 py-1.5 text-center">
+                    {s.actions.includes(a) ? box(a) : <span className="text-muted-foreground/50">—</span>}
+                  </td>
                 ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </fieldset>
+                <td className="px-3 py-1.5">
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {extra.map((a) => (
+                      <span key={a} className="inline-flex items-center gap-1.5">
+                        {box(a)}
+                        <span className="text-xs">{meta.actionLabels[a]}</span>
+                      </span>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
+}
+
+/** Drops what the scope doesn't allow (switching a role to own teams). */
+function clamp(meta: RolesResponse, scope: RoleScope, p: Permissions): Permissions {
+  const out: Permissions = {};
+  for (const s of meta.screens) {
+    const blocked = blockedFor(meta, scope, s.key);
+    out[s.key] = (p[s.key] ?? []).filter((a) => !blocked.includes(a));
+  }
+  return out;
 }
 
 function RoleDialog({
   role,
-  screens,
+  meta,
   onOpenChange,
 }: {
   role: AdminRole | null;
-  screens: RolesResponse['screens'];
+  meta: RolesResponse;
   onOpenChange: (v: boolean) => void;
 }) {
   const save = useSaveRole();
   const [name, setName] = useState(role?.name ?? '');
-  const [scope, setScope] = useState<RoleScope>(role?.scope ?? 'team');
-  const [permissions, setPermissions] = useState<Partial<Record<Screen, Level>>>(() => ({ ...role?.permissions }));
+  const [scope, setScope] = useState<RoleScope>(role?.scope ?? 'all');
+  const [permissions, setPermissions] = useState<Permissions>(() => ({ ...role?.permissions }));
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     const trimmed = name.trim();
     save.mutate(
-      { id: role?.id, name: trimmed, scope, permissions },
+      { id: role?.id, name: trimmed, scope, permissions: clamp(meta, scope, permissions) },
       {
         onSuccess: () => {
           toast.success(`Saved role: ${trimmed}`);
@@ -115,6 +186,12 @@ function RoleDialog({
     );
   }
 
+  const viewAll = () => {
+    const next: Permissions = { ...permissions };
+    for (const s of meta.screens) if (!(next[s.key] ?? []).length) next[s.key] = ['view'];
+    setPermissions(next);
+  };
+
   return (
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent size="lg">
@@ -123,7 +200,7 @@ function RoleDialog({
             <DialogTitle>{role ? `Edit ${role.name}` : 'Create role'}</DialogTitle>
             <DialogDescription>
               {role
-                ? 'Changes apply to everyone with this role straight away.'
+                ? 'Changes apply to everyone with this role within about 30 seconds.'
                 : 'e.g. Team Leader or Supervisor. Then give it to people in Users.'}
             </DialogDescription>
           </DialogHeader>
@@ -137,25 +214,30 @@ function RoleDialog({
                 label="Sees data of"
                 hint={
                   scope === 'team'
-                    ? "Only the teams they're a member of (Teams screen). They can't create campaigns, manage users or change teams."
+                    ? "Only the teams they're added to in Teams. Creating or deleting campaigns, users and teams is locked (it reaches outside their teams)."
                     : 'Every team.'
                 }
               >
                 <Select id="role-scope" value={scope} onChange={(e) => setScope(e.target.value as RoleScope)}>
-                  <option value="team">Their own teams</option>
                   <option value="all">All teams</option>
+                  <option value="team">Their own teams</option>
                 </Select>
               </Field>
             </div>
-            <PermissionGrid
-              screens={screens}
-              value={permissions}
-              onChange={(screen, level) => setPermissions((p) => ({ ...p, [screen]: level }))}
-            />
-            <p className="text-xs text-muted-foreground">
-              View: open the screen and read it. Manage: also create, edit, delete and its actions (e.g. start the
-              dialer). Roles themselves are always Super Admin only.
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                Tick what this role may do. Any tick also gives View; a screen with nothing ticked is hidden.
+              </p>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={viewAll}>
+                  View everything
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setPermissions({})}>
+                  Clear
+                </Button>
+              </div>
+            </div>
+            <PermissionGrid meta={meta} scope={scope} value={permissions} onChange={setPermissions} />
             <FormError message={save.error?.message} />
           </DialogBody>
           <DialogFooter>
@@ -172,12 +254,12 @@ function RoleDialog({
   );
 }
 
-/** "Live Agents (view), Dialer (manage), …" */
-function summary(role: AdminRole, screens: RolesResponse['screens']) {
-  const parts = screens
-    .filter((s) => (role.permissions[s.key] ?? 'none') !== 'none')
-    .map((s) => `${s.label}${role.permissions[s.key] === 'manage' ? ' (manage)' : ''}`);
-  return parts.join(', ');
+/** "Live Agents: View · Campaigns: View, Edit · …" */
+function summary(role: AdminRole, meta: RolesResponse) {
+  return meta.screens
+    .filter((s) => (role.permissions[s.key] ?? []).length)
+    .map((s) => `${s.label}: ${(role.permissions[s.key] ?? []).map((a) => meta.actionLabels[a]).join(', ')}`)
+    .join(' · ');
 }
 
 export function RolesPage() {
@@ -191,7 +273,7 @@ export function RolesPage() {
       <CardContent className="pt-5">
         <SectionHeader
           title="Roles"
-          description="Admin logins with only the rights you give them. Give a role to someone in Users (account type: Admin with a role)."
+          description="Admin logins with only the rights you tick. Give a role to someone in Users (account type: Admin with a role)."
           actions={
             <Button onClick={() => setEditing('new')} disabled={!roles.data}>
               <Plus /> Create role
@@ -209,7 +291,7 @@ export function RolesPage() {
           <ErrorState message={roles.error.message} onRetry={() => roles.refetch()} />
         ) : roles.data.roles.length === 0 ? (
           <EmptyState icon={ShieldCheck} title="No roles yet">
-            Create one, e.g. Team Leader: Live Agents, Dialer and Reports for their own team.
+            Create one, e.g. Team Leader: Live Agents and Reports to view, Dialer start / stop.
           </EmptyState>
         ) : (
           <Table>
@@ -217,7 +299,7 @@ export function RolesPage() {
               <TableRow>
                 <TableHead>Role</TableHead>
                 <TableHead>Sees</TableHead>
-                <TableHead>Screens</TableHead>
+                <TableHead>Rights</TableHead>
                 <TableHead>Users</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -231,7 +313,7 @@ export function RolesPage() {
                       {r.scope === 'team' ? 'Own teams' : 'All teams'}
                     </StatusPill>
                   </TableCell>
-                  <TableCell className="min-w-56 text-sm">{summary(r, roles.data.screens)}</TableCell>
+                  <TableCell className="min-w-64 text-sm">{summary(r, roles.data)}</TableCell>
                   <TableCell className="tabular-nums">{r.userCount}</TableCell>
                   <TableCell className="text-right whitespace-nowrap">
                     <Button variant="ghost" size="sm" onClick={() => setEditing(r)} aria-label={`Edit ${r.name}`}>
@@ -258,7 +340,7 @@ export function RolesPage() {
         <RoleDialog
           key={editing === 'new' ? 'new' : editing.id}
           role={editing === 'new' ? null : editing}
-          screens={roles.data.screens}
+          meta={roles.data}
           onOpenChange={(v) => !v && setEditing(null)}
         />
       )}

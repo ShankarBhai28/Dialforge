@@ -27,7 +27,7 @@ router.get('/admin/campaigns/:id/recycle-rules', requirePermission('campaigns', 
   res.json(Object.keys(rules).map((key) => ({ result: key, label: RECYCLE_RULE_LABELS[key], ...rules[key] })));
 });
 
-router.put('/admin/campaigns/:id/recycle-rules', requirePermission('campaigns', 'manage'), async (req, res) => {
+router.put('/admin/campaigns/:id/recycle-rules', requirePermission('campaigns', 'edit'), async (req, res) => {
   const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [req.params.id]);
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].id))
     return res.status(404).json({ error: 'campaign not found' });
@@ -105,7 +105,7 @@ router.get('/admin/lists/:id/recycle', requirePermission('leads', 'view'), async
   });
 });
 
-router.post('/admin/lists/:id/recycle', requirePermission('leads', 'manage'), async (req, res) => {
+router.post('/admin/lists/:id/recycle', requirePermission('leads', 'recycle'), async (req, res) => {
   const list = await listWithCampaign(req.params.id);
   if (!list || !campaignInScope(req.access.scope, list.campaign_id))
     return res.status(404).json({ error: 'list not found' });

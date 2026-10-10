@@ -14,7 +14,7 @@ router.get('/admin/queues', requireAdminSide, async (req, res) => {
   res.json(rows);
 });
 
-router.post('/admin/queues', requirePermission('queues', 'manage'), async (req, res) => {
+router.post('/admin/queues', requirePermission('queues', 'create'), async (req, res) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const asteriskName = slugify(name);
@@ -49,7 +49,7 @@ router.post('/admin/queues', requirePermission('queues', 'manage'), async (req, 
   res.status(201).json({ id: result.insertId, name, asteriskName });
 });
 
-router.put('/admin/queues/:id', requirePermission('queues', 'manage'), async (req, res) => {
+router.put('/admin/queues/:id', requirePermission('queues', 'edit'), async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM queues WHERE id = ?', [req.params.id]);
   const queue = rows[0];
   if (!queue) return res.status(404).json({ error: 'queue not found' });
@@ -90,7 +90,7 @@ router.put('/admin/queues/:id', requirePermission('queues', 'manage'), async (re
   res.json({ id: Number(req.params.id), ...updated });
 });
 
-router.delete('/admin/queues/:id', requirePermission('queues', 'manage'), async (req, res) => {
+router.delete('/admin/queues/:id', requirePermission('queues', 'delete'), async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM queues WHERE id = ?', [req.params.id]);
   const queue = rows[0];
   if (!queue) return res.status(404).json({ error: 'queue not found' });

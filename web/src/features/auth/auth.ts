@@ -14,8 +14,10 @@ export type User = {
   roleName?: string;
   /** 'team' = only the data of the teams they belong to. */
   scope?: 'all' | 'team';
-  /** Staff: level per screen. Super Admin: null (everything). */
-  permissions?: Record<string, 'none' | 'view' | 'manage'> | null;
+  /** Staff: the actions ticked per screen. Super Admin: null (everything). */
+  permissions?: Record<string, string[]> | null;
+  /** Own-teams role: how many teams they're in. */
+  teamCount?: number | null;
 };
 
 export const meKey = ['auth', 'me'] as const;
@@ -32,7 +34,9 @@ export function useMe() {
         throw err;
       }
     },
-    staleTime: 5 * 60 * 1000,
+    // Short, so a role change by the Super Admin shows on screen within ~30 s.
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
     retry: false,
   });
 }

@@ -132,11 +132,11 @@ describe('Users', () => {
     });
   });
 
-  it('a role with Users: manage handles agent accounts only; view-only changes nothing', async () => {
-    const staff = (permissions: Record<string, string>) => ({
+  it('a role with Users rights handles agent accounts only; View alone changes nothing', async () => {
+    const staff = (permissions: Record<string, string[]>) => ({
       body: { id: 30, username: 'sup', role: 'staff', roleName: 'Supervisor', scope: 'all', permissions },
     });
-    fakeApi({ 'GET /auth/me': staff({ users: 'manage' }), 'GET /admin/users': USERS });
+    fakeApi({ 'GET /auth/me': staff({ users: ['view', 'create', 'edit', 'password'] }), 'GET /admin/users': USERS });
     const { unmount } = renderPage(<UsersPage />);
     await screen.findByRole('button', { name: 'Edit agent04' });
     expect(screen.queryByRole('button', { name: 'Edit admin' })).not.toBeInTheDocument();
@@ -144,7 +144,7 @@ describe('Users', () => {
     expect(screen.queryByLabelText('Account type')).not.toBeInTheDocument(); // agents only
     unmount();
 
-    fakeApi({ 'GET /auth/me': staff({ users: 'view' }), 'GET /admin/users': USERS });
+    fakeApi({ 'GET /auth/me': staff({ users: ['view'] }), 'GET /admin/users': USERS });
     renderPage(<UsersPage />);
     await screen.findByText('agent04');
     expect(screen.queryByRole('button', { name: /create user/i })).not.toBeInTheDocument();

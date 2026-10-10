@@ -1,19 +1,25 @@
 const express = require('express');
 const pool = require('../../db');
 const { requireRole, requireAdminSide } = require('../middleware/auth');
-const { SCREENS, forgetRoles, parseRole, toRole } = require('../services/access');
+const { ACTION_LABELS, SCREENS, TEAM_SCOPE_BLOCKED, forgetRoles, parseRole, toRole } = require('../services/access');
 const hub = require('../realtime/hub');
 
 const router = express.Router();
 
 // --- Admin roles (Team Leader, Supervisor, ...): Super Admin only. ---
-// GET also lists the screens, so the roles editor never hard-codes them.
+// GET also lists the screens with their actions, so the roles editor never
+// hard-codes them, and which actions an own-teams role can't have.
 router.get('/admin/roles', requireAdminSide, async (req, res) => {
   const [rows] = await pool.query(
     `SELECT r.*, (SELECT COUNT(*) FROM users u WHERE u.role_id = r.id) AS user_count
      FROM roles r ORDER BY r.name`,
   );
-  res.json({ screens: SCREENS, roles: rows.map((r) => ({ ...toRole(r), userCount: Number(r.user_count) })) });
+  res.json({
+    screens: SCREENS,
+    actionLabels: ACTION_LABELS,
+    teamScopeBlocked: TEAM_SCOPE_BLOCKED,
+    roles: rows.map((r) => ({ ...toRole(r), userCount: Number(r.user_count) })),
+  });
 });
 
 // A role's rights apply on its users' very next request (the cache is

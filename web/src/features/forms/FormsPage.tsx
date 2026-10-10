@@ -12,10 +12,10 @@ import { ErrorState } from '@/components/ErrorState';
 import { toFormInput, useDeleteForm, useForms, useSaveForm, type Form } from './api';
 import { FormBuilderDialog } from './FormBuilderDialog';
 import { ResponsesDialog } from './ResponsesDialog';
-import { useCanManage } from '@/features/auth/access';
+import { useCan } from '@/features/auth/access';
 
 export function FormsPage() {
-  const manages = useCanManage('forms');
+  const can = useCan('forms');
   const forms = useForms();
   const remove = useDeleteForm();
   // Separate from the builder's own mutation so its error shows in this dialog only.
@@ -38,7 +38,7 @@ export function FormsPage() {
               <Button variant="outline" onClick={() => forms.refetch()}>
                 <RefreshCw /> Refresh
               </Button>
-              {manages && (
+              {can('create') && (
                 <Button onClick={() => setEditing('new')}>
                   <Plus /> Create form
                 </Button>
@@ -100,12 +100,12 @@ export function FormsPage() {
                     >
                       <Eye /> Responses
                     </Button>
-                    {manages && (
+                    {can('edit') && (
                       <Button variant="ghost" size="sm" onClick={() => setEditing(f)} aria-label={`Edit ${f.name}`}>
                         <Pencil /> Edit
                       </Button>
                     )}
-                    {manages && (
+                    {can('edit') && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -115,7 +115,7 @@ export function FormsPage() {
                         <Power /> {f.status === 'active' ? 'Deactivate' : 'Activate'}
                       </Button>
                     )}
-                    {manages && (
+                    {can('delete') && (
                       <Button
                         variant="ghost"
                         size="sm"

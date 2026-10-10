@@ -8,7 +8,17 @@ const { test, before, after } = require('node:test');
 const root = path.join(__dirname, '..');
 const sql = [];
 const ROLES = {
-  4: { id: 4, name: 'Supervisor', scope: 'all', permissions: { leads: 'view', campaigns: 'manage', users: 'manage' } },
+  4: {
+    id: 4,
+    name: 'Supervisor',
+    scope: 'all',
+    permissions: {
+      leads: ['view', 'import'],
+      campaigns: ['view', 'create'],
+      users: ['view', 'create', 'edit', 'password'],
+    },
+  },
+  // Saved in the first format ('manage'): read as every action, minus what own-teams roles can't have.
   5: { id: 5, name: 'Team Leader', scope: 'team', permissions: { calls: 'view', campaigns: 'manage', dialer: 'view' } },
 };
 function fake(rel, exports) {
@@ -68,17 +78,30 @@ async function call(who, method, url, body) {
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
-test('role rules: every screen gets a level, unknown screens and built-in names are refused', () => {
-  const { role } = parseRole({ name: ' Team Leader ', scope: 'team', permissions: { live: 'view', dialer: 'manage' } });
+test('role rules: ticked actions per screen; any action brings View; unknown ones are refused', () => {
+  const { role } = parseRole({
+    name: ' Team Leader ',
+    scope: 'team',
+    permissions: { live: ['view'], dialer: ['control'], leads: ['edit', 'import'] },
+  });
   assert.strictEqual(role.name, 'Team Leader');
-  assert.strictEqual(role.permissions.live, 'view');
-  assert.strictEqual(role.permissions.users, 'none');
+  assert.deepStrictEqual(role.permissions.live, ['view']);
+  assert.deepStrictEqual(role.permissions.dialer, ['view', 'control']); // control brings view
+  assert.deepStrictEqual(role.permissions.leads, ['view', 'edit', 'import']);
+  assert.deepStrictEqual(role.permissions.users, []);
   assert.strictEqual(Object.keys(role.permissions).length, 14);
-  assert.match(parseRole({ name: 'X', permissions: { roles: 'manage' } }).error, /unknown screen/);
-  assert.match(parseRole({ name: 'X', permissions: { live: 'admin' } }).error, /level/);
-  assert.match(parseRole({ name: 'Super Admin', permissions: { live: 'view' } }).error, /built-in/);
+  assert.match(parseRole({ name: 'X', permissions: { roles: ['view'] } }).error, /unknown screen/);
+  assert.match(parseRole({ name: 'X', permissions: { live: ['delete'] } }).error, /no "delete" action/);
+  assert.match(parseRole({ name: 'X', permissions: { live: 'view' } }).error, /list of actions/);
+  // own-teams roles can't have what reaches outside their teams - said, not silently dropped
+  assert.match(
+    parseRole({ name: 'X', scope: 'team', permissions: { campaigns: ['create'] } }).error,
+    /Campaigns: Create needs a role that sees all teams/,
+  );
+  assert.ok(parseRole({ name: 'X', scope: 'all', permissions: { campaigns: ['create'] } }).role);
+  assert.match(parseRole({ name: 'Super Admin', permissions: { live: ['view'] } }).error, /built-in/);
   assert.match(parseRole({ name: 'X', permissions: {} }).error, /at least one screen/);
-  assert.match(parseRole({ name: 'X', scope: 'region', permissions: { live: 'view' } }).error, /scope/);
+  assert.match(parseRole({ name: 'X', scope: 'region', permissions: { live: ['view'] } }).error, /scope/);
 });
 
 test('scope helpers: all = no condition; team = only its ids (none = matches nothing)', () => {
@@ -93,9 +116,14 @@ test('scope helpers: all = no condition; team = only its ids (none = matches not
   assert.strictEqual(campaignInScope({ campaignIds: [7] }, 9), false);
 });
 
-test('staff: view opens a screen, manage is needed to change it, none hides it', async () => {
+test('staff: each change needs its own tick; no tick at all hides the screen', async () => {
   assert.strictEqual((await call('sup', 'GET', '/admin/leads')).status, 200);
-  assert.strictEqual((await call('sup', 'PUT', '/admin/leads/1', { phone: '9840012345' })).status, 403);
+  const edit = await call('sup', 'PUT', '/admin/leads/1', { phone: '9840012345' });
+  assert.strictEqual(edit.status, 403);
+  assert.match(edit.body.error, /Leads & Lists - Edit/);
+  // Campaigns: Create ticked, Delete not
+  assert.notStrictEqual((await call('sup', 'POST', '/admin/campaigns', {})).status, 403);
+  assert.strictEqual((await call('sup', 'DELETE', '/admin/campaigns/1')).status, 403);
   assert.strictEqual((await call('sup', 'GET', '/admin/dnc')).status, 403);
   assert.strictEqual((await call('sup', 'GET', '/admin/campaigns')).status, 200); // lookup list
   assert.strictEqual((await call('agent', 'GET', '/admin/campaigns')).status, 403);
@@ -103,7 +131,7 @@ test('staff: view opens a screen, manage is needed to change it, none hides it',
 
 test('only a Super Admin manages roles and admin-side accounts', async () => {
   assert.strictEqual(
-    (await call('sup', 'POST', '/admin/roles', { name: 'X', permissions: { live: 'view' } })).status,
+    (await call('sup', 'POST', '/admin/roles', { name: 'X', permissions: { live: ['view'] } })).status,
     403,
   );
   const r = await call('sup', 'POST', '/admin/users', { username: 'newboss', password: 'longenough', role: 'admin' });
@@ -127,7 +155,7 @@ test('team scope: queries are limited to the teams; reaching outside is refused'
 
   const create = await call('tl', 'POST', '/admin/campaigns', { name: 'Mine' });
   assert.strictEqual(create.status, 403);
-  assert.match(create.body.error, /only roles that see all teams/);
+  assert.match(create.body.error, /Campaigns - Create/);
   // a campaign outside the team answers like a missing one
   assert.strictEqual((await call('tl', 'GET', '/admin/campaigns/9/dispositions')).status, 404);
 });
@@ -136,17 +164,20 @@ test('/auth/me tells the screens what a staff login may do', async () => {
   const me = await call('tl', 'GET', '/auth/me');
   assert.strictEqual(me.body.roleName, 'Team Leader');
   assert.strictEqual(me.body.scope, 'team');
-  assert.strictEqual(me.body.permissions.dialer, 'view');
+  assert.deepStrictEqual(me.body.permissions.dialer, ['view']);
+  assert.strictEqual(me.body.teamCount, 1);
+  // the old 'manage' became every action except the ones own-teams roles can't have
+  assert.deepStrictEqual(me.body.permissions.campaigns, ['view', 'edit']);
   const boss = await call('super', 'GET', '/auth/me');
   assert.strictEqual(boss.body.roleName, 'Super Admin');
   assert.strictEqual(boss.body.permissions, null);
 });
 
 test('live updates: staff get only what their role and teams cover', () => {
-  const level = (p) => (screen) => p[screen] || 'none';
-  const all = { level: level({ live: 'view' }), scope: null };
+  const actions = (p) => (screen) => p[screen] || [];
+  const all = { actions: actions({ live: ['view'] }), scope: null };
   const team = {
-    level: level({ live: 'view', dialer: 'view' }),
+    actions: actions({ live: ['view'], dialer: ['view'] }),
     scope: { campaignIds: [7], agentIds: [21], teamIds: [3] },
   };
   assert.deepStrictEqual(staffView('agent.status', { userId: 99 }, all), { userId: 99 });

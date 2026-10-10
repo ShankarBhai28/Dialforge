@@ -10,7 +10,7 @@ const router = express.Router();
 
 // --- Admin: dialer control + live view (the engine itself is the
 // separate dialer-engine.js process; these only flip state / read status) ---
-router.post('/admin/campaigns/:id/dialer', requirePermission('dialer', 'manage'), async (req, res) => {
+router.post('/admin/campaigns/:id/dialer', requirePermission('dialer', 'control'), async (req, res) => {
   const { action } = req.body;
   const [rows] = await pool.query('SELECT * FROM campaigns WHERE id = ?', [req.params.id]);
   const c = rows[0];

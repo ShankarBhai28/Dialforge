@@ -123,7 +123,8 @@ describe('admin logins with a role', () => {
     extensionName: null,
     roleName: 'Team Leader',
     scope: 'team',
-    permissions: { live: 'view', dialer: 'manage', reports: 'view' },
+    teamCount: 1,
+    permissions: { live: ['view'], dialer: ['view', 'control'], reports: ['view'] },
   };
 
   it('the menu shows only the screens of the role, and the header says which role', async () => {
@@ -152,14 +153,14 @@ describe('admin logins with a role', () => {
   });
 
   it('Roles is for the Super Admin only', async () => {
-    fakeApi({ 'GET /auth/me': { body: { ...TL, permissions: { users: 'manage', teams: 'manage' } } } });
+    fakeApi({ 'GET /auth/me': { body: { ...TL, permissions: { users: ['view', 'create'], teams: ['view'] } } } });
     renderAt('/admin/roles');
     expect(await screen.findByText("Your role doesn't include this screen.")).toBeInTheDocument();
   });
 
   it('view-only: the screen opens without its change buttons', async () => {
     fakeApi({
-      'GET /auth/me': { body: { ...TL, scope: 'all', permissions: { campaigns: 'view' } } },
+      'GET /auth/me': { body: { ...TL, scope: 'all', permissions: { campaigns: ['view'] } } },
       'GET /admin/campaigns': { body: [{ id: 1, name: 'Sales', status: 'active', dial_mode: 'manual' }] },
     });
     renderAt('/admin/campaigns');
@@ -168,14 +169,27 @@ describe('admin logins with a role', () => {
     expect(screen.queryByRole('button', { name: 'Edit Sales' })).not.toBeInTheDocument();
   });
 
-  it("team scope with Campaigns: manage edits its campaigns but can't create or delete", async () => {
+  it('each button follows its own tick: Edit without Create / Delete', async () => {
     fakeApi({
-      'GET /auth/me': { body: { ...TL, permissions: { campaigns: 'manage' } } },
+      'GET /auth/me': { body: { ...TL, permissions: { campaigns: ['view', 'edit'] } } },
       'GET /admin/campaigns': { body: [{ id: 1, name: 'Sales', status: 'active', dial_mode: 'manual' }] },
     });
     renderAt('/admin/campaigns');
     expect(await screen.findByRole('button', { name: 'Edit Sales' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /create campaign/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete Sales' })).not.toBeInTheDocument();
+  });
+
+  it('an own-teams login in no team is told why it sees nothing', async () => {
+    fakeApi({ 'GET /auth/me': { body: { ...TL, teamCount: 0 } }, 'GET /admin/live-agents': { body: [] } });
+    renderAt('/admin/live');
+    expect(await screen.findByText(/not in any team yet/)).toBeInTheDocument();
+  });
+
+  it('Reports without Export: no CSV button', async () => {
+    fakeApi({ 'GET /auth/me': { body: TL }, 'GET /admin/reports/campaigns': { body: [] } });
+    renderAt('/admin/reports');
+    await screen.findByRole('button', { name: /refresh/i });
+    expect(screen.queryByRole('link', { name: /export csv/i })).not.toBeInTheDocument();
   });
 });

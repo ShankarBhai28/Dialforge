@@ -16,6 +16,7 @@ import { useCampaigns } from '@/features/campaigns/api';
 import { formatDateTime, toDateInput } from '@/lib/format';
 import { formatSeconds } from '@/lib/utils';
 import { reportUrl, useReport, type ReportKind } from './api';
+import { useAccess } from '@/features/auth/access';
 
 type Range = { from: string; to: string };
 type CallFilters = Range & { campaignId: string; disposition: string };
@@ -37,6 +38,7 @@ function Toolbar({
   valid: boolean;
   onRefresh: () => void;
 }) {
+  const canExport = useAccess().can('reports', 'export');
   return (
     <div className="mb-4 flex flex-wrap items-end gap-3">
       {children}
@@ -44,7 +46,7 @@ function Toolbar({
         <Button variant="outline" onClick={onRefresh} disabled={!valid}>
           <RefreshCw /> Refresh
         </Button>
-        {valid ? (
+        {!canExport ? null : valid ? (
           <Button variant="outline" asChild>
             {/* A plain link, like the classic window.open: the server sends the file. */}
             <a href={reportUrl(kind, params, true)} target="_blank" rel="noopener noreferrer">

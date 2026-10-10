@@ -16,7 +16,7 @@ router.get('/admin/dids', requirePermission('numbers', 'view'), async (req, res)
   res.json(rows);
 });
 
-router.post('/admin/dids', requirePermission('numbers', 'manage'), async (req, res) => {
+router.post('/admin/dids', requirePermission('numbers', 'create'), async (req, res) => {
   const { number, campaignId } = req.body;
   if (!number) return res.status(400).json({ error: 'number is required' });
   // Upsert - reassigning an existing DID to a different campaign is just
@@ -29,7 +29,7 @@ router.post('/admin/dids', requirePermission('numbers', 'manage'), async (req, r
   res.status(201).json({ number, campaignId: campaignId || null });
 });
 
-router.put('/admin/dids/:id', requirePermission('numbers', 'manage'), async (req, res) => {
+router.put('/admin/dids/:id', requirePermission('numbers', 'edit'), async (req, res) => {
   const { campaignId } = req.body;
   const [rows] = await pool.query('SELECT id FROM dids WHERE id = ?', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'DID not found' });
@@ -37,7 +37,7 @@ router.put('/admin/dids/:id', requirePermission('numbers', 'manage'), async (req
   res.json({ id: Number(req.params.id), campaignId: campaignId || null });
 });
 
-router.delete('/admin/dids/:id', requirePermission('numbers', 'manage'), async (req, res) => {
+router.delete('/admin/dids/:id', requirePermission('numbers', 'delete'), async (req, res) => {
   const [result] = await pool.query('DELETE FROM dids WHERE id = ?', [req.params.id]);
   if (result.affectedRows === 0) return res.status(404).json({ error: 'DID not found' });
   res.json({ status: 'ok' });

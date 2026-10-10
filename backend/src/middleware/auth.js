@@ -1,5 +1,5 @@
 const { isRevoked } = require('../services/sessions');
-const { accessFor, can } = require('../services/access');
+const { ACTION_LABELS, SCREENS, accessFor, can } = require('../services/access');
 
 // A session ended by an admin (role change, deactivation, password reset)
 // is dropped here, on its next request.
@@ -60,13 +60,14 @@ async function loadAccess(req, res) {
   return access;
 }
 
-/** Super Admin, or a staff role with at least `level` (view / manage) on `screen`. */
-function requirePermission(screen, level) {
+/** Super Admin, or a staff role whose rights on `screen` include `action` (view, create, edit, ...). */
+function requirePermission(screen, action) {
   return async (req, res, next) => {
     const access = await loadAccess(req, res);
     if (!access) return;
-    if (!can(access, screen, level)) {
-      return res.status(403).json({ error: `your role can't ${level === 'manage' ? 'change' : 'open'} ${screen}` });
+    if (!can(access, screen, action)) {
+      const label = SCREENS.find((s) => s.key === screen)?.label ?? screen;
+      return res.status(403).json({ error: `Your role doesn't allow: ${label} - ${ACTION_LABELS[action] ?? action}` });
     }
     next();
   };

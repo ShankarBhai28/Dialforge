@@ -35,7 +35,7 @@ import {
   type LeadFilters,
 } from './api';
 import { DEFAULT_DISPOSITIONS, statusLabel } from './statuses';
-import { useCanManage } from '@/features/auth/access';
+import { useCan } from '@/features/auth/access';
 
 const muted = (text: string) => <span className="text-muted-foreground">{text}</span>;
 
@@ -219,7 +219,7 @@ function LeadDialog({ lead, onOpenChange }: { lead: Lead; onOpenChange: (open: b
 }
 
 export function LeadsTab() {
-  const manages = useCanManage('leads');
+  const can = useCan('leads');
   const campaigns = useCampaigns();
   const lists = useLists();
   const remove = useDeleteLead();
@@ -352,12 +352,12 @@ export function LeadsTab() {
                     <TableCell className="tabular-nums">{l.attempts}</TableCell>
                     <TableCell className="whitespace-nowrap">{formatDateTime(l.created_at)}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
-                      {manages && (
+                      {can('edit') && (
                         <Button variant="ghost" size="sm" onClick={() => setEditing(l)} aria-label={`Edit ${l.phone}`}>
                           <Pencil /> Edit
                         </Button>
                       )}
-                      {manages && (
+                      {can('delete') && (
                         <Button
                           variant="ghost"
                           size="sm"
