@@ -12,7 +12,9 @@ const { activeCalls } = require('../state');
 
 const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
 
-const { scopeCondition } = require('../services/access');
+const { campaignInScope, scopeCondition } = require('../services/access');
+const { audit } = require('../services/audit');
+const { playableFile } = require('../services/recording');
 
 const router = express.Router();
 
@@ -56,7 +58,35 @@ router.get('/admin/calls', requirePermission('calls', 'view'), async (req, res) 
     [...where.params, paging.pageSize, paging.offset],
   );
   const [[count]] = await pool.query(`SELECT COUNT(*) AS n FROM calls ca ${where.sql}`, where.params);
-  res.json(pageResult(rows, count.n, paging));
+  // The file path stays on the server; the screen only needs to know there is one.
+  const out = rows.map(({ recording_path: rec, ...r }) => ({ ...r, has_recording: !!rec }));
+  res.json(pageResult(out, count.n, paging));
+});
+
+// --- A call's recording (play in the browser, or ?download=1) ---
+// Right: Call Log -> Play recordings. Every playback is in the audit log.
+router.get('/admin/calls/:id/recording', requirePermission('calls', 'recordings'), async (req, res) => {
+  const [rows] = await pool.query('SELECT id, campaign_id, recording_path FROM calls WHERE id = ?', [req.params.id]);
+  const call = rows[0];
+  if (!call || !campaignInScope(req.access.scope, call.campaign_id))
+    return res.status(404).json({ error: 'call not found' });
+  if (!call.recording_path) return res.status(404).json({ error: 'this call was not recorded' });
+  const found = playableFile(call.recording_path);
+  if (!found)
+    return res.status(410).json({ error: 'the recording is no longer on the server (older than the keep period)' });
+  void audit({
+    user: req.session.user,
+    action: req.query.download ? 'calls.recording_download' : 'calls.recording_play',
+    entity: 'calls',
+    entityId: call.id,
+    ip: req.ip,
+  });
+  const ext = found.type === 'audio/mpeg' ? 'mp3' : 'wav';
+  if (req.query.download) res.attachment(`call-${call.id}.${ext}`);
+  res.type(found.type);
+  res.sendFile(found.file, (err) => {
+    if (err && !res.headersSent) res.status(500).json({ error: 'could not read the recording' });
+  });
 });
 
 router.post('/calls/click2call', requireCaller, async (req, res) => {

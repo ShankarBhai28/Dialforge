@@ -26,3 +26,18 @@ The backend checks the system every minute (`src/services/health.js`): database,
 
 ## Uptime from outside
 The checks above run inside the backend, so they can't report the backend or the whole server being down. Add a free external monitor (e.g. UptimeRobot, Better Stack) on `https://<domain>:3000/health` every 1-5 minutes, alerting to the same people.
+
+## Call recording
+Calls are recorded when the customer is connected to an agent (click-to-call: when the customer answers; inbound / dialer: when an agent takes the call from the queue), on the customer's channel, so the recording follows the call through transfers and conferences. Per campaign: Campaigns -> Edit -> **Record calls** (on by default). Calls without a campaign: `RECORD_CALLS_WITHOUT_CAMPAIGN` (default on). Playback / download: Call Log -> **Play** (right "Call Log -> Play recordings"); every playback is in the audit log.
+
+Files: `/var/spool/asterisk/monitor/dialforge/YYYY/MM/DD/call-<id>-<time>.mp3` (~0.2 MB a minute). Kept `RECORDING_RETENTION_DAYS` (default 90) on the server, removed by the nightly backup (after the S3 sync, if S3 is set).
+
+Install once per server:
+```
+sudo apt-get install -y ffmpeg
+sudo install -o root -g root -m 755 ~/dialforge-backend/ops/recording-done.sh /usr/local/bin/dialforge-recording-done
+sudo install -d -o asterisk -g asterisk -m 2775 /var/spool/asterisk/monitor/dialforge
+```
+The app's AMI login needs the `call` write right (MixMonitor) - already in DEPLOY.md §11. Sizing: 50 agents x ~5 h of talk a day ~ 3.6 GB a day -> about 330 GB for 90 days; plan the disk (or S3 + a shorter local keep).
+
+Recording notice: in India and most places callers should be told calls may be recorded - add a short announcement at the start of inbound calls (a later dialplan change) and mention it in outbound scripts.

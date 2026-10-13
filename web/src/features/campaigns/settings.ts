@@ -24,6 +24,7 @@ export type CampaignForm = {
   outboundCallerId: string;
   status: string;
   autoAnswer: boolean;
+  recordCalls: boolean;
   dialMode: DialMode;
   dialRatio: string;
   maxDialRatio: string;
@@ -61,6 +62,7 @@ export function campaignForm(c: Campaign | null): CampaignForm {
     outboundCallerId: c?.outbound_caller_id ?? '',
     status: c?.status ?? 'active',
     autoAnswer: !!c?.auto_answer,
+    recordCalls: c ? c.record_calls !== 0 : true,
     dialMode: c?.dial_mode ?? 'manual',
     dialRatio: str(c?.dial_ratio, DEFAULTS.dialRatio),
     maxDialRatio: str(c?.max_dial_ratio, DEFAULTS.maxDialRatio),
@@ -86,6 +88,7 @@ export function campaignBody(f: CampaignForm): CampaignBody {
     formId: f.formId ? Number(f.formId) : null,
     outboundCallerId: f.outboundCallerId.trim() || null,
     autoAnswer: f.autoAnswer,
+    recordCalls: f.recordCalls,
     status: f.status,
     dialMode: f.dialMode,
     dialRatio: num(f.dialRatio, DEFAULTS.dialRatio),

@@ -39,7 +39,8 @@ export type Action =
   | 'logout'
   | 'listen'
   | 'whisper'
-  | 'barge';
+  | 'barge'
+  | 'recordings';
 
 export function canDo(user: User | null | undefined, screen: NavScreen, action: Action) {
   if (!user) return false;

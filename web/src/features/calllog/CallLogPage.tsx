@@ -1,8 +1,8 @@
 // Call Log: every call across every agent (GET /admin/calls), filtered and
 // paged on the server.
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { PhoneCall, RefreshCw, Search } from 'lucide-react';
+import { Download, PhoneCall, Play, RefreshCw, Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -16,6 +16,7 @@ import { useDebouncedValue } from '@/lib/hooks';
 import { useRealtime } from '@/lib/realtime';
 import { formatSeconds } from '@/lib/utils';
 import { callLogKeys, NO_CALL_FILTERS, useCalls, type CallFilters, type CallRow } from './api';
+import { useAccess } from '@/features/auth/access';
 
 const NONE = <span className="text-muted-foreground">—</span>;
 
@@ -32,8 +33,28 @@ function talkTime(c: CallRow) {
   return (new Date(c.end_time).getTime() - new Date(c.answer_time).getTime()) / 1000;
 }
 
+/** The browser plays the recording straight from the server (same login cookie). */
+function RecordingPlayer({ call, onClose }: { call: CallRow; onClose: () => void }) {
+  const src = `/admin/calls/${call.id}/recording`;
+  return (
+    <div className="flex flex-wrap items-center gap-3 py-1">
+      <audio controls autoPlay src={src} className="h-9 max-w-full" aria-label={`Recording of call ${call.id}`} />
+      <Button variant="outline" size="sm" asChild>
+        <a href={`${src}?download=1`} download>
+          <Download /> Download
+        </a>
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close player">
+        <X />
+      </Button>
+    </div>
+  );
+}
+
 export function CallLogPage() {
   const qc = useQueryClient();
+  const canPlay = useAccess().can('calls', 'recordings');
+  const [playing, setPlaying] = useState<number | null>(null);
   const [form, setForm] = useState<CallFilters>(NO_CALL_FILTERS);
   // Only the number box is debounced; the selects and dates apply at once.
   const q = useDebouncedValue(form.q.replace(/\D/g, ''), 300);
@@ -128,27 +149,55 @@ export function CallLogPage() {
                   <TableHead>Answer</TableHead>
                   <TableHead>End</TableHead>
                   <TableHead>Talk time</TableHead>
+                  {canPlay && <TableHead>Recording</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {calls.data.rows.map((c) => {
                   const talk = talkTime(c);
                   return (
-                    <TableRow key={c.id}>
-                      {/* Dialer calls have no agent extension until one picks up. */}
-                      <TableCell className="font-semibold tabular-nums">{c.from_extension ?? NONE}</TableCell>
-                      <TableCell className="tabular-nums">{c.to_number}</TableCell>
-                      <TableCell className="capitalize">{c.direction}</TableCell>
-                      <TableCell>
-                        <Disposition call={c} />
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">{formatDateTime(c.start_time)}</TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {c.answer_time ? formatTime(c.answer_time) : NONE}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">{c.end_time ? formatTime(c.end_time) : NONE}</TableCell>
-                      <TableCell className="tabular-nums">{talk === null ? NONE : formatSeconds(talk)}</TableCell>
-                    </TableRow>
+                    <Fragment key={c.id}>
+                      <TableRow>
+                        {/* Dialer calls have no agent extension until one picks up. */}
+                        <TableCell className="font-semibold tabular-nums">{c.from_extension ?? NONE}</TableCell>
+                        <TableCell className="tabular-nums">{c.to_number}</TableCell>
+                        <TableCell className="capitalize">{c.direction}</TableCell>
+                        <TableCell>
+                          <Disposition call={c} />
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">{formatDateTime(c.start_time)}</TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {c.answer_time ? formatTime(c.answer_time) : NONE}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {c.end_time ? formatTime(c.end_time) : NONE}
+                        </TableCell>
+                        <TableCell className="tabular-nums">{talk === null ? NONE : formatSeconds(talk)}</TableCell>
+                        {canPlay && (
+                          <TableCell>
+                            {c.has_recording ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setPlaying(playing === c.id ? null : c.id)}
+                                aria-label={`Play recording of call ${c.id}`}
+                              >
+                                <Play /> Play
+                              </Button>
+                            ) : (
+                              NONE
+                            )}
+                          </TableCell>
+                        )}
+                      </TableRow>
+                      {playing === c.id && (
+                        <TableRow>
+                          <TableCell colSpan={9} className="bg-muted/20">
+                            <RecordingPlayer call={c} onClose={() => setPlaying(null)} />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
                   );
                 })}
               </TableBody>

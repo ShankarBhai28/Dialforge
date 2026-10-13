@@ -16,6 +16,8 @@ export type Campaign = {
   wait_timeout: number | null;
   outbound_caller_id: string | null;
   auto_answer: 0 | 1;
+  /** Calls of this campaign are recorded (on by default). */
+  record_calls?: 0 | 1;
   form_id: number | null;
   form_name: string | null;
   dial_mode: DialMode;
@@ -42,6 +44,7 @@ export type CampaignBody = {
   formId: number | null;
   outboundCallerId: string | null;
   autoAnswer: boolean;
+  recordCalls: boolean;
   status: string;
   dialMode: DialMode;
   dialRatio: number;

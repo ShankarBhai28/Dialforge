@@ -27,6 +27,7 @@ function call(over: Record<string, unknown>) {
     dial_attempt_id: null,
     campaign_name: 'Sales',
     lead_name: null,
+    has_recording: false,
     ...over,
   };
 }
@@ -112,5 +113,31 @@ describe('Call Log', () => {
     fakeApi({ [FIRST]: { status: 401, body: { error: 'not logged in' } } });
     renderPage(<CallLogPage />);
     expect(await screen.findByRole('alert')).toHaveTextContent('not logged in');
+  });
+
+  it('plays and downloads a recorded call; no player for calls without one', async () => {
+    fakeApi({ [FIRST]: paged([call({ id: 7, has_recording: true }), call({ id: 8, to_number: '9000000001' })]) });
+    renderPage(<CallLogPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Play recording of call 7' }));
+    expect(screen.getByLabelText('Recording of call 7')).toHaveAttribute('src', '/admin/calls/7/recording');
+    expect(screen.getByRole('link', { name: /download/i })).toHaveAttribute(
+      'href',
+      '/admin/calls/7/recording?download=1',
+    );
+    expect(screen.queryByRole('button', { name: 'Play recording of call 8' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Close player' }));
+    expect(screen.queryByLabelText('Recording of call 7')).not.toBeInTheDocument();
+  });
+
+  it('without the "Play recordings" right there is no recording column', async () => {
+    fakeApi({
+      'GET /auth/me': {
+        body: { id: 30, username: 'tl', role: 'staff', scope: 'all', permissions: { calls: ['view'] } },
+      },
+      [FIRST]: paged([call({ id: 7, has_recording: true })]),
+    });
+    renderPage(<CallLogPage />);
+    await screen.findByText('9876543210');
+    expect(screen.queryByRole('button', { name: /play recording/i })).not.toBeInTheDocument();
   });
 });

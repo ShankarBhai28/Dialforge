@@ -159,9 +159,25 @@ function on(eventName, handler) {
   events.on(eventName, handler);
 }
 
+/** Records a channel (both directions) to `file`; `command` runs when it ends. */
+function mixMonitor({ channel, file, options = '', command }) {
+  return action('MixMonitor', { Channel: channel, File: file, options, ...(command ? { Command: command } : {}) });
+}
+
 /** Logged in to AMI right now (for the health check). */
 function isReady() {
   return !!socket && loggedIn;
 }
 
-module.exports = { connect, isReady, queueAdd, queueRemove, queuePause, queueReload, originate, redirect, on };
+module.exports = {
+  connect,
+  isReady,
+  mixMonitor,
+  queueAdd,
+  queueRemove,
+  queuePause,
+  queueReload,
+  originate,
+  redirect,
+  on,
+};

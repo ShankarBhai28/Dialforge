@@ -149,5 +149,14 @@ Same setup as above: two agents in **two different browsers** (or one normal + o
 - [ ] **Force logout** on a logged-in agent (not on a call) → confirm → they turn Offline.
 - [ ] Audit Log shows `live-agents.monitor` (with the mode) and `live-agents.logout`.
 
+## Recording, backups, health, login protection
+- [ ] Make a click-to-call that the customer answers, talk ~20 s, hang up → Call Log → that call has **Play** → it plays both sides → **Download** gives an MP3.
+- [ ] Same for an inbound queue call and a dialer call (the recording starts when the agent takes the call).
+- [ ] Transfer a call to another agent → still **one** recording, including the part after the transfer.
+- [ ] Campaigns → Edit → untick **Record calls** → a new call of that campaign has no Play button. Tick it again.
+- [ ] A role without Call Log → Play recordings sees no Recording column. Audit Log shows `calls.recording_play` for each playback.
+- [ ] Dashboard (Super Admin) → **System health**: all green except "Nightly backup - only on this server" until S3 is set.
+- [ ] Log in with a wrong password 5 times → "Too many failed logins - try again in 15 minutes" (Audit Log: `auth.login_locked`); the right password is refused until then.
+
 ## After testing
 - [ ] Tell Claude what failed (step + what you saw) — fixes go in before the live trunk.

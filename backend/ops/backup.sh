@@ -8,7 +8,9 @@
 # then, if BACKUP_S3_BUCKET is set in .env, copies both to
 #   s3://<bucket>/dialforge/<hostname>/  (server-side encrypted)
 # and syncs call recordings to s3://<bucket>/dialforge/<hostname>/recordings/.
-# Local copies older than BACKUP_KEEP_DAYS (default 14) are removed.
+# Local copies older than BACKUP_KEEP_DAYS (default 14) are removed, and
+# call recordings older than RECORDING_RETENTION_DAYS (default 90) are
+# deleted from this server (after the S3 sync, so S3 keeps them).
 # The result is written to ~/backups/nightly/last.json, which the app's
 # System health panel shows; a failure also sends an alert (ALERT_WEBHOOK_URL).
 #
@@ -31,6 +33,7 @@ errors=()
 dbfile="$DEST/db-$TS.sql.gz"
 if MYSQL_PWD="$DB_PASSWORD" mysqldump --single-transaction --routines --no-tablespaces -u"${DB_USER:-dialforge}" "$DB" | gzip -9 > "$dbfile" \
    && gzip -t "$dbfile" && [ "$(stat -c %s "$dbfile")" -gt 1000 ]; then
+  chmod 600 "$dbfile"
   echo "database: $dbfile ($(du -h "$dbfile" | cut -f1))"
 else
   errors+=("database dump failed")
@@ -62,8 +65,15 @@ if [ -n "${BACKUP_S3_BUCKET:-}" ]; then
   if [ $ok = 1 ]; then offsite="ok"; echo "copied to $prefix"; else offsite="failed"; errors+=("upload to S3 failed"); fi
 fi
 
-# 4. keep the last KEEP_DAYS days locally
+# 4. keep the last KEEP_DAYS days locally; recordings for RECORDING_RETENTION_DAYS
 find "$DEST" -maxdepth 1 -type f \( -name 'db-*.sql.gz' -o -name 'config-*.tgz' \) -mtime +"$KEEP_DAYS" -delete
+REC_DIR=/var/spool/asterisk/monitor/dialforge
+REC_DAYS=${RECORDING_RETENTION_DAYS:-90}
+if [ -d "$REC_DIR" ]; then
+  old=$(sudo -n find "$REC_DIR" -type f \( -name '*.mp3' -o -name '*.wav' \) -mtime +"$REC_DAYS" -print -delete | wc -l)
+  sudo -n find "$REC_DIR" -mindepth 1 -type d -empty -delete
+  echo "recordings: $old older than $REC_DAYS days removed, $(sudo -n du -sh "$REC_DIR" | cut -f1) kept"
+fi
 
 # 5. result for the app + alert on failure
 status=$([ ${#errors[@]} -eq 0 ] && echo ok || echo failed)

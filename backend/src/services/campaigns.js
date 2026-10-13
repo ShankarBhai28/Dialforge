@@ -22,6 +22,8 @@ function parseCampaignSettings(body) {
     call_window_end: body.callWindowEnd || '21:00',
     timezone: body.timezone || 'Asia/Kolkata',
     abandon_wait_sec: num(body.abandonWaitSec, 5),
+    // Recording is on unless switched off.
+    record_calls: body.recordCalls === false ? 0 : 1,
   };
   const inRange = (v, lo, hi) => Number.isFinite(v) && v >= lo && v <= hi;
   if (!DIAL_MODES.includes(s.dial_mode)) return { error: 'unknown dial mode' };

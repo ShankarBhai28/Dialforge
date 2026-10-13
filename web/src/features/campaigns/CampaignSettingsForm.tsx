@@ -180,6 +180,12 @@ export function CampaignSettingsForm({ campaign, onDone }: { campaign: Campaign 
             checked={form.autoAnswer}
             onChange={(v) => set('autoAnswer', v)}
           />
+          <CheckField
+            id="c-record"
+            label="Record calls"
+            checked={form.recordCalls}
+            onChange={(v) => set('recordCalls', v)}
+          />
         </div>
 
         <fieldset className="grid gap-4 rounded-lg border p-4">

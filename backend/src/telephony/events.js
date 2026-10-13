@@ -7,6 +7,7 @@ const { APP_NAME } = require('../config');
 const { findAgentIdByExtension, setAgentStatus } = require('../services/agents');
 const { logEvent, resolveDestination } = require('../services/calls');
 const { activeCalls, queueCallChannels } = require('../state');
+const { startRecording } = require('../services/recording');
 
 // Q.850 cause of a failed customer leg -> calls.disposition.
 const DEST_FAILURE = {
@@ -185,6 +186,8 @@ function start() {
 
           await pool.query('UPDATE calls SET answer_time = NOW() WHERE id = ?', [callId]);
           await logEvent(callId, 'bridged', { bridgeId: bridge.id });
+          // Click-to-call: record from the moment the customer answers.
+          void startRecording({ callId, channelName: event.channel.name });
         }
       } else if (event.type === 'StasisEnd') {
         for (const [callId, state] of activeCalls.entries()) {
@@ -302,6 +305,8 @@ function start() {
         [extensionName, fields.DestChannel || null, callId],
       );
       await logEvent(callId, 'agent_answered', { extensionName, interface: fields.Interface });
+      // Inbound / dialer call: record the caller from the moment an agent takes it.
+      void startRecording({ callId, channelName: fields.Channel });
       if (attemptId) {
         await pool.query(
           "UPDATE dial_attempts SET status = 'connected', result = 'connected', connected_at = NOW(), agent_user_id = ? WHERE id = ? AND result IS NULL",

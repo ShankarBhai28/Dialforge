@@ -21,6 +21,8 @@ export type CallRow = {
   campaign_id: number | null;
   auto_answer: 0 | 1 | null;
   agent_channel: string | null;
+  /** A recording exists (GET /admin/calls/:id/recording plays it). */
+  has_recording: boolean;
   transfer_ext: string | null;
   channel_name: string | null;
   dial_attempt_id: number | null;
