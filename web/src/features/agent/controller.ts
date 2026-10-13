@@ -193,7 +193,7 @@ export class AgentController {
     this.outcomeTarget = null;
     this.callAnswered = false;
     this.set({ incoming: null, call: null });
-    this.refresh('calls', 'stats');
+    this.refresh('calls', 'stats', 'history');
     if (target && answered) {
       const resolved = target.leadId || target.callId ? target : await this.findCall(target);
       if (resolved) {
@@ -488,7 +488,7 @@ export class AgentController {
       await post(`/leads/${target.leadId}/disposition`, target.callId ? { ...body, callId: target.callId } : body);
     else await post(`/agent/calls/${target.callId}/disposition`, body);
     this.set({ outcomeFor: null });
-    this.refresh('leads', 'callbacks');
+    this.refresh('leads', 'callbacks', 'history');
     await this.scheduleAutoAvailable();
   }
 

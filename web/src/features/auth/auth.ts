@@ -49,7 +49,10 @@ export function homeFor(role: Role) {
 export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { username: string; password: string }) => post<{ user: User }>('/auth/login', v),
+    // takeOver: an agent logged in elsewhere logs in here instead (the other screen is closed).
+    mutationFn: (v: { username: string; password: string; takeOver?: boolean }) =>
+      post<{ user: User }>('/auth/login', v),
+    meta: { errorInline: true }, // the login page shows it
     onSuccess: ({ user }) => qc.setQueryData(meKey, user),
   });
 }
@@ -66,4 +69,30 @@ export function useLogout() {
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== meKey[0] });
     },
   });
+}
+
+// --- "You were logged out because you logged in elsewhere" ---
+const ENDED_KEY = 'df-session-ended';
+const ENDED_TEXT: Record<string, string> = {
+  elsewhere: 'You were logged out here because you logged in on another browser or computer.',
+};
+
+/** Remembers why the session ended, for the login page to show. */
+export function noteSessionEnded(reason: string) {
+  try {
+    sessionStorage.setItem(ENDED_KEY, ENDED_TEXT[reason] ?? 'Your session was ended.');
+  } catch {
+    /* private mode */
+  }
+}
+
+/** The notice, once (then forgotten). */
+export function takeSessionEndedNotice(): string | null {
+  try {
+    const v = sessionStorage.getItem(ENDED_KEY);
+    sessionStorage.removeItem(ENDED_KEY);
+    return v;
+  } catch {
+    return null;
+  }
 }

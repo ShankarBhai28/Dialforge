@@ -15,6 +15,7 @@ const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/
 const { campaignInScope, scopeCondition } = require('../services/access');
 const { audit } = require('../services/audit');
 const { playableFile } = require('../services/recording');
+const { findLeadByPhone } = require('../services/leadHistory');
 
 const router = express.Router();
 
@@ -135,11 +136,13 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
     await pool.query('UPDATE leads SET attempts = attempts + 1, last_attempt_at = NOW() WHERE id = ?', [leadId]);
   }
 
+  // A number typed on the dialpad that is a known lead: the call goes into that lead's history.
+  const linkedLead = leadId || (await findLeadByPhone(toNumber, campaign ? campaign.id : null));
   const [insertResult] = await pool.query(
     `INSERT INTO calls (tenant_id, lead_id, direction, from_extension, to_number, campaign_id, agent_user_id)
      VALUES (1, ?, 'outbound', ?, ?, ?, ?)`,
     [
-      leadId || null,
+      linkedLead || null,
       fromExtension,
       toNumber,
       campaign ? campaign.id : null,

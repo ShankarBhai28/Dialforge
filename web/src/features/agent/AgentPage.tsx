@@ -14,6 +14,10 @@ import { SidePanel } from './SidePanel';
 import { Tiles, TopBar } from './TopBar';
 import { Workspace } from './Workspace';
 import type { UAFactory } from './softphone/softphone';
+import { useSingleTab } from './singleTab';
+import { FullPageSpinner } from '@/components/FullPageSpinner';
+import { Button } from '@/components/ui/button';
+import { MonitorSmartphone } from 'lucide-react';
 
 const PAGE_TITLE = 'Agent · DialForge';
 
@@ -85,10 +89,28 @@ function AgentScreen() {
   return line.reg === 'registered' ? <Workbench /> : <ConnectLine />;
 }
 
+/** This tab waits: the agent screen is working in another tab of this browser. */
+function OtherTab({ onUseHere }: { onUseHere: () => void }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+      <MonitorSmartphone className="size-10 text-muted-foreground" />
+      <p className="font-semibold">The agent screen is open in another tab.</p>
+      <p className="max-w-sm text-sm text-muted-foreground">
+        Only one tab can have your phone line. Use it there, or move it to this tab - the other one will stop.
+      </p>
+      <Button onClick={onUseHere}>Use here</Button>
+    </div>
+  );
+}
+
 export function AgentPage({ createUA }: { createUA?: UAFactory }) {
   useEffect(() => {
     document.title = PAGE_TITLE;
   }, []);
+  const tab = useSingleTab();
+  if (tab.state === 'checking') return <FullPageSpinner />;
+  // Unmounting the provider below disconnects this tab's phone line.
+  if (tab.state === 'blocked') return <OtherTab onUseHere={tab.takeOver} />;
   return (
     <AgentProvider createUA={createUA}>
       <AgentScreen />

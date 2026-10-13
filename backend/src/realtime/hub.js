@@ -105,6 +105,18 @@ function publish(type, data, { toUserId = null } = {}) {
   }
 }
 
+/** Has this user a screen open right now (a live connection)? */
+function isUserConnected(userId) {
+  for (const { ws, user } of clients) if (user.id === Number(userId) && ws.readyState === ws.OPEN) return true;
+  return false;
+}
+
+/** Sends one message to this user's open screens only. */
+function sendToUser(userId, type, data) {
+  const full = JSON.stringify({ type, data, at: Date.now() });
+  for (const { ws, user } of clients) if (user.id === Number(userId) && ws.readyState === ws.OPEN) ws.send(full);
+}
+
 /** Closes a user's live connections (their access was just revoked). */
 function disconnectUser(userId) {
   for (const client of clients) {
@@ -128,4 +140,14 @@ function watchingCount(screen) {
   return n;
 }
 
-module.exports = { attach, publish, disconnectUser, connectedCount, watchingCount, refreshAccess, staffView };
+module.exports = {
+  attach,
+  publish,
+  disconnectUser,
+  isUserConnected,
+  sendToUser,
+  connectedCount,
+  watchingCount,
+  refreshAccess,
+  staffView,
+};

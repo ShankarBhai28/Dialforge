@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router';
-import { LoaderCircle } from 'lucide-react';
+import { Info, LoaderCircle } from 'lucide-react';
+import { ApiError } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FullPageSpinner } from '@/components/FullPageSpinner';
-import { homeFor, useLogin, useMe } from './auth';
+import { homeFor, takeSessionEndedNotice, useLogin, useMe } from './auth';
 
 export function LoginPage() {
   const { data: user, isPending } = useMe();
@@ -14,6 +15,8 @@ export function LoginPage() {
   const [params] = useSearchParams();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  // Why the last session ended (logged in on another computer), shown once.
+  const [ended] = useState(takeSessionEndedNotice);
 
   // Only follow ?next= inside this app.
   const next = params.get('next');
@@ -22,13 +25,17 @@ export function LoginPage() {
   if (isPending) return <FullPageSpinner />;
   if (user) return <Navigate to={safeNext ?? homeFor(user.role)} replace />;
 
-  function onSubmit(e: FormEvent) {
-    e.preventDefault();
+  function signIn(takeOver = false) {
     login.mutate(
-      { username: username.trim(), password },
+      { username: username.trim(), password, ...(takeOver ? { takeOver: true } : {}) },
       { onSuccess: ({ user: u }) => navigate(safeNext ?? homeFor(u.role), { replace: true }) },
     );
   }
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    signIn();
+  }
+  const elsewhere = login.error instanceof ApiError && login.error.code === 'already_logged_in';
 
   return (
     <div className="flex min-h-full items-center justify-center bg-gradient-to-br from-ink to-ink-2 p-4">
@@ -63,10 +70,37 @@ export function LoginPage() {
           />
         </div>
 
-        {login.error && (
-          <p role="alert" className="mb-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {login.error.message}
+        {ended && !login.error && (
+          <p role="status" className="mb-4 flex gap-2 rounded-md bg-muted px-3 py-2 text-sm">
+            <Info className="mt-0.5 size-4 shrink-0" />
+            {ended}
           </p>
+        )}
+        {elsewhere ? (
+          <div
+            role="alert"
+            className="mb-4 space-y-3 rounded-md border border-status-break/40 bg-status-break/10 p-3 text-sm"
+          >
+            <p className="font-semibold">You are already logged in on another browser or computer.</p>
+            <p className="text-muted-foreground">
+              Log in here and that screen will be closed (its phone line disconnects). An agent can only be logged in
+              once, so calls don&apos;t ring in the wrong place.
+            </p>
+            <div className="flex gap-2">
+              <Button type="button" size="sm" onClick={() => signIn(true)} disabled={login.isPending}>
+                Log in here
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => login.reset()}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          login.error && (
+            <p role="alert" className="mb-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {login.error.message}
+            </p>
+          )
         )}
 
         <Button type="submit" className="w-full" disabled={login.isPending}>

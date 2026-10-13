@@ -20,10 +20,25 @@ function revokeUserSessions(userId) {
   if (store) store.destroyUser(Number(userId)).catch((err) => console.error('[session revoke]', err.message));
 }
 
+/**
+ * Ends every session of this user now and tells their open screens why
+ * (reason 'elsewhere' = they logged in on another browser / computer).
+ * Waits for the session rows to be gone. Returns the revocation time: a
+ * login made after it must have a later loginAt.
+ */
+async function endUserSessions(userId, reason) {
+  const t = Date.now();
+  revokedBefore.set(Number(userId), t);
+  hub.sendToUser(userId, 'session.ended', { reason });
+  hub.disconnectUser(userId);
+  if (store) await store.destroyUser(Number(userId));
+  return t;
+}
+
 /** True when this session's login predates a revocation for its user. */
 function isRevoked(sessionUser) {
   const t = revokedBefore.get(Number(sessionUser.id));
   return t !== undefined && !(sessionUser.loginAt > t);
 }
 
-module.exports = { revokeUserSessions, isRevoked, setStore };
+module.exports = { revokeUserSessions, endUserSessions, isRevoked, setStore };

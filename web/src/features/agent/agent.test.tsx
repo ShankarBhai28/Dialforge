@@ -106,6 +106,24 @@ describe('agent screen', () => {
         'POST /agent/form-responses': { status: 201, body: { id: 1 } },
         'POST /leads/9/disposition': { body: { status: 'ok' } },
         'GET /agent/campaign-info': { body: null },
+        'GET /agent/leads/9/history': {
+          body: {
+            lead: { id: 9 },
+            summary: {
+              calls: 3,
+              answered: 2,
+              talkSeconds: 300,
+              lastCallAt: '2026-10-10T10:00:00Z',
+              lastSpokeWith: 'agent1001',
+              lastSpokeAt: '2026-10-10T10:00:00Z',
+              lastOutcome: 'Callback',
+              agents: ['agent1001'],
+              pendingCallback: null,
+            },
+            latestForm: null,
+            timeline: [],
+          },
+        },
       }),
     );
     const s = new FakeSession('9876543210', 'Meena');
@@ -122,6 +140,9 @@ describe('agent screen', () => {
     expect(screen.getByLabelText('Amount *')).toHaveValue(5000);
     expect(screen.getByText('Chennai')).toBeInTheDocument();
     expect(screen.getByText('Saving against: Meena (9876543210)')).toBeInTheDocument();
+    // Who spoke to this customer before, while the call is live.
+    const history = await screen.findByRole('region', { name: 'Customer history' });
+    expect(within(history).getByText(/Last spoke with/)).toHaveTextContent('agent1001');
 
     await userEvent.click(within(panel).getByRole('button', { name: /mute/i }));
     expect(within(panel).getByText(/you are muted/i)).toBeInTheDocument();

@@ -4,10 +4,13 @@
 
 export class ApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /** The server's machine-readable reason, when it gives one (e.g. 'already_logged_in'). */
+  readonly code: string | null;
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -35,7 +38,8 @@ export async function api<T>(path: string, options: { method?: Method; body?: un
       data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
         ? data.error
         : `Request failed (${res.status})`;
-    throw new ApiError(res.status, message);
+    const code = data && typeof data === 'object' && 'code' in data && typeof data.code === 'string' ? data.code : null;
+    throw new ApiError(res.status, message, code);
   }
   return data as T;
 }

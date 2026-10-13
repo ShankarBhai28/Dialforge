@@ -7,6 +7,7 @@ const { sessionUser } = require('../middleware/auth');
 const { accessFor } = require('../services/access');
 const { audit } = require('../services/audit');
 const { guard } = require('../services/loginGuard');
+const { claimAgentLogin } = require('../services/singleLogin');
 
 const router = express.Router();
 
@@ -50,6 +51,28 @@ router.post('/auth/login', async (req, res) => {
     return res.status(403).json({ error: 'your account has no role yet - ask your Super Admin' });
   }
 
+  // Agents: one login at a time (services/singleLogin.js).
+  let loginAt = Date.now();
+  if (user.role === 'agent') {
+    const claim = await claimAgentLogin(user, req.body.takeOver === true);
+    if (claim.refuse) {
+      void audit({ user, action: 'auth.login_refused', status: 409, summary: claim.refuse.body.code, ip: req.ip });
+      return res.status(claim.refuse.status).json(claim.refuse.body);
+    }
+    loginAt = claim.loginAt;
+    if (claim.tookOver) {
+      void audit({
+        user,
+        action: 'auth.login_takeover',
+        entity: 'users',
+        entityId: user.id,
+        status: 200,
+        summary: 'logged in here; the other browser was logged out',
+        ip: req.ip,
+      });
+    }
+  }
+
   req.session.user = {
     id: user.id,
     username: user.username,
@@ -58,7 +81,7 @@ router.post('/auth/login', async (req, res) => {
     extensionId: user.extension_id,
     extensionName: user.extension_name,
     // Sessions started before an admin revokes this user's access end (services/sessions.js).
-    loginAt: Date.now(),
+    loginAt,
   };
 
   // No auto-Available here anymore - an agent must pick a queue first

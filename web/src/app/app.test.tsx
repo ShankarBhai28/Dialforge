@@ -60,6 +60,40 @@ describe('login', () => {
     expect(calls.find((c) => c.key === 'POST /auth/login')?.body).toEqual({ username: 'admin', password: 'secret' });
   });
 
+  it('an agent logged in elsewhere is asked first; "Log in here" takes over', async () => {
+    let tries = 0;
+    const calls = fakeApi({
+      'GET /auth/me': { status: 401 },
+      'POST /auth/login': () =>
+        tries++ === 0
+          ? {
+              status: 409,
+              body: { error: 'You are already logged in on another browser or computer.', code: 'already_logged_in' },
+            }
+          : { body: { status: 'ok', user: AGENT } },
+    });
+    const { router } = renderAt('/login');
+    await userEvent.type(await screen.findByLabelText('Username'), 'agent04');
+    await userEvent.type(screen.getByLabelText('Password'), 'secret');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByText(/already logged in on another browser/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Log in here' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/agent'));
+    expect(calls.filter((c) => c.key === 'POST /auth/login').map((c) => c.body)).toEqual([
+      { username: 'agent04', password: 'secret' },
+      { username: 'agent04', password: 'secret', takeOver: true },
+    ]);
+  });
+
+  it('after being logged out from another computer, the login page says why (once)', async () => {
+    fakeApi({ 'GET /auth/me': { status: 401 } });
+    const { noteSessionEnded } = await import('@/features/auth/auth');
+    noteSessionEnded('elsewhere');
+    renderAt('/login');
+    expect(await screen.findByText(/logged in on another browser or computer/i)).toBeInTheDocument();
+    expect(sessionStorage.getItem('df-session-ended')).toBeNull();
+  });
+
   it('keeps agents out of admin screens', async () => {
     fakeApi({ 'GET /auth/me': { body: AGENT } });
     const { router } = renderAt('/admin/users');

@@ -12,6 +12,7 @@ import { dispositionLabel, isDncStatus, useAgentDispositions, useAgentForm, type
 import { FieldInput, fieldValues, type FieldValues } from '@/features/forms/FieldInput';
 import { useController, usePhone } from './AgentProvider';
 import { LeadStatusChip } from './LeadsPanel';
+import { CustomerHistory } from '@/features/history/CustomerHistory';
 
 const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : String(v));
 
@@ -111,6 +112,10 @@ function PreviewCard() {
               )}
               {stopped && left !== null && <span className="text-sm text-muted-foreground">Auto-dial stopped</span>}
             </div>
+            {/* Before dialing: who spoke to them, what was said. */}
+            <div className="border-t pt-3">
+              <CustomerHistory side="agent" leadId={lead.id} collapsible />
+            </div>
           </div>
         )}
       </CardContent>
@@ -176,6 +181,11 @@ function LeadDetail({
             ))}
           </dl>
         )}
+        {lead?.id ? (
+          <div className="border-t pt-3">
+            <CustomerHistory side="agent" leadId={lead.id} collapsible />
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );

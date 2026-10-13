@@ -8,6 +8,7 @@ const { findAgentIdByExtension, setAgentStatus } = require('../services/agents')
 const { logEvent, resolveDestination } = require('../services/calls');
 const { activeCalls, queueCallChannels } = require('../state');
 const { startRecording } = require('../services/recording');
+const { findLeadByPhone } = require('../services/leadHistory');
 
 // Q.850 cause of a failed customer leg -> calls.disposition.
 const DEST_FAILURE = {
@@ -110,10 +111,13 @@ function start() {
 
           // from_extension isn't known yet - Asterisk's queue engine decides
           // who answers, not us. AMI's AgentConnect event fills it in.
+          // A known caller: the call joins their lead, so the agent sees who it is and their history.
+          const leadId = await findLeadByPhone(callerNumber, campaign.id).catch(() => null);
           const [insertResult] = await pool.query(
-            `INSERT INTO calls (tenant_id, direction, to_number, campaign_id, auto_answer, channel_name, did)
-           VALUES (1, 'inbound', ?, ?, ?, ?, ?)`,
+            `INSERT INTO calls (tenant_id, lead_id, direction, to_number, campaign_id, auto_answer, channel_name, did)
+           VALUES (1, ?, 'inbound', ?, ?, ?, ?, ?)`,
             [
+              leadId,
               callerNumber,
               campaign.id,
               campaign.auto_answer,

@@ -134,6 +134,8 @@ export const agentKeys = {
   form: ['agent', 'form'] as const,
   calls: ['agent', 'calls'] as const,
   control: ['agent', 'call-control'] as const,
+  /** Customer history of a lead (features/history): ['agent', 'lead-history', id]. */
+  history: ['agent', 'lead-history'] as const,
 };
 
 export const useAgentStats = () =>

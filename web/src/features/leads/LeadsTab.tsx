@@ -2,7 +2,7 @@
 // with edit and delete.
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
-import { BookUser, Pencil, Search, Trash2 } from 'lucide-react';
+import { BookUser, History, Pencil, Search, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/form-controls';
@@ -37,6 +37,7 @@ import {
 import { DEFAULT_DISPOSITIONS, statusLabel } from './statuses';
 import { useCan } from '@/features/auth/access';
 import { toastDeleted } from '@/lib/deleted';
+import { CustomerHistory } from '@/features/history/CustomerHistory';
 
 const muted = (text: string) => <span className="text-muted-foreground">{text}</span>;
 
@@ -226,6 +227,7 @@ export function LeadsTab() {
   const remove = useDeleteLead();
   const [editing, setEditing] = useState<Lead | null>(null);
   const [deleting, setDeleting] = useState<Lead | null>(null);
+  const [historyOf, setHistoryOf] = useState<Lead | null>(null);
   const [form, setForm] = useState<LeadFilters>(NO_LEAD_FILTERS);
 
   // Only the search box is debounced; the selects apply at once.
@@ -353,6 +355,14 @@ export function LeadsTab() {
                     <TableCell className="tabular-nums">{l.attempts}</TableCell>
                     <TableCell className="whitespace-nowrap">{formatDateTime(l.created_at)}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setHistoryOf(l)}
+                        aria-label={`History of ${l.phone}`}
+                      >
+                        <History /> History
+                      </Button>
                       {can('edit') && (
                         <Button variant="ghost" size="sm" onClick={() => setEditing(l)} aria-label={`Edit ${l.phone}`}>
                           <Pencil /> Edit
@@ -379,6 +389,21 @@ export function LeadsTab() {
         </>
       )}
 
+      {historyOf && (
+        <Dialog open onOpenChange={(v) => !v && setHistoryOf(null)}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>
+                {historyOf.name || 'Lead'} · {historyOf.phone}
+              </DialogTitle>
+              <DialogDescription>Every call, outcome, form, callback and change - newest first.</DialogDescription>
+            </DialogHeader>
+            <DialogBody className="max-h-[70vh] overflow-y-auto">
+              <CustomerHistory side="admin" leadId={historyOf.id} />
+            </DialogBody>
+          </DialogContent>
+        </Dialog>
+      )}
       {editing && <LeadDialog key={editing.id} lead={editing} onOpenChange={(v) => !v && setEditing(null)} />}
       <ConfirmDialog
         open={!!deleting}

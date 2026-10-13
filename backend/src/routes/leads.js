@@ -18,7 +18,8 @@ const {
   receiveLeadFile,
 } = require('../services/leadImport');
 
-const { campaignInScope, scopeCondition } = require('../services/access');
+const { campaignInScope, can, scopeCondition } = require('../services/access');
+const { leadHistory } = require('../services/leadHistory');
 
 const router = express.Router();
 
@@ -107,6 +108,40 @@ router.post('/leads', requireCaller, async (req, res) => {
 // right after it ends. What it does comes from the campaign's own
 // disposition config: final (lead done), retry after N minutes, schedule a
 // callback, and/or add the number to the DNC list (click2call then refuses it).
+// --- Customer history (services/leadHistory.js) ---
+// Agent screen: a lead of the campaign they're working, or one they have
+// talked to before.
+router.get('/agent/leads/:id/history', requireCaller, async (req, res) => {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query('SELECT id, campaign_id FROM leads WHERE id = ?', [id]);
+  if (!rows[0]) return res.status(404).json({ error: 'lead not found' });
+  const user = req.session.user;
+  if (user.role === 'agent') {
+    const campaign = await findCurrentCampaign(user.id);
+    const inCampaign = !rows[0].campaign_id || (campaign && campaign.id === rows[0].campaign_id);
+    let theirs = false;
+    if (!inCampaign) {
+      const ext = user.extensionName || '';
+      const [mine] = await pool.query(
+        'SELECT 1 FROM calls WHERE lead_id = ? AND (agent_user_id = ? OR from_extension = ? OR transfer_ext = ?) LIMIT 1',
+        [id, user.id, ext, ext],
+      );
+      theirs = mine.length > 0;
+    }
+    if (!inCampaign && !theirs) return res.status(403).json({ error: 'that lead is not in your current campaign' });
+  }
+  res.json(await leadHistory(id, { canPlay: false }));
+});
+
+// Admin side (Leads -> History): with recordings to play for roles that may.
+router.get('/admin/leads/:id/history', requirePermission('leads', 'view'), async (req, res) => {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query('SELECT id, campaign_id FROM leads WHERE id = ?', [id]);
+  if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id))
+    return res.status(404).json({ error: 'lead not found' });
+  res.json(await leadHistory(id, { canPlay: can(req.access, 'calls', 'recordings') }));
+});
+
 router.post('/leads/:id/disposition', requireCaller, async (req, res) => {
   const [leadRows] = await pool.query('SELECT id, phone, campaign_id, status FROM leads WHERE id = ?', [req.params.id]);
   const lead = leadRows[0];

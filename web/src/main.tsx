@@ -4,8 +4,8 @@ import { createBrowserRouter, RouterProvider } from 'react-router';
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster, toast } from 'sonner';
 import { ApiError } from '@/lib/api';
-import { meKey } from '@/features/auth/auth';
-import { stopRealtime } from '@/lib/realtime';
+import { meKey, noteSessionEnded } from '@/features/auth/auth';
+import { stopRealtime, subscribe } from '@/lib/realtime';
 import { routes } from '@/app/routes';
 import './index.css';
 
@@ -35,6 +35,14 @@ const queryClient: QueryClient = new QueryClient({
       refetchOnWindowFocus: true,
     },
   },
+});
+
+// The server ended this login (the agent logged in somewhere else): leave
+// at once - the agent screen unmounts and disconnects its phone line.
+subscribe('session.ended', (msg) => {
+  noteSessionEnded((msg.data as { reason?: string } | null)?.reason ?? '');
+  stopRealtime();
+  queryClient.setQueryData(meKey, null);
 });
 
 const router = createBrowserRouter(routes, { basename: '/app' });
