@@ -431,16 +431,20 @@ running from `~/dialforge-backend` - either clone directly there, or copy
 separate from the running copy is optional but keeps `git pull` simple later
 - pick whichever you'll remember.)
 
+Create the database structure and the first Super Admin. These read the
+database login from `.env`, so fill that in first (section 10), then come back:
 ```
-cd ~/dialforge-backend-repo/backend
-mysql -u dialforge -p dialforge_dev < schema.sql
+cd ~/dialforge-backend
+npm run db:migrate                               # empty database -> full structure (backend/migrations)
+npm run create-admin -- --username <your-name>   # prints a one-time password; change it after logging in
 ```
+`db:migrate` records what it applied in the `schema_migrations` table, so it
+is safe to run again: it only applies what's missing.
 
-Seed the two test extensions this app expects (matching the PJSIP config
-from section 4):
+Add the extensions this app expects (matching the PJSIP config from
+section 4):
 ```sql
 mysql -u dialforge -p dialforge_dev -e "
-INSERT INTO tenants (id, name) VALUES (1, 'Default') ON DUPLICATE KEY UPDATE name=name;
 INSERT INTO extensions (tenant_id, name, sip_password) VALUES
   (1, '1001', '<same password as pjsip.conf [1001] auth>'),
   (1, '1002', '<same password as pjsip.conf [1002] auth>');
@@ -618,12 +622,14 @@ cd backend && npm install        # only picks up new/changed dependencies
 sudo systemctl restart dialforge-backend
 curl -k https://localhost:3000/health
 ```
-If the update includes a schema change, apply the specific migration file
-first (see `backend/migration-*.sql`), then regenerate `backend/schema.sql`
-from the now-current live schema so the next fresh install stays accurate:
+If the update includes database changes (new files in `backend/migrations/`),
+back up the database, then apply them:
 ```
-mysqldump -u dialforge -p --no-data --routines --triggers dialforge_dev > backend/schema.sql
+mysqldump --single-transaction --no-tablespaces -u dialforge -p dialforge_dev > ~/backups/pre-update.sql
+npm run db:migrate -- --status    # what's pending
+npm run db:migrate
 ```
+(`scripts/deploy-dev.sh` does the backup and `db:migrate` by itself.)
 
 ---
 

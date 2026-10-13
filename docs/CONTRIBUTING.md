@@ -32,7 +32,7 @@ Editor: install the **ESLint**, **Prettier** and **EditorConfig** extensions, an
 ## 3. Pull request checklist
 - [ ] `npm run check` passes (CI runs the same thing).
 - [ ] New logic has a test in `backend/tests/` (or `web/`, from Stage 2).
-- [ ] Schema change → new `backend/migration-<topic>.sql`, safe to run on the live DB, mentioned in the PR.
+- [ ] Schema change → new `backend/migrations/NNNN_<topic>.sql` (next number), safe to run on a live DB; never edit a file that was already applied anywhere. Mentioned in the PR.
 - [ ] Anything touching calls (ARI/AMI, dialplan, queues, dialer) lists how you tested it, and is tested on a test server with **internal extensions or your own numbers**.
 - [ ] Docs updated: `ARCHITECTURE.md` if a flow changed, plus a `RUNBOOK.md` entry for anything deployed.
 - [ ] No secrets, customer numbers or real lead data in code, tests, logs or screenshots.
@@ -63,4 +63,4 @@ It runs `npm run check` and builds the web app. On the server it then:
 - checks `/health` and `/app`;
 - prints the rollback command.
 
-The script does **not** apply database migrations: run the new `backend/migration-*.sql` by hand first (see `docs/DEPLOY.md` §15). After deploying, check the screen you changed and add a `RUNBOOK.md` entry.
+When the version brings new `backend/migrations/` files, the script backs up the database and runs `npm run db:migrate` before restarting (and stops without restarting if a migration fails). After deploying, check the screen you changed and add a `RUNBOOK.md` entry.

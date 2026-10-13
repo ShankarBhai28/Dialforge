@@ -79,7 +79,7 @@ An agent who never logs out is taken offline in two ways (`src/services/agentLog
 | Access | `roles` (see ADR 0005), `sessions` (logins, so a restart doesn't log anyone out) |
 | Audit | `audit_log`: every admin-side change (who, when, request, row before / after, refused ones too), logins / logouts / failed logins, agent outcomes, automatic logouts. Written by `src/services/audit.js`; nothing in the app updates or deletes it. Viewed on the **Audit Log** screen. |
 
-Every table has `tenant_id` (always 1 today; multi-tenant is planned). The schema is `backend/schema.sql` plus `backend/migration-*.sql`, applied in order.
+Every table has `tenant_id` (always 1 today; multi-tenant is planned). The structure is `backend/migrations/NNNN_*.sql`, applied in order by `npm run db:migrate` and recorded in `schema_migrations`: `0001_baseline.sql` is the whole structure as of 2026-10-13; earlier loose files are kept in `migrations/archive/` for history only. A new install: `npm run db:migrate` then `npm run create-admin -- --username <name>`.
 
 ## 6. Code map
 

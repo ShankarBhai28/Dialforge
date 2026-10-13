@@ -41,7 +41,7 @@ PKG=$(mktemp -d)/dialforge-deploy.tgz
 # app, and the dependency manifest. Never .env, certs or logs.
 (cd backend && tar czf "$PKG" \
   server.js dialer-engine.js dialer-common.js call-control.js ari.js ami.js db.js seed-users.js \
-  package.json package-lock.json src web-dist)
+  package.json package-lock.json src migrations web-dist)
 echo "package: $(du -h "$PKG" | cut -f1)"
 if [ "${DRY_RUN:-}" = 1 ]; then
   tar tzf "$PKG" | sed 's#/.*##' | sort | uniq -c
@@ -82,6 +82,20 @@ tar xzf "$PKG" && rm -f "$PKG"
 if [ "$(sum package-lock.json)" != "$old_deps" ]; then
   echo "dependencies changed: npm ci --omit=dev"
   npm ci --omit=dev --no-audit --no-fund
+fi
+
+# Database changes that came with this version: back the database up, then
+# apply them (backend/migrations, npm run db:migrate). Stops on any problem.
+if ! npm run -s db:migrate -- --status >/dev/null 2>&1; then
+  set -a; . ./.env >/dev/null 2>&1; set +a
+  MYSQL_PWD="$DB_PASSWORD" mysqldump --single-transaction --no-tablespaces -u"${DB_USER:-dialforge}" "${DB_NAME:-dialforge_dev}" > "$B/database.sql"
+  echo "database backup: $B/database.sql ($(wc -c < "$B/database.sql") bytes)"
+  if ! npm run -s db:migrate; then
+    echo "MIGRATION FAILED - the app was NOT restarted. To roll back:"
+    echo "  cd ~/$DIR && tar xzf $B/backend-files.tgz"
+    echo "  MYSQL_PWD=... mysql -u dialforge dialforge_dev < $B/database.sql"
+    exit 5
+  fi
 fi
 
 sudo systemctl restart dialforge-backend
