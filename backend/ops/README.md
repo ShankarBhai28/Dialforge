@@ -41,3 +41,20 @@ sudo install -d -o asterisk -g asterisk -m 2775 /var/spool/asterisk/monitor/dial
 The app's AMI login needs the `call` write right (MixMonitor) - already in DEPLOY.md §11. Sizing: 50 agents x ~5 h of talk a day ~ 3.6 GB a day -> about 330 GB for 90 days; plan the disk (or S3 + a shorter local keep).
 
 Recording notice: in India and most places callers should be told calls may be recorded - add a short announcement at the start of inbound calls (a later dialplan change) and mention it in outbound scripts.
+
+## Who is online, and fixing stuck things
+`SELECT * FROM live_agents;` - one row per agent logged in now (state logged_in / available / break / acw / on_call, extension, queue, campaign, current call, `line` registered or not, `screen_open`, login time, last seen). The backend rewrites it every 10 s (`PRESENCE_SECONDS`) and right after status / call changes, from the real sources - don't edit it.
+
+Where each piece of live state really lives:
+
+| What | Source of truth | Fix when stuck |
+|---|---|---|
+| Agent status (available / break / ACW / logged out) | `agent_status_log` open row (`ended_at IS NULL`) | Live Agents -> Force logout; or `npm run db:check -- --fix` (closes doubles, > 12 h, inactive users); automatic after 10 min with the line down |
+| Login | `sessions` (MySQL) | Force logout / deactivate user; expired rows: `db:check --fix` |
+| A call | `calls` row (+ `call_events` trail) | open > 2 h: `db:check --fix` |
+| The call's audio (channels, bridge) | Asterisk + backend memory | Hang up in Asterisk (`channel request hangup <name>`); restart of the backend loses transfer state only |
+| Line registered | Asterisk (`pjsip show contacts`) | agent refreshes the page / Reconnect |
+| Agent in a queue | Asterisk (`queue show <name>`) | Force logout (QueueRemove) / agent picks the queue again |
+| Dialer work | `dial_attempts`, `dial_hopper`, `campaigns.dialer_state` | `db:check --fix` (attempts > 2 h, locks > 10 min, hopper rows of final leads); dialer state: Dialer screen |
+
+`npm run db:check` only reads. `npm run db:check -- --fix` first dumps the tables it will change to `~/backups/db-fix-<time>.sql` (undo: `mysql -u dialforge -p dialforge_dev < that file`), repairs only problems with an obvious fix, then checks again. Duplicates, DNC leads, a dialer marked running etc. are reported for a person to decide.

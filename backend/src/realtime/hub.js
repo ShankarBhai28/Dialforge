@@ -58,10 +58,14 @@ function attach(server, sessionMiddleware) {
       wss.handleUpgrade(req, socket, head, (ws) => {
         const client = { ws, user, access: null };
         clients.add(client);
+        require('../services/presence').presenceChanged(); // live_agents.screen_open
         if (user.role === 'staff') void loadAccess(client);
         ws.isAlive = true;
         ws.on('pong', () => (ws.isAlive = true));
-        ws.on('close', () => clients.delete(client));
+        ws.on('close', () => {
+          clients.delete(client);
+          require('../services/presence').presenceChanged();
+        });
         ws.on('error', () => clients.delete(client));
         ws.send(JSON.stringify({ type: 'hello', data: { user: user.username, role: user.role }, at: Date.now() }));
       });
@@ -105,6 +109,13 @@ function publish(type, data, { toUserId = null } = {}) {
   }
 }
 
+/** Ids of users with a screen open now (optionally only this role). */
+function connectedUserIds(role = null) {
+  const ids = new Set();
+  for (const { ws, user } of clients) if (ws.readyState === ws.OPEN && (!role || user.role === role)) ids.add(user.id);
+  return [...ids];
+}
+
 /** Has this user a screen open right now (a live connection)? */
 function isUserConnected(userId) {
   for (const { ws, user } of clients) if (user.id === Number(userId) && ws.readyState === ws.OPEN) return true;
@@ -145,6 +156,7 @@ module.exports = {
   publish,
   disconnectUser,
   isUserConnected,
+  connectedUserIds,
   sendToUser,
   connectedCount,
   watchingCount,

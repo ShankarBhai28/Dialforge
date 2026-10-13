@@ -6,6 +6,7 @@ const hub = require('../realtime/hub');
 // --- Agent status tracking (available / break / acw) ---
 async function closeOpenStatus(userId) {
   await pool.query('UPDATE agent_status_log SET ended_at = NOW() WHERE user_id = ? AND ended_at IS NULL', [userId]);
+  require('./presence').presenceChanged(); // live_agents (lazy: presence needs this module's neighbours)
 }
 
 // Which queue is this agent nominally working this session? (the most
@@ -66,6 +67,7 @@ async function syncQueueMembership(userId, extensionName, newStatus, explicitQue
 }
 
 async function setAgentStatus(userId, status, reason, queueId, extensionName) {
+  require('./presence').presenceChanged();
   let keepCampaignId = null;
   if (status === 'available' && queueId) {
     const [c] = await pool.query('SELECT id FROM campaigns WHERE queue_id = ? LIMIT 1', [queueId]);

@@ -21,6 +21,7 @@ async function logEvent(callId, eventType, payload) {
     payload ? JSON.stringify(payload) : null,
   ]);
   hub.publish('call.event', { callId, eventType, payload: payload || null });
+  require('./presence').presenceChanged(); // live_agents shows the call (lazy: presence needs hub too)
 }
 
 module.exports = { logEvent, resolveDestination };
