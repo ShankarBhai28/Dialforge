@@ -8,12 +8,24 @@
 // in it; warm/conference: a free agent from it) or any number.
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Grid3x3, Mic, MicOff, Pause, PhoneForwarded, PhoneOff, Play, UsersRound } from 'lucide-react';
+import {
+  Grid3x3,
+  GripHorizontal,
+  Mic,
+  MicOff,
+  Pause,
+  PhoneForwarded,
+  PhoneOff,
+  Play,
+  Undo2,
+  UsersRound,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { FormError } from '@/components/common';
 import { get, post } from '@/lib/api';
 import { useNow } from '@/lib/hooks';
+import { useDraggable } from '@/lib/useDraggable';
 import { cn } from '@/lib/utils';
 import { agentKeys, useCallControl, type TransferTargets } from './api';
 import { useController, usePhone } from './AgentProvider';
@@ -273,6 +285,8 @@ export function InCallPanel() {
   const [keypad, setKeypad] = useState(false);
   const [dtmf, setDtmf] = useState('');
   const [prevCallId, setPrevCallId] = useState<number | null>(null);
+  // The agent can drag the panel by its coloured bar; the spot is remembered.
+  const { attach, style, handleProps, moved, reset } = useDraggable<HTMLElement>('dialforge.callPanel.pos');
 
   const call = line.call;
   const info = state.call;
@@ -302,16 +316,40 @@ export function InCallPanel() {
   const btn = 'flex h-auto flex-col gap-1 py-2 text-xs';
   return (
     <section
+      ref={attach}
       aria-label="Current call"
       aria-live="polite"
+      style={style}
       className="fixed right-4 bottom-4 z-40 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-xl bg-card shadow-2xl ring-1 ring-black/5"
     >
-      <div className={cn('flex items-center justify-between px-4 py-2 text-sm font-semibold text-white', headCls)}>
+      <div
+        {...handleProps}
+        data-testid="call-panel-handle"
+        title="Drag to move · double-click to put it back"
+        className={cn(
+          'flex cursor-grab touch-none items-center justify-between px-4 py-2 text-sm font-semibold text-white select-none active:cursor-grabbing',
+          headCls,
+        )}
+      >
         <span className="flex items-center gap-2">
+          <GripHorizontal className="size-4 opacity-70" aria-hidden />
           <span className={cn('size-2 rounded-full bg-white', phase === 'live' && 'animate-pulse')} />
           {stateText}
         </span>
-        <span className="tabular-nums">{elapsed}</span>
+        <span className="flex items-center gap-2">
+          <span className="tabular-nums">{elapsed}</span>
+          {moved && (
+            <button
+              type="button"
+              onClick={reset}
+              aria-label="Put the call panel back in the corner"
+              title="Back to the corner"
+              className="cursor-pointer rounded p-0.5 opacity-80 hover:bg-white/20 hover:opacity-100"
+            >
+              <Undo2 className="size-3.5" />
+            </button>
+          )}
+        </span>
       </div>
       <div className="px-4 pt-3 pb-2">
         {info.name && <div className="truncate font-bold">{info.name}</div>}

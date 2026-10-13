@@ -108,6 +108,7 @@ Same setup as above: two agents in **two different browsers** (or one normal + o
 - [ ] **Call history** (right column) → the green phone button on a row → that number is dialled.
 - [ ] Click a lead → details + form open in the middle → **Call** → your mobile rings (the browser line is answered by itself) → panel says "Ringing customer…" → answer the mobile → **Live call** + timer.
 - [ ] In the call: **Mute** (red warning; mobile can't hear you) → Unmute. **Hold** → mobile hears music → Resume. **Keypad** → tones heard.
+- [ ] Drag the call panel by its coloured top bar to another spot → it stays inside the window (also with the Keypad open) → next call it opens in the same spot → double-click the bar (or the ↶ button) → back to the bottom-right corner.
 - [ ] Fill the form → **Save Form** → "Form saved." Hang up → **Call outcome** dialog → pick one → it closes. Try **Callback** once → pick a time → it appears under Callbacks.
 - [ ] Dialer campaign (progressive), Auto Answer **off**: a dialer call rings → **Incoming call** popup with ringtone + the customer's number → Accept → the lead pops up with the form pre-filled → hang up → outcome → back to **Available** by itself after the wrap-up time.
 - [ ] Auto Answer **on**: no popup, the call connects straight away.

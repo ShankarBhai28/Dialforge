@@ -1345,3 +1345,8 @@ Reported by the user after trying the agent panel:
 - **Undo:** `sudo tar xzf ~/backups/pre-asterisk-realtime-20261013-051149/etc-asterisk.tgz -C /etc && sudo asterisk -rx "core restart now"` + redeploy the previous app version.
 - **New install:** `docs/DEPLOY.md` §11b.
 - Tests: 87 backend, 162 web.
+
+## Agent screen: movable call panel (2026-10-13)
+- **Asked by the user:** the panel that pops up during a call (status, Mute / Hold / Keypad / Transfer / Conference / Hang up, the DTMF keypad) should be movable.
+- **Now:** drag it by its coloured top bar (grip icon; mouse or touch). It's kept inside the window, also when the keypad opens or the window shrinks, and the spot is remembered in that browser (`localStorage` `dialforge.callPanel.pos`). Double-click the bar or the ↶ button → back to the bottom-right corner. Buttons in the bar still work normally.
+- Code: `web/src/lib/useDraggable.ts` (reusable for other floating panels), used in `features/agent/InCallPanel.tsx`. Tests: `useDraggable.test.tsx` (move + remember, reopen where left + double-click reset, can't leave the window, inner button doesn't drag).
