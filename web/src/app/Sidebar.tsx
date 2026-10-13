@@ -4,6 +4,7 @@ import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAccess } from '@/features/auth/access';
 import { isGroup, visibleNav, type NavGroup, type NavItem } from './nav';
+import { Logo } from '@/components/Logo';
 
 const OPEN_KEY = 'dialforge.nav.open';
 
@@ -71,10 +72,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <nav aria-label="Admin" className="flex h-full flex-col bg-gradient-to-b from-ink to-ink-2 px-3 py-5 text-white">
-      <div className="mb-6 flex items-center gap-2.5 px-3 text-lg font-extrabold">
-        <span className="size-2.5 rounded-full bg-teal-400 shadow-[0_0_12px] shadow-teal-400" />
-        DialForge
-      </div>
+      <Logo tone="light" className="mb-6 px-3 text-lg" />
 
       <div className="-mx-1 flex-1 space-y-0.5 overflow-y-auto px-1">
         {nav.map((entry) => {

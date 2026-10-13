@@ -1440,3 +1440,7 @@ Reported by the user after trying the agent panel:
 ## Agents must go Available before working (2026-10-14)
 - Agent screen: after the line connects, an agent not logged into a queue (no open status) sees only **Start your shift** - their queues with "Go Available" (last queue highlighted). Leads, dialpad, call log and calls open once they're Available; Break / ACW keep the workbench.
 - Server: `POST /calls/click2call` refuses agents with no open status (403 `not_logged_into_queue`), so it holds even without the screen. Preview already required Available.
+
+## Product name VIZTEX + new login page (2026-10-14)
+- Everything people see says **VIZTEX** (upper case): logo (`web/src/components/Logo.tsx`: mark + VIZ**TEX** wordmark), favicon (`web/public/favicon.svg`), page titles, login, sidebar, agent bar, alerts (`APP_DISPLAY_NAME`, default VIZTEX). One place for the name: `web/src/lib/brand.ts`. Internal names stay `dialforge` (repo, database, services, paths, AMI/ARI app names) - renaming those would mean a server migration for no visible gain.
+- Login page: product panel with features on large screens, sign-in card (icons in fields, show / hide password, Caps Lock warning, "Remember my username" in this browser only, never the password), logged-in-elsewhere prompt and session-ended notice kept. Checked by screenshots at 1440 px and 520 px.

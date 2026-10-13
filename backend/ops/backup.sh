@@ -85,7 +85,7 @@ if [ "$status" != ok ]; then
   echo "BACKUP FAILED: $msg" >&2
   if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
     curl -s -m 10 -H 'content-type: application/json' \
-      -d "{\"text\":\"DialForge ($HOST): nightly backup FAILED - $msg\"}" "$ALERT_WEBHOOK_URL" >/dev/null || true
+      -d "{\"text\":\"${APP_DISPLAY_NAME:-VIZTEX} ($HOST): nightly backup FAILED - $msg\"}" "$ALERT_WEBHOOK_URL" >/dev/null || true
   fi
   exit 1
 fi

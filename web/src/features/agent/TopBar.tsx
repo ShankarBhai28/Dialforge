@@ -6,6 +6,7 @@ import { useLogout, useMe } from '@/features/auth/auth';
 import type { AgentStats } from './api';
 import { useController, usePhone } from './AgentProvider';
 import { EXTENSION_KEY } from './ConnectLine';
+import { Logo } from '@/components/Logo';
 
 const BREAK_REASONS = ['Meeting', 'Lunch', 'Tea Break'];
 
@@ -103,10 +104,7 @@ export function TopBar({ stats }: { stats: AgentStats | undefined }) {
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 bg-gradient-to-r from-ink to-ink-2 px-4 text-white">
-      <div className="flex items-center gap-2 font-extrabold">
-        <span className="size-2.5 rounded-full bg-teal-400 shadow-[0_0_12px] shadow-teal-400" />
-        <span className="hidden sm:inline">DialForge</span>
-      </div>
+      <Logo tone="light" markClassName="size-7" nameClassName="hidden sm:inline" />
       <div className="flex-1" />
       <div className="hidden items-center gap-1.5 text-sm tabular-nums text-white/80 md:flex" title="Logged in today">
         <Clock className="size-4" /> {hms(stats?.loginSeconds ?? 0)}

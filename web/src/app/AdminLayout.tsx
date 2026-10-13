@@ -7,11 +7,12 @@ import { useAccess } from '@/features/auth/access';
 import { cn } from '@/lib/utils';
 import { allNavItems } from './nav';
 import { Sidebar } from './Sidebar';
+import { APP_NAME } from '@/lib/brand';
 
 function usePageTitle() {
   const { pathname } = useLocation();
   const item = allNavItems().find((i) => i.to === pathname);
-  return item?.label ?? 'DialForge';
+  return item?.label ?? APP_NAME;
 }
 
 export function AdminLayout() {
@@ -23,7 +24,7 @@ export function AdminLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    document.title = `${title} · DialForge`;
+    document.title = `${title} · ${APP_NAME}`;
   }, [title]);
 
   return (

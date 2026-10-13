@@ -61,4 +61,4 @@ dialerFeed.start();
 startStaleAgentCleanup();
 startHealthWatch();
 startPresenceSync(); // live_agents table
-server.listen(PORT, () => console.log(`DialForge backend listening on port ${PORT} (HTTPS)`));
+server.listen(PORT, () => console.log(`VIZTEX backend listening on port ${PORT} (HTTPS)`));

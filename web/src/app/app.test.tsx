@@ -94,6 +94,31 @@ describe('login', () => {
     expect(sessionStorage.getItem('df-session-ended')).toBeNull();
   });
 
+  it('login page: VIZTEX, show / hide password, Caps Lock warning, remembers the username (never the password)', async () => {
+    fakeApi({
+      'GET /auth/me': { status: 401 },
+      'POST /auth/login': { status: 401, body: { error: 'invalid username or password' } },
+    });
+    renderAt('/login');
+    expect(await screen.findAllByText('TEX')).not.toHaveLength(0);
+    const pw = screen.getByLabelText('Password');
+    expect(pw).toHaveAttribute('type', 'password');
+    await userEvent.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(pw).toHaveAttribute('type', 'text');
+    await userEvent.click(screen.getByRole('button', { name: 'Hide password' }));
+    expect(pw).toHaveAttribute('type', 'password');
+
+    await userEvent.type(pw, '{CapsLock}A');
+    expect(screen.getByText('Caps Lock is on')).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText('Username'), 'agent04');
+    await userEvent.click(screen.getByLabelText('Remember my username'));
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByRole('alert');
+    expect(localStorage.getItem('viztex-remember-username')).toBe('agent04');
+    expect(JSON.stringify({ ...localStorage })).not.toContain('A');
+  });
+
   it('keeps agents out of admin screens', async () => {
     fakeApi({ 'GET /auth/me': { body: AGENT } });
     const { router } = renderAt('/admin/users');

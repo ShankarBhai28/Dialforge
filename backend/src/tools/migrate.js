@@ -67,7 +67,7 @@ function plan(migrations, applied, { tablesExist }) {
       pending,
       changed,
       error:
-        'This database already has tables but no migration history. If it is an existing DialForge database, ' +
+        'This database already has tables but no migration history. If it is an existing VIZTEX (dialforge) database, ' +
         'run once:  npm run db:migrate -- --baseline   (then db:migrate as usual).',
     };
   }

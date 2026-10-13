@@ -21,8 +21,9 @@ import { useSingleTab } from './singleTab';
 import { FullPageSpinner } from '@/components/FullPageSpinner';
 import { Button } from '@/components/ui/button';
 import { CircleCheck, LoaderCircle, MonitorSmartphone, Play } from 'lucide-react';
+import { APP_NAME } from '@/lib/brand';
 
-const PAGE_TITLE = 'Agent · DialForge';
+const PAGE_TITLE = `Agent · ${APP_NAME}`;
 
 /** The tab title shows a live call, so it's noticed from another tab. */
 function useCallTitle() {

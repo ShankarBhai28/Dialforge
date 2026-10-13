@@ -1,6 +1,6 @@
 @import 'tailwindcss';
 
-/* DialForge theme. Colours are named by role (primary, muted…) the
+/* VIZTEX theme. Colours are named by role (primary, muted…) the
    shadcn/ui way, so components never hard-code a hex value. */
 @theme {
   --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;

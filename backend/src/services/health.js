@@ -191,7 +191,7 @@ async function runOnce(deps) {
     const lines = changed.map(
       (c) => `${c.status === 'ok' ? 'RESOLVED' : c.status.toUpperCase()}: ${c.label} - ${c.detail}`,
     );
-    await sendAlert(`DialForge (${host}):\n${lines.join('\n')}`);
+    await sendAlert(`${process.env.APP_DISPLAY_NAME || 'VIZTEX'} (${host}):\n${lines.join('\n')}`);
     for (const c of changed) {
       await audit({
         action: 'system.health',
