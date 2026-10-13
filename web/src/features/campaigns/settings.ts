@@ -157,6 +157,7 @@ export type DispoRow = {
   retryAfterMin: string;
   isCallback: boolean;
   marksDnc: boolean;
+  isSuccess: boolean;
 };
 
 let nextUid = 1;
@@ -170,6 +171,7 @@ export function dispoRow(d?: Disposition): DispoRow {
     retryAfterMin: d?.retry_after_min ? String(d.retry_after_min) : '',
     isCallback: !!d?.is_callback,
     marksDnc: !!d?.marks_dnc,
+    isSuccess: !!d?.is_success,
   };
 }
 
@@ -195,6 +197,7 @@ export function dispositionsBody(rows: DispoRow[]): DispositionInput[] {
       retryAfterMin: r.retryAfterMin.trim() === '' ? null : Number(r.retryAfterMin),
       isCallback: r.isCallback,
       marksDnc: r.marksDnc,
+      isSuccess: r.isSuccess,
     }));
 }
 

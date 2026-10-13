@@ -187,7 +187,18 @@ describe('admin logins with a role', () => {
   });
 
   it('Reports without Export: no CSV button', async () => {
-    fakeApi({ 'GET /auth/me': { body: TL }, 'GET /admin/reports/campaigns': { body: [] } });
+    fakeApi({
+      'GET /auth/me': { body: TL },
+      'GET /admin/reports': {
+        body: {
+          timezone: 'Asia/Kolkata',
+          reports: [{ key: 'campaigns', title: 'Campaign Performance', description: '', filters: ['campaign'] }],
+          campaigns: [],
+          agents: [],
+          outcomes: [],
+        },
+      },
+    });
     renderAt('/admin/reports');
     await screen.findByRole('button', { name: /refresh/i });
     expect(screen.queryByRole('link', { name: /export csv/i })).not.toBeInTheDocument();

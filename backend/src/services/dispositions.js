@@ -2,11 +2,51 @@ const pool = require('../../db');
 
 // Seeded into every new campaign - same codes the system always used.
 const DEFAULT_DISPOSITIONS = [
-  { code: 'interested', label: 'Interested', is_final: 1, retry_after_min: null, marks_dnc: 0, is_callback: 0 },
-  { code: 'not_interested', label: 'Not Interested', is_final: 1, retry_after_min: null, marks_dnc: 0, is_callback: 0 },
-  { code: 'callback', label: 'Callback', is_final: 0, retry_after_min: null, marks_dnc: 0, is_callback: 1 },
-  { code: 'no_answer', label: 'No Answer', is_final: 0, retry_after_min: 60, marks_dnc: 0, is_callback: 0 },
-  { code: 'do_not_call', label: 'Do Not Call', is_final: 1, retry_after_min: null, marks_dnc: 1, is_callback: 0 },
+  {
+    code: 'interested',
+    label: 'Interested',
+    is_final: 1,
+    retry_after_min: null,
+    marks_dnc: 0,
+    is_callback: 0,
+    is_success: 1,
+  },
+  {
+    code: 'not_interested',
+    label: 'Not Interested',
+    is_final: 1,
+    retry_after_min: null,
+    marks_dnc: 0,
+    is_callback: 0,
+    is_success: 0,
+  },
+  {
+    code: 'callback',
+    label: 'Callback',
+    is_final: 0,
+    retry_after_min: null,
+    marks_dnc: 0,
+    is_callback: 1,
+    is_success: 0,
+  },
+  {
+    code: 'no_answer',
+    label: 'No Answer',
+    is_final: 0,
+    retry_after_min: 60,
+    marks_dnc: 0,
+    is_callback: 0,
+    is_success: 0,
+  },
+  {
+    code: 'do_not_call',
+    label: 'Do Not Call',
+    is_final: 1,
+    retry_after_min: null,
+    marks_dnc: 1,
+    is_callback: 0,
+    is_success: 0,
+  },
 ];
 
 // A lead with no campaign (e.g. added by an admin without one) falls back
@@ -14,7 +54,7 @@ const DEFAULT_DISPOSITIONS = [
 async function getDispositions(campaignId) {
   if (!campaignId) return DEFAULT_DISPOSITIONS;
   const [rows] = await pool.query(
-    'SELECT code, label, is_final, retry_after_min, marks_dnc, is_callback FROM campaign_dispositions WHERE campaign_id = ? ORDER BY sort_order, id',
+    'SELECT code, label, is_final, retry_after_min, marks_dnc, is_callback, is_success FROM campaign_dispositions WHERE campaign_id = ? ORDER BY sort_order, id',
     [campaignId],
   );
   return rows;
@@ -40,6 +80,7 @@ function validateDispositions(list) {
     const isFinal = d.isFinal ? 1 : 0;
     const isCallback = d.isCallback ? 1 : 0;
     const marksDnc = d.marksDnc ? 1 : 0;
+    const isSuccess = d.isSuccess ? 1 : 0;
     if (isFinal && (retry !== null || isCallback))
       return { error: `"${label}": a final disposition can't also retry or schedule a callback` };
     if (marksDnc && !isFinal) return { error: `"${label}": Do-Not-Call dispositions must also be final` };
@@ -51,6 +92,7 @@ function validateDispositions(list) {
       retry_after_min: retry,
       marks_dnc: marksDnc,
       is_callback: isCallback,
+      is_success: isSuccess,
     });
   }
   return { dispositions: cleaned };
@@ -60,9 +102,9 @@ async function replaceDispositions(conn, campaignId, list) {
   await conn.query('DELETE FROM campaign_dispositions WHERE campaign_id = ?', [campaignId]);
   for (const [i, d] of list.entries()) {
     await conn.query(
-      `INSERT INTO campaign_dispositions (campaign_id, code, label, is_final, retry_after_min, marks_dnc, is_callback, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [campaignId, d.code, d.label, d.is_final, d.retry_after_min, d.marks_dnc, d.is_callback, i],
+      `INSERT INTO campaign_dispositions (campaign_id, code, label, is_final, retry_after_min, marks_dnc, is_callback, is_success, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [campaignId, d.code, d.label, d.is_final, d.retry_after_min, d.marks_dnc, d.is_callback, d.is_success, i],
     );
   }
 }

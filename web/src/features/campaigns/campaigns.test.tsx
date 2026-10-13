@@ -245,6 +245,7 @@ describe('Campaigns', () => {
     await userEvent.click(within(dialog).getByLabelText('Disposition 3 final'));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Move disposition 3 up' }));
 
+    await userEvent.click(within(dialog).getByLabelText('Disposition 1 success'));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save dispositions' }));
     await waitFor(() => expect(calls.some((c) => c.key === 'PUT /admin/campaigns/5/dispositions')).toBe(true));
     expect(calls.find((c) => c.key === 'PUT /admin/campaigns/5/dispositions')?.body).toEqual({
@@ -256,6 +257,7 @@ describe('Campaigns', () => {
           retryAfterMin: null,
           isCallback: false,
           marksDnc: false,
+          isSuccess: true,
         },
         {
           label: 'Wrong Number',
@@ -264,6 +266,7 @@ describe('Campaigns', () => {
           retryAfterMin: null,
           isCallback: false,
           marksDnc: false,
+          isSuccess: false,
         },
         {
           label: 'No Answer',
@@ -272,6 +275,7 @@ describe('Campaigns', () => {
           retryAfterMin: 60,
           isCallback: false,
           marksDnc: false,
+          isSuccess: false,
         },
       ],
     });

@@ -91,6 +91,11 @@ describe('click-to-call', () => {
 
     await t.controller.saveOutcome(t.state().outcomeFor!, 'interested');
     expect(t.state().outcomeFor).toBeNull();
+    // The call id goes along: the outcome is kept on the call for reports.
+    expect(t.calls.find((c) => c.key === 'POST /leads/7/disposition')?.body).toEqual({
+      status: 'interested',
+      callId: 42,
+    });
     await settle();
     // Progressive campaign: back to Available by itself after wrap-up (here 0 s).
     expect(t.calls.find((c) => c.key === 'POST /agent/status')?.body).toEqual({

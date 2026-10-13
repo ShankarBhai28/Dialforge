@@ -1,68 +1,74 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { get } from '@/lib/api';
 
-// Shapes of /admin/reports/* (JSON). With `format=csv` the same routes
-// return a CSV download of the same rows.
-export type CampaignReportRow = {
-  campaign_id: number;
-  campaign_name: string;
-  total_leads: number;
-  total_calls: number;
-  answered: number;
-  not_answered: number;
-  abandoned: number;
-  answer_rate: number; // whole percent
-  avg_talk_seconds: number;
+// GET /admin/reports: the reports + what their filters offer (the caller's scope).
+export type FilterKey = 'campaign' | 'agent' | 'direction' | 'answered' | 'outcome' | 'number' | 'sla';
+export type ReportFilter = FilterKey | { key: 'groupBy'; options: string[] };
+export type ReportInfo = {
+  key: string;
+  title: string;
+  description: string;
+  filters: ReportFilter[];
+  /** Current state, not a date range (List Penetration). */
+  noRange?: boolean;
+};
+export type ReportCatalog = {
+  timezone: string;
+  reports: ReportInfo[];
+  campaigns: { id: number; name: string }[];
+  agents: { id: number; username: string }[];
+  outcomes: { code: string; label: string }[];
 };
 
-export type AgentReportRow = {
-  user_id: number;
-  username: string;
-  login_seconds: number;
-  total_calls: number;
-  answered_calls: number;
-  talk_seconds: number;
-  avg_talk_seconds: number;
-  callbacks_set: number;
+// GET /admin/reports/:key - every report has the same shape; the screen
+// formats each cell by its column type. ?format=csv = the same as a file.
+export type ColumnType = 'text' | 'id' | 'number' | 'decimal' | 'seconds' | 'percent' | 'date' | 'datetime';
+export type ReportColumn = {
+  key: string;
+  label: string;
+  type?: ColumnType;
+  /** Shown in red above / below this value (e.g. drop rate over 3 %). */
+  warnAbove?: number;
+  warnBelow?: number;
+};
+export type Cell = string | number | null;
+export type ReportResult = {
+  report: string;
+  title: string;
+  from: string;
+  to: string;
+  timezone: string;
+  columns: ReportColumn[];
+  rows: Record<string, Cell>[];
+  totals: Record<string, Cell> | null;
+  /** Call Detail: how many calls match vs. how many are shown. */
+  meta?: { total: number; shown: number; limit: number };
+  notes?: string[];
 };
 
-export type CallReportRow = {
-  id: number;
-  direction: string;
-  from_extension: string | null;
-  to_number: string;
-  disposition: string | null;
-  start_time: string;
-  answer_time: string | null;
-  end_time: string | null;
-  campaign_name: string | null;
-};
-
-export type HourlyReportRow = { hour: number; total_calls: number; answered: number; answer_rate: number };
-
-export type ReportKind = 'campaigns' | 'agents' | 'calls' | 'hourly';
-export type ReportRows = {
-  campaigns: CampaignReportRow;
-  agents: AgentReportRow;
-  calls: CallReportRow;
-  hourly: HourlyReportRow;
-};
+export function useReportCatalog() {
+  return useQuery({
+    queryKey: ['admin', 'reports'],
+    queryFn: () => get<ReportCatalog>('/admin/reports'),
+    staleTime: 60_000,
+  });
+}
 
 /** Report URL; empty params are left out. `csv` adds format=csv for the export link. */
-export function reportUrl(kind: ReportKind, params: Record<string, string>, csv = false) {
+export function reportUrl(key: string, params: Record<string, string>, csv = false) {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v);
   if (csv) qs.set('format', 'csv');
   const s = qs.toString();
-  return `/admin/reports/${kind}${s ? `?${s}` : ''}`;
+  return `/admin/reports/${key}${s ? `?${s}` : ''}`;
 }
 
-export function useReport<K extends ReportKind>(kind: K, params: Record<string, string>, enabled = true) {
+export function useReport(key: string | null, params: Record<string, string>, enabled = true) {
   return useQuery({
-    queryKey: ['admin', 'reports', kind, params],
-    queryFn: () => get<ReportRows[K][]>(reportUrl(kind, params)),
-    enabled,
-    // Keep the old table visible while a new date range loads.
+    queryKey: ['admin', 'reports', key, params],
+    queryFn: () => get<ReportResult>(reportUrl(key!, params)),
+    enabled: enabled && !!key,
+    // Keep the old table visible while new filters load.
     placeholderData: keepPreviousData,
   });
 }

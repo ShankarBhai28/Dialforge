@@ -1,394 +1,439 @@
-// Reports: campaign, agent, call and hourly performance, each with its own
-// date range and a CSV export of exactly what the table shows.
-import { useState, type ReactNode } from 'react';
-import { BarChart3, Download, RefreshCw } from 'lucide-react';
-import type { UseQueryResult } from '@tanstack/react-query';
+// Reports: pick a report on the left, set the filters it uses, read the
+// table (sortable, totals last), export the same thing as CSV. Every report
+// has the same shape (columns + rows + totals), so one table shows them all.
+// The chosen report is in the URL (?r=agents) so a link opens it.
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
+import { ArrowDown, ArrowUp, BarChart3, Download, Info, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/form-controls';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState, Field, SectionHeader } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
-import { useCampaigns } from '@/features/campaigns/api';
-import { formatDateTime, toDateInput } from '@/lib/format';
-import { formatSeconds } from '@/lib/utils';
-import { reportUrl, useReport, type ReportKind } from './api';
+import { cn } from '@/lib/utils';
 import { useAccess } from '@/features/auth/access';
+import {
+  reportUrl,
+  useReport,
+  useReportCatalog,
+  type Cell,
+  type ReportCatalog,
+  type ReportColumn,
+  type ReportInfo,
+  type ReportResult,
+} from './api';
+import {
+  GROUP_LABELS,
+  PRESETS,
+  filterKeys,
+  formatCell,
+  groupOptions,
+  presetRange,
+  reportParams,
+  type Filters,
+} from './reportHelpers';
 
-type Range = { from: string; to: string };
-type CallFilters = Range & { campaignId: string; disposition: string };
-
-const CALL_LIMIT = 500; // the route's LIMIT
-const dash = <span className="text-muted-foreground">—</span>;
-
-/** Filter row: the inputs, then Refresh + Export CSV on the right. */
-function Toolbar({
-  children,
-  kind,
-  params,
-  valid,
-  onRefresh,
+function FilterBar({
+  report,
+  catalog,
+  filters,
+  set,
 }: {
-  children: ReactNode;
-  kind: ReportKind;
-  params: Record<string, string>;
-  valid: boolean;
-  onRefresh: () => void;
+  report: ReportInfo;
+  catalog: ReportCatalog;
+  filters: Filters;
+  set: (patch: Partial<Filters>) => void;
 }) {
-  const canExport = useAccess().can('reports', 'export');
+  const keys = filterKeys(report);
+  const groups = groupOptions(report);
+  const rangeBad = !report.noRange && (!filters.from || !filters.to || filters.from > filters.to);
   return (
-    <div className="mb-4 flex flex-wrap items-end gap-3">
-      {children}
-      <div className="flex gap-2 sm:ml-auto">
-        <Button variant="outline" onClick={onRefresh} disabled={!valid}>
-          <RefreshCw /> Refresh
-        </Button>
-        {!canExport ? null : valid ? (
-          <Button variant="outline" asChild>
-            {/* A plain link, like the classic window.open: the server sends the file. */}
-            <a href={reportUrl(kind, params, true)} target="_blank" rel="noopener noreferrer">
-              <Download /> Export CSV
-            </a>
-          </Button>
-        ) : (
-          <Button variant="outline" disabled>
-            <Download /> Export CSV
-          </Button>
+    <div className="mb-4 space-y-3">
+      {!report.noRange && (
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Date range">
+          {PRESETS.map((p) => (
+            <Button
+              key={p.key}
+              type="button"
+              size="sm"
+              variant={filters.preset === p.key ? 'default' : 'outline'}
+              aria-pressed={filters.preset === p.key}
+              onClick={() => set(p.key === 'custom' ? { preset: 'custom' } : { preset: p.key, ...presetRange(p.key) })}
+            >
+              {p.label}
+            </Button>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap items-end gap-3">
+        {!report.noRange && (
+          <>
+            <Field id="rep-from" label="From" className="w-full sm:w-40">
+              <Input
+                id="rep-from"
+                type="date"
+                value={filters.from}
+                max={filters.to || undefined}
+                onChange={(e) => set({ from: e.target.value, preset: 'custom' })}
+                required
+              />
+            </Field>
+            <Field id="rep-to" label="To" className="w-full sm:w-40">
+              <Input
+                id="rep-to"
+                type="date"
+                value={filters.to}
+                min={filters.from || undefined}
+                onChange={(e) => set({ to: e.target.value, preset: 'custom' })}
+                required
+              />
+            </Field>
+          </>
+        )}
+        {keys.includes('campaign') && (
+          <Field id="rep-campaign" label="Campaign" className="w-full sm:w-48">
+            <Select id="rep-campaign" value={filters.campaignId} onChange={(e) => set({ campaignId: e.target.value })}>
+              <option value="">All campaigns</option>
+              {catalog.campaigns.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        {keys.includes('agent') && (
+          <Field id="rep-agent" label="Agent" className="w-full sm:w-44">
+            <Select id="rep-agent" value={filters.agentId} onChange={(e) => set({ agentId: e.target.value })}>
+              <option value="">All agents</option>
+              {catalog.agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.username}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        {keys.includes('direction') && (
+          <Field id="rep-direction" label="Direction" className="w-full sm:w-36">
+            <Select id="rep-direction" value={filters.direction} onChange={(e) => set({ direction: e.target.value })}>
+              <option value="">Both</option>
+              <option value="outbound">Outbound</option>
+              <option value="inbound">Inbound</option>
+            </Select>
+          </Field>
+        )}
+        {keys.includes('answered') && (
+          <Field id="rep-answered" label="Answered" className="w-full sm:w-36">
+            <Select id="rep-answered" value={filters.answered} onChange={(e) => set({ answered: e.target.value })}>
+              <option value="">All calls</option>
+              <option value="yes">Answered</option>
+              <option value="no">Not answered</option>
+            </Select>
+          </Field>
+        )}
+        {keys.includes('outcome') && (
+          <Field id="rep-outcome" label="Outcome" className="w-full sm:w-44">
+            <Select id="rep-outcome" value={filters.outcome} onChange={(e) => set({ outcome: e.target.value })}>
+              <option value="">Any outcome</option>
+              {catalog.outcomes.map((o) => (
+                <option key={o.code} value={o.code}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        {keys.includes('number') && (
+          <Field id="rep-number" label="Number" className="w-full sm:w-40">
+            <Input
+              id="rep-number"
+              inputMode="tel"
+              placeholder="any part"
+              value={filters.number}
+              onChange={(e) => set({ number: e.target.value })}
+            />
+          </Field>
+        )}
+        {groups && (
+          <Field id="rep-group" label="Group by" className="w-full sm:w-36">
+            <Select
+              id="rep-group"
+              value={groups.includes(filters.groupBy) ? filters.groupBy : groups[0]}
+              onChange={(e) => set({ groupBy: e.target.value })}
+            >
+              {groups.map((g) => (
+                <option key={g} value={g}>
+                  {GROUP_LABELS[g] ?? g}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        {keys.includes('sla') && (
+          <Field id="rep-sla" label="Service level (s)" className="w-full sm:w-36">
+            <Input
+              id="rep-sla"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={600}
+              value={filters.slaSeconds}
+              onChange={(e) => set({ slaSeconds: e.target.value })}
+            />
+          </Field>
         )}
       </div>
+      {rangeBad && (
+        <p className="text-sm text-destructive">
+          {filters.from && filters.to ? '"From" must be on or before "To".' : 'Pick both dates.'}
+        </p>
+      )}
     </div>
   );
 }
 
-function RangeInputs({ id, value, onChange }: { id: string; value: Range; onChange: (v: Range) => void }) {
+// --- the table ---
+const isNumeric = (c: ReportColumn) => ['number', 'decimal', 'seconds', 'percent', 'id'].includes(c.type ?? '');
+const warn = (c: ReportColumn, v: Cell) =>
+  typeof v === 'number' &&
+  ((c.warnAbove !== undefined && v > c.warnAbove) || (c.warnBelow !== undefined && v < c.warnBelow));
+
+function ResultTable({ result }: { result: ReportResult }) {
+  const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(null);
+  const rows = useMemo(() => {
+    if (!sort) return result.rows;
+    const dir = sort.desc ? -1 : 1;
+    return [...result.rows].sort((a, b) => {
+      const x = a[sort.key];
+      const y = b[sort.key];
+      if (x === y) return 0;
+      if (x === null || x === undefined) return 1; // empty cells last either way
+      if (y === null || y === undefined) return -1;
+      return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))) * dir;
+    });
+  }, [result.rows, sort]);
+
+  const onSort = (key: string) =>
+    setSort((s) => (s?.key !== key ? { key, desc: false } : s.desc ? null : { key, desc: true }));
+
   return (
-    <>
-      <Field id={`${id}-from`} label="From" className="w-full sm:w-40">
-        <Input
-          id={`${id}-from`}
-          type="date"
-          value={value.from}
-          max={value.to || undefined}
-          onChange={(e) => onChange({ ...value, from: e.target.value })}
-          required
-        />
-      </Field>
-      <Field id={`${id}-to`} label="To" className="w-full sm:w-40">
-        <Input
-          id={`${id}-to`}
-          type="date"
-          value={value.to}
-          min={value.from || undefined}
-          onChange={(e) => onChange({ ...value, to: e.target.value })}
-          required
-        />
-      </Field>
-    </>
-  );
-}
-
-const rangeOk = (r: Range) => !!r.from && !!r.to && r.from <= r.to;
-
-function RangeHint({ range }: { range: Range }) {
-  if (rangeOk(range)) return null;
-  return (
-    <p className="mb-4 text-sm text-destructive">
-      {range.from && range.to ? '"From" must be on or before "To".' : 'Pick both dates.'}
-    </p>
-  );
-}
-
-/** Loading / error / empty around a report table. */
-function ReportBody<T>({
-  query,
-  valid,
-  empty,
-  children,
-}: {
-  query: UseQueryResult<T[]>;
-  valid: boolean;
-  empty: string;
-  children: (rows: T[]) => ReactNode;
-}) {
-  if (!valid) return null;
-  if (query.isPending)
-    return (
-      <div className="space-y-2">
-        {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-10" />
-        ))}
-      </div>
-    );
-  if (query.error) return <ErrorState message={query.error.message} onRetry={() => query.refetch()} />;
-  if (query.data.length === 0) return <EmptyState icon={BarChart3} title={empty} />;
-  return <div className={query.isPlaceholderData ? 'opacity-60' : undefined}>{children(query.data)}</div>;
-}
-
-function CampaignReport({ range, setRange }: { range: Range; setRange: (r: Range) => void }) {
-  const valid = rangeOk(range);
-  const q = useReport('campaigns', range, valid);
-  return (
-    <>
-      <Toolbar kind="campaigns" params={range} valid={valid} onRefresh={() => q.refetch()}>
-        <RangeInputs id="campaign" value={range} onChange={setRange} />
-      </Toolbar>
-      <RangeHint range={range} />
-      <ReportBody query={q} valid={valid} empty="No campaigns yet.">
-        {(rows) => (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Campaign</TableHead>
-                <TableHead className="text-right">Leads</TableHead>
-                <TableHead className="text-right">Calls</TableHead>
-                <TableHead className="text-right">Answered</TableHead>
-                <TableHead className="text-right">Not answered</TableHead>
-                <TableHead className="text-right">Abandoned</TableHead>
-                <TableHead className="text-right">Answer rate</TableHead>
-                <TableHead className="text-right">Avg talk</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody className="tabular-nums">
-              {rows.map((r) => (
-                <TableRow key={r.campaign_id}>
-                  <TableCell className="font-semibold">{r.campaign_name}</TableCell>
-                  <TableCell className="text-right">{r.total_leads}</TableCell>
-                  <TableCell className="text-right">{r.total_calls}</TableCell>
-                  <TableCell className="text-right">{r.answered}</TableCell>
-                  <TableCell className="text-right">{r.not_answered}</TableCell>
-                  <TableCell className="text-right">{r.abandoned}</TableCell>
-                  <TableCell className="text-right">{r.answer_rate}%</TableCell>
-                  <TableCell className="text-right">{formatSeconds(r.avg_talk_seconds)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </ReportBody>
-    </>
-  );
-}
-
-function AgentReport({ range, setRange }: { range: Range; setRange: (r: Range) => void }) {
-  const valid = rangeOk(range);
-  const q = useReport('agents', range, valid);
-  return (
-    <>
-      <Toolbar kind="agents" params={range} valid={valid} onRefresh={() => q.refetch()}>
-        <RangeInputs id="agent" value={range} onChange={setRange} />
-      </Toolbar>
-      <RangeHint range={range} />
-      <ReportBody query={q} valid={valid} empty="No agents yet.">
-        {(rows) => (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Agent</TableHead>
-                <TableHead className="text-right">Login time</TableHead>
-                <TableHead className="text-right">Calls</TableHead>
-                <TableHead className="text-right">Answered</TableHead>
-                <TableHead className="text-right">Talk time</TableHead>
-                <TableHead className="text-right">Avg talk</TableHead>
-                <TableHead className="text-right">Callbacks</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody className="tabular-nums">
-              {rows.map((r) => (
-                <TableRow key={r.user_id}>
-                  <TableCell className="font-semibold">{r.username}</TableCell>
-                  <TableCell className="text-right">{formatSeconds(r.login_seconds)}</TableCell>
-                  <TableCell className="text-right">{r.total_calls}</TableCell>
-                  <TableCell className="text-right">{r.answered_calls}</TableCell>
-                  <TableCell className="text-right">{formatSeconds(r.talk_seconds)}</TableCell>
-                  <TableCell className="text-right">{formatSeconds(r.avg_talk_seconds)}</TableCell>
-                  <TableCell className="text-right">{r.callbacks_set}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </ReportBody>
-    </>
-  );
-}
-
-function CallReport({ filters, setFilters }: { filters: CallFilters; setFilters: (f: CallFilters) => void }) {
-  const campaigns = useCampaigns();
-  const valid = rangeOk(filters);
-  const q = useReport('calls', filters, valid);
-  return (
-    <>
-      <Toolbar kind="calls" params={filters} valid={valid} onRefresh={() => q.refetch()}>
-        <RangeInputs id="call" value={filters} onChange={(r) => setFilters({ ...filters, ...r })} />
-        <Field id="call-campaign" label="Campaign" className="w-full sm:w-48">
-          <Select
-            id="call-campaign"
-            value={filters.campaignId}
-            onChange={(e) => setFilters({ ...filters, campaignId: e.target.value })}
-          >
-            <option value="">All campaigns</option>
-            {campaigns.data?.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
+    <Table aria-label={result.title}>
+      <TableHeader>
+        <TableRow>
+          {result.columns.map((c) => (
+            <TableHead
+              key={c.key}
+              className={isNumeric(c) ? 'text-right' : undefined}
+              aria-sort={sort?.key === c.key ? (sort.desc ? 'descending' : 'ascending') : undefined}
+            >
+              <button
+                type="button"
+                className="inline-flex cursor-pointer items-center gap-1 uppercase hover:text-foreground"
+                onClick={() => onSort(c.key)}
+              >
+                {c.label}
+                {sort?.key === c.key && (sort.desc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />)}
+              </button>
+            </TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((r, i) => (
+          <TableRow key={i}>
+            {result.columns.map((c) => (
+              <TableCell
+                key={c.key}
+                className={cn(
+                  'whitespace-nowrap',
+                  isNumeric(c) && 'text-right tabular-nums',
+                  warn(c, r[c.key]) && 'font-semibold text-destructive',
+                )}
+              >
+                {formatCell(r[c.key], c.type)}
+              </TableCell>
             ))}
-          </Select>
-        </Field>
-        <Field id="call-disposition" label="Disposition" className="w-full sm:w-40">
-          <Select
-            id="call-disposition"
-            value={filters.disposition}
-            onChange={(e) => setFilters({ ...filters, disposition: e.target.value })}
-          >
-            <option value="">All dispositions</option>
-            <option value="ended">Ended</option>
-            <option value="abandoned">Abandoned</option>
-          </Select>
-        </Field>
-      </Toolbar>
-      <RangeHint range={filters} />
-      <ReportBody query={q} valid={valid} empty="No calls match these filters.">
-        {(rows) => (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Direction</TableHead>
-                  <TableHead>From</TableHead>
-                  <TableHead>To</TableHead>
-                  <TableHead>Campaign</TableHead>
-                  <TableHead>Disposition</TableHead>
-                  <TableHead>Start</TableHead>
-                  <TableHead>Answer</TableHead>
-                  <TableHead>End</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((c) => (
-                  <TableRow key={c.id}>
-                    <TableCell>{c.direction}</TableCell>
-                    <TableCell className="tabular-nums">{c.from_extension ?? dash}</TableCell>
-                    <TableCell className="tabular-nums">{c.to_number}</TableCell>
-                    <TableCell>{c.campaign_name ?? dash}</TableCell>
-                    <TableCell>{c.disposition ?? dash}</TableCell>
-                    <TableCell className="whitespace-nowrap">{formatDateTime(c.start_time)}</TableCell>
-                    <TableCell className="whitespace-nowrap">{formatDateTime(c.answer_time)}</TableCell>
-                    <TableCell className="whitespace-nowrap">{formatDateTime(c.end_time)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            {rows.length >= CALL_LIMIT && (
-              <p className="mt-3 text-xs text-muted-foreground">
-                Showing the latest {CALL_LIMIT} calls - narrow the filters to see others.
-              </p>
-            )}
-          </>
+          </TableRow>
+        ))}
+        {result.totals && (
+          <TableRow className="bg-muted/60 font-semibold hover:bg-muted/60" data-testid="totals">
+            {result.columns.map((c) => {
+              const v = result.totals![c.key];
+              return (
+                <TableCell
+                  key={c.key}
+                  className={cn(
+                    'whitespace-nowrap',
+                    isNumeric(c) && 'text-right tabular-nums',
+                    warn(c, v ?? null) && 'text-destructive',
+                  )}
+                >
+                  {v === undefined || v === null ? '' : formatCell(v, c.type)}
+                </TableCell>
+              );
+            })}
+          </TableRow>
         )}
-      </ReportBody>
-    </>
+      </TableBody>
+    </Table>
   );
 }
 
-function HourlyReport({ date, setDate }: { date: string; setDate: (d: string) => void }) {
-  const valid = !!date;
-  const q = useReport('hourly', { date }, valid);
+/** Waits until typing stops before searching. */
+function useDebounced<T>(value: T, ms = 400) {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+const START_FILTERS = (): Filters => ({
+  preset: 'today',
+  ...presetRange('today'),
+  campaignId: '',
+  agentId: '',
+  direction: '',
+  answered: '',
+  outcome: '',
+  number: '',
+  groupBy: '',
+  slaSeconds: '20',
+});
+
+function ReportView({
+  report,
+  catalog,
+  filters,
+  set,
+}: {
+  report: ReportInfo;
+  catalog: ReportCatalog;
+  filters: Filters;
+  set: (patch: Partial<Filters>) => void;
+}) {
+  const canExport = useAccess().can('reports', 'export');
+  const number = useDebounced(filters.number);
+  const params = reportParams(report, filters, number);
+  const valid = report.noRange || (!!filters.from && !!filters.to && filters.from <= filters.to);
+  const q = useReport(report.key, params, valid);
+
   return (
-    <>
-      <Toolbar kind="hourly" params={{ date }} valid={valid} onRefresh={() => q.refetch()}>
-        <Field id="hourly-date" label="Date" className="w-full sm:w-40">
-          <Input id="hourly-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
-        </Field>
-      </Toolbar>
-      <ReportBody query={q} valid={valid} empty="No data for this day.">
-        {(rows) => {
-          // Bars are scaled to the busiest hour, like the classic chart.
-          const max = Math.max(1, ...rows.map((r) => r.total_calls));
-          const total = rows.reduce((s, r) => s + r.total_calls, 0);
-          const answered = rows.reduce((s, r) => s + r.answered, 0);
-          return (
-            <div className="grid gap-3">
-              <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
-                <span>
-                  <b>{total}</b> calls
-                </span>
-                <span>
-                  <b>{answered}</b> answered ({total ? Math.round((answered / total) * 100) : 0}%)
-                </span>
-                <span className="flex items-center gap-1.5 text-muted-foreground">
-                  <span className="inline-block size-2.5 rounded-sm bg-primary" /> Answered
-                  <span className="ml-2 inline-block size-2.5 rounded-sm bg-status-break" /> Not answered
-                </span>
-              </div>
-              <ul className="grid gap-1" aria-label="Calls by hour">
-                {rows.map((r) => (
-                  <li
-                    key={r.hour}
-                    className="grid grid-cols-[3rem_1fr_auto] items-center gap-2 text-xs sm:grid-cols-[3.5rem_1fr_9rem]"
-                  >
-                    <span className="text-muted-foreground tabular-nums">{String(r.hour).padStart(2, '0')}:00</span>
-                    <span className="flex h-3 overflow-hidden rounded-sm bg-muted">
-                      <span className="bg-primary" style={{ width: `${(r.answered / max) * 100}%` }} />
-                      <span
-                        className="bg-status-break"
-                        style={{ width: `${((r.total_calls - r.answered) / max) * 100}%` }}
-                      />
-                    </span>
-                    <span className="text-right tabular-nums">
-                      {r.total_calls} calls · {r.answer_rate}%
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        }}
-      </ReportBody>
-    </>
+    <section aria-labelledby="report-title" className="min-w-0">
+      <SectionHeader
+        title={<span id="report-title">{report.title}</span>}
+        description={report.description}
+        actions={
+          <>
+            <Button variant="outline" onClick={() => q.refetch()} disabled={!valid}>
+              <RefreshCw /> Refresh
+            </Button>
+            {canExport &&
+              (valid ? (
+                <Button variant="outline" asChild>
+                  {/* A plain link: the server sends the file. */}
+                  <a href={reportUrl(report.key, params, true)} target="_blank" rel="noopener noreferrer">
+                    <Download /> Export CSV
+                  </a>
+                </Button>
+              ) : (
+                <Button variant="outline" disabled>
+                  <Download /> Export CSV
+                </Button>
+              ))}
+          </>
+        }
+      />
+      <FilterBar report={report} catalog={catalog} filters={filters} set={set} />
+      {!valid ? null : q.isPending ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-10" />
+          ))}
+        </div>
+      ) : q.error ? (
+        <ErrorState message={q.error.message} onRetry={() => q.refetch()} />
+      ) : q.data.rows.length === 0 ? (
+        <EmptyState icon={BarChart3} title={report.noRange ? 'Nothing to show yet.' : 'Nothing in this range.'} />
+      ) : (
+        <div className={q.isPlaceholderData ? 'opacity-60' : undefined}>
+          {q.data.meta && q.data.meta.total > q.data.meta.shown && (
+            <p className="mb-2 flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Info className="size-4" /> Showing the newest {q.data.meta.shown.toLocaleString('en-IN')} of{' '}
+              {q.data.meta.total.toLocaleString('en-IN')} calls - Export CSV for all of them.
+            </p>
+          )}
+          <ResultTable key={q.data.report} result={q.data} />
+          {q.data.notes?.map((n) => (
+            <p key={n} className="mt-2 text-xs text-muted-foreground">
+              {n}
+            </p>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
 export function ReportsPage() {
-  // Filters live here, so switching tabs keeps each tab's choices.
-  const [tab, setTab] = useState('campaign');
-  const [today] = useState(() => toDateInput());
-  const [campaignRange, setCampaignRange] = useState<Range>({ from: today, to: today });
-  const [agentRange, setAgentRange] = useState<Range>({ from: today, to: today });
-  const [callFilters, setCallFilters] = useState<CallFilters>({
-    from: today,
-    to: today,
-    campaignId: '',
-    disposition: '',
-  });
-  const [hourlyDate, setHourlyDate] = useState(today);
+  const catalog = useReportCatalog();
+  const [search, setSearch] = useSearchParams();
+  const reports = catalog.data?.reports ?? [];
+  const current = reports.find((r) => r.key === search.get('r')) ?? reports[0];
+  const choose = (key: string) => setSearch({ r: key }, { replace: true });
+  // Shared by all reports: switching report keeps the dates and filters.
+  const [filters, setFilters] = useState(START_FILTERS);
+  const set = (patch: Partial<Filters>) => setFilters((f) => ({ ...f, ...patch }));
 
   return (
     <Card>
       <CardContent className="pt-5">
-        <SectionHeader title="Reports" description="Campaign, agent, call, and hourly performance." />
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList>
-            <TabsTrigger value="campaign">Campaign</TabsTrigger>
-            <TabsTrigger value="agent">Agent</TabsTrigger>
-            <TabsTrigger value="call">Call</TabsTrigger>
-            <TabsTrigger value="hourly">Hourly</TabsTrigger>
-          </TabsList>
-          <TabsContent value="campaign">
-            <CampaignReport range={campaignRange} setRange={setCampaignRange} />
-          </TabsContent>
-          <TabsContent value="agent">
-            <AgentReport range={agentRange} setRange={setAgentRange} />
-          </TabsContent>
-          <TabsContent value="call">
-            <CallReport filters={callFilters} setFilters={setCallFilters} />
-          </TabsContent>
-          <TabsContent value="hourly">
-            <HourlyReport date={hourlyDate} setDate={setHourlyDate} />
-          </TabsContent>
-        </Tabs>
+        <SectionHeader
+          title="Reports"
+          description={catalog.data ? `Dates and hours are ${catalog.data.timezone} time.` : undefined}
+        />
+        {catalog.isPending ? (
+          <Skeleton className="h-40" />
+        ) : catalog.error ? (
+          <ErrorState message={catalog.error.message} onRetry={() => catalog.refetch()} />
+        ) : (
+          <div className="grid gap-5 lg:grid-cols-[13rem_minmax(0,1fr)]">
+            <Field id="rep-pick" label="Report" className="lg:hidden">
+              <Select id="rep-pick" value={current?.key} onChange={(e) => choose(e.target.value)}>
+                {reports.map((r) => (
+                  <option key={r.key} value={r.key}>
+                    {r.title}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <nav aria-label="Reports" className="hidden lg:block">
+              <ul className="space-y-0.5">
+                {reports.map((r) => (
+                  <li key={r.key}>
+                    <button
+                      type="button"
+                      onClick={() => choose(r.key)}
+                      aria-current={r.key === current?.key ? 'page' : undefined}
+                      className={cn(
+                        'w-full cursor-pointer rounded-md px-3 py-2 text-left text-sm hover:bg-muted',
+                        r.key === current?.key && 'bg-muted font-semibold text-foreground',
+                      )}
+                    >
+                      {r.title}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+            {current && <ReportView report={current} catalog={catalog.data} filters={filters} set={set} />}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

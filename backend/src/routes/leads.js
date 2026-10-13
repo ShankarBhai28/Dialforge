@@ -165,6 +165,32 @@ router.post('/agent/calls/:callId/disposition', requireCaller, async (req, res) 
   return saveDisposition(req, res, lead);
 });
 
+/**
+ * The call an outcome belongs to: the route's call, else the call id the
+ * agent screen sent - if it is this lead's and was this agent's - else this
+ * agent's latest call to the lead in the last 12 hours.
+ */
+async function outcomeCallId(conn, req, leadId) {
+  if (req.params.callId) return Number(req.params.callId);
+  const ext = req.session.user.extensionName || '';
+  const mine = '(agent_user_id = ? OR from_extension = ? OR transfer_ext = ?)';
+  const who = [req.session.user.id, ext, ext];
+  const asked = Number(req.body.callId);
+  if (Number.isInteger(asked) && asked > 0) {
+    const [rows] = await conn.query(`SELECT id FROM calls WHERE id = ? AND lead_id = ? AND ${mine}`, [
+      asked,
+      leadId,
+      ...who,
+    ]);
+    if (rows[0]) return rows[0].id;
+  }
+  const [rows] = await conn.query(
+    `SELECT id FROM calls WHERE lead_id = ? AND ${mine} AND start_time > NOW() - INTERVAL 12 HOUR ORDER BY id DESC LIMIT 1`,
+    [leadId, ...who],
+  );
+  return rows[0] ? rows[0].id : null;
+}
+
 /** Applies the agent's outcome to a lead (shared by both routes above). */
 async function saveDisposition(req, res, lead) {
   const { status, callbackAt, callbackMine, note } = req.body;
@@ -187,6 +213,7 @@ async function saveDisposition(req, res, lead) {
     nextCallAt = new Date(Date.now() + d.retry_after_min * 60 * 1000);
   }
 
+  let callId = null;
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -197,6 +224,14 @@ async function saveDisposition(req, res, lead) {
       nextCallAt,
       lead.id,
     ]);
+    // The outcome of THIS call too (the lead keeps only its latest): reports.
+    callId = await outcomeCallId(conn, req, lead.id);
+    if (callId) {
+      await conn.query(
+        'UPDATE calls SET outcome = ?, outcome_at = NOW(), agent_user_id = COALESCE(agent_user_id, ?) WHERE id = ?',
+        [d.code, req.session.user.role === 'agent' ? req.session.user.id : null, callId],
+      );
+    }
     // Any earlier pending callback for this lead is now handled.
     await conn.query("UPDATE callbacks SET status = 'done' WHERE lead_id = ? AND status = 'pending'", [lead.id]);
     if (d.is_callback) {
@@ -228,7 +263,7 @@ async function saveDisposition(req, res, lead) {
     entity: 'leads',
     entityId: lead.id,
     status: 200,
-    summary: `${d.code}${req.params.callId ? ` (call ${req.params.callId})` : ''}`,
+    summary: `${d.code}${callId ? ` (call ${callId})` : ''}`,
     request: { status, callbackAt: callbackAt || undefined, callbackMine, note },
     before: { status: lead.status ?? null },
     after: { status: d.code, next_call_at: nextCallAt, is_final: d.is_final ? 1 : 0 },

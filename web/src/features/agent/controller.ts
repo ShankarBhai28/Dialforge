@@ -483,7 +483,9 @@ export class AgentController {
     extra?: { callbackAt: string; callbackMine: boolean; note: string },
   ) {
     const body = { status, ...(extra ?? {}) };
-    if (target.leadId) await post(`/leads/${target.leadId}/disposition`, body);
+    // callId: the outcome is kept on that call too (reports).
+    if (target.leadId)
+      await post(`/leads/${target.leadId}/disposition`, target.callId ? { ...body, callId: target.callId } : body);
     else await post(`/agent/calls/${target.callId}/disposition`, body);
     this.set({ outcomeFor: null });
     this.refresh('leads', 'callbacks');

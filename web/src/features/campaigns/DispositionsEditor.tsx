@@ -53,7 +53,8 @@ function DispositionsForm({
         <p className="text-xs text-muted-foreground">
           What the agent picks after a call. <b>Final</b> = lead is done. <b>Retry</b> = dialer may call again after N
           minutes. <b>Callback</b> = agent picks a date/time. <b>DNC</b> = number goes on the Do Not Call list (must
-          also be final). The code is what's stored on the lead - avoid changing codes already in use.
+          also be final). <b>Success</b> = counts as a success (sale, interested) in the reports. The code is what's
+          stored on the lead - avoid changing codes already in use.
         </p>
         <Table>
           <TableHeader>
@@ -64,6 +65,7 @@ function DispositionsForm({
               <TableHead>Retry (min)</TableHead>
               <TableHead>Callback</TableHead>
               <TableHead>DNC</TableHead>
+              <TableHead>Success</TableHead>
               <TableHead className="text-right">
                 <span className="sr-only">Actions</span>
               </TableHead>
@@ -131,6 +133,13 @@ function DispositionsForm({
                       aria-label={`Disposition ${n} DNC`}
                       checked={r.marksDnc}
                       onChange={(e) => update(r.uid, { marksDnc: e.target.checked })}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Checkbox
+                      aria-label={`Disposition ${n} success`}
+                      checked={r.isSuccess}
+                      onChange={(e) => update(r.uid, { isSuccess: e.target.checked })}
                     />
                   </TableCell>
                   <TableCell className="text-right whitespace-nowrap">

@@ -136,9 +136,15 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
   }
 
   const [insertResult] = await pool.query(
-    `INSERT INTO calls (tenant_id, lead_id, direction, from_extension, to_number, campaign_id)
-     VALUES (1, ?, 'outbound', ?, ?, ?)`,
-    [leadId || null, fromExtension, toNumber, campaign ? campaign.id : null],
+    `INSERT INTO calls (tenant_id, lead_id, direction, from_extension, to_number, campaign_id, agent_user_id)
+     VALUES (1, ?, 'outbound', ?, ?, ?, ?)`,
+    [
+      leadId || null,
+      fromExtension,
+      toNumber,
+      campaign ? campaign.id : null,
+      req.session.user.role === 'agent' ? req.session.user.id : null,
+    ],
   );
   const callId = insertResult.insertId;
   await logEvent(callId, 'originated', { fromExtension, toNumber });

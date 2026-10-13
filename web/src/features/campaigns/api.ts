@@ -70,6 +70,8 @@ export type Disposition = {
   retry_after_min: number | null;
   marks_dnc: 0 | 1;
   is_callback: 0 | 1;
+  /** Counts as a success (sale / interested) in reports. */
+  is_success?: 0 | 1;
 };
 
 /** One item of PUT /admin/campaigns/:id/dispositions `{ dispositions: [...] }`. */
@@ -80,6 +82,7 @@ export type DispositionInput = {
   retryAfterMin: number | null;
   isCallback: boolean;
   marksDnc: boolean;
+  isSuccess: boolean;
 };
 
 // One row of GET /admin/campaigns/:id/recycle-rules - every result is always present.

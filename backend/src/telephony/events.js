@@ -111,9 +111,15 @@ function start() {
           // from_extension isn't known yet - Asterisk's queue engine decides
           // who answers, not us. AMI's AgentConnect event fills it in.
           const [insertResult] = await pool.query(
-            `INSERT INTO calls (tenant_id, direction, to_number, campaign_id, auto_answer, channel_name)
-           VALUES (1, 'inbound', ?, ?, ?, ?)`,
-            [callerNumber, campaign.id, campaign.auto_answer, event.channel.name],
+            `INSERT INTO calls (tenant_id, direction, to_number, campaign_id, auto_answer, channel_name, did)
+           VALUES (1, 'inbound', ?, ?, ?, ?, ?)`,
+            [
+              callerNumber,
+              campaign.id,
+              campaign.auto_answer,
+              event.channel.name,
+              dialedNumber ? dialedNumber.slice(0, 20) : null,
+            ],
           );
           const callId = insertResult.insertId;
           queueCallChannels.set(event.channel.name, callId);
@@ -148,7 +154,7 @@ function start() {
             // Inbound flow: the caller is already waiting - answer them now
             // and bridge immediately, rather than originating anything new.
             await ari.answer(state.destChannelId);
-            await pool.query('UPDATE calls SET answer_time = NOW() WHERE id = ?', [callId]);
+            await pool.query('UPDATE calls SET answer_time = NOW(), agent_connect_time = NOW() WHERE id = ?', [callId]);
             const bridge = await ari.createBridge();
             await ari.addChannelToBridge(bridge.id, event.channel.id);
             await ari.addChannelToBridge(bridge.id, state.destChannelId);
@@ -184,7 +190,7 @@ function start() {
           await ari.addChannelToBridge(bridge.id, event.channel.id);
           state.bridgeId = bridge.id;
 
-          await pool.query('UPDATE calls SET answer_time = NOW() WHERE id = ?', [callId]);
+          await pool.query('UPDATE calls SET answer_time = NOW(), agent_connect_time = NOW() WHERE id = ?', [callId]);
           await logEvent(callId, 'bridged', { bridgeId: bridge.id });
           // Click-to-call: record from the moment the customer answers.
           void startRecording({ callId, channelName: event.channel.name });
@@ -299,10 +305,15 @@ function start() {
       const match = (fields.Interface || '').match(/PJSIP\/([^\s,]+)/i);
       const extensionName = match ? match[1] : null;
       if (!extensionName) return;
+      const agentUserId = await findAgentIdByExtension(extensionName);
       // Dialer calls already have answer_time (when the customer picked up).
+      // The first agent to take the call stays its agent (reports); a
+      // transfer is in transfer_ext / call events.
       await pool.query(
-        'UPDATE calls SET from_extension = ?, agent_channel = ?, answer_time = COALESCE(answer_time, NOW()) WHERE id = ?',
-        [extensionName, fields.DestChannel || null, callId],
+        `UPDATE calls SET from_extension = ?, agent_channel = ?, answer_time = COALESCE(answer_time, NOW()),
+           agent_connect_time = COALESCE(agent_connect_time, NOW()), agent_user_id = COALESCE(agent_user_id, ?)
+         WHERE id = ?`,
+        [extensionName, fields.DestChannel || null, agentUserId, callId],
       );
       await logEvent(callId, 'agent_answered', { extensionName, interface: fields.Interface });
       // Inbound / dialer call: record the caller from the moment an agent takes it.
@@ -310,7 +321,7 @@ function start() {
       if (attemptId) {
         await pool.query(
           "UPDATE dial_attempts SET status = 'connected', result = 'connected', connected_at = NOW(), agent_user_id = ? WHERE id = ? AND result IS NULL",
-          [await findAgentIdByExtension(extensionName), attemptId],
+          [agentUserId, attemptId],
         );
       }
     } catch (err) {
