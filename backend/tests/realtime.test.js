@@ -21,7 +21,10 @@ before(async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   url = `ws://127.0.0.1:${server.address().port}/ws`;
 });
-after(() => server.close());
+after(async () => {
+  server.closeAllConnections();
+  await new Promise((r) => server.close(r));
+});
 
 // Opens a socket and collects its messages until closed.
 function connect(user) {

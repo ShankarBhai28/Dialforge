@@ -7,7 +7,7 @@ const hub = require('../realtime/hub');
 // using the calling campaign's own CLI if it has one set, falling back
 // to the global default otherwise.
 async function resolveDestination(toNumber, campaignCallerId) {
-  const [rows] = await pool.query('SELECT 1 FROM extensions WHERE name = ? LIMIT 1', [toNumber]);
+  const [rows] = await pool.query('SELECT 1 FROM extensions WHERE name = ? AND deleted_at IS NULL LIMIT 1', [toNumber]);
   if (rows.length > 0) {
     return { endpoint: `PJSIP/${toNumber}`, callerId: null };
   }

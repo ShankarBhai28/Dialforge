@@ -1,4 +1,5 @@
 const express = require('express');
+const { deleteLead } = require('../services/softDelete');
 const ExcelJS = require('exceljs');
 const pool = require('../../db');
 const { normalizePhone } = require('../../dialer-common');
@@ -31,15 +32,17 @@ router.get('/leads', requireCaller, async (req, res) => {
       FROM leads l
       LEFT JOIN campaigns c ON c.id = l.campaign_id
       LEFT JOIN lists ls ON ls.id = l.list_id
+      WHERE l.deleted_at IS NULL
       ORDER BY l.id DESC LIMIT 200
     `);
     return res.json(rows);
   }
   const campaign = await findCurrentCampaign(req.session.user.id);
   if (!campaign) return res.json([]);
-  const [rows] = await pool.query('SELECT * FROM leads WHERE campaign_id = ? ORDER BY id DESC LIMIT 100', [
-    campaign.id,
-  ]);
+  const [rows] = await pool.query(
+    'SELECT * FROM leads WHERE campaign_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 100',
+    [campaign.id],
+  );
   res.json(rows);
 });
 
@@ -50,6 +53,7 @@ router.get('/admin/leads', requirePermission('leads', 'view'), async (req, res) 
   const { q, campaignId, listId, status } = req.query;
   const digits = normalizePhone(q || '');
   const where = whereClause([
+    ['l.deleted_at IS NULL', []],
     [
       q ? `(l.name LIKE ?${digits ? ' OR l.phone LIKE ?' : ''})` : '',
       q ? [likeTerm(q.trim()), ...(digits ? [likeTerm(digits)] : [])] : [],
@@ -74,6 +78,7 @@ router.get('/admin/leads', requirePermission('leads', 'view'), async (req, res) 
   const [[count]] = await pool.query(`SELECT COUNT(*) AS n FROM leads l ${where.sql}`, where.params);
   // Statuses present (for the filter), within the chosen campaign if any.
   const scope = whereClause([
+    ['deleted_at IS NULL', []],
     [campaignId === 'none' ? 'campaign_id IS NULL' : campaignId ? 'campaign_id = ?' : '', [campaignId]],
     scopeCondition(req.access.scope, 'campaigns', 'campaign_id'),
   ]);
@@ -145,7 +150,7 @@ router.post('/agent/calls/:callId/disposition', requireCaller, async (req, res) 
     return res.status(400).json({ error: `status must be one of: ${codes.join(', ')}` });
 
   const [existing] = await pool.query(
-    'SELECT id, phone, campaign_id, status FROM leads WHERE phone = ? AND campaign_id <=> ? ORDER BY id DESC LIMIT 1',
+    'SELECT id, phone, campaign_id, status FROM leads WHERE phone = ? AND campaign_id <=> ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1',
     [phone, campaignId],
   );
   let lead = existing[0];
@@ -255,21 +260,22 @@ router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, r
     if (!codes.includes(status))
       return res.status(400).json({ error: `status must be new or one of: ${codes.join(', ')}` });
   }
-  const [rows] = await pool.query('SELECT id, alt_phone, priority, custom_data, campaign_id FROM leads WHERE id = ?', [
-    req.params.id,
-  ]);
+  const [rows] = await pool.query(
+    'SELECT id, alt_phone, priority, custom_data, campaign_id FROM leads WHERE id = ? AND deleted_at IS NULL',
+    [req.params.id],
+  );
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id))
     return res.status(404).json({ error: 'lead not found' });
   if (!campaignInScope(req.access.scope, campaignId)) {
     return res.status(400).json({ error: "that campaign isn't one of your teams'" });
   }
   if (campaignId) {
-    const [c] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [campaignId]);
+    const [c] = await pool.query('SELECT id FROM campaigns WHERE id = ? AND deleted_at IS NULL', [campaignId]);
     if (!c[0]) return res.status(400).json({ error: 'campaign not found' });
   }
   if (listId) {
     // The dialer takes a list's leads for the list's campaign, so the two must agree.
-    const [l] = await pool.query('SELECT name, campaign_id FROM lists WHERE id = ?', [listId]);
+    const [l] = await pool.query('SELECT name, campaign_id FROM lists WHERE id = ? AND deleted_at IS NULL', [listId]);
     if (!l[0]) return res.status(400).json({ error: 'list not found' });
     if (l[0].campaign_id !== campaignId)
       return res.status(400).json({ error: `list "${l[0].name}" belongs to a different campaign` });
@@ -302,37 +308,24 @@ router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, r
   res.json({ status: 'ok' });
 });
 
+// Delete always works and keeps history (its calls, answers, callbacks).
 router.delete('/admin/leads/:id', requirePermission('leads', 'delete'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id, campaign_id FROM leads WHERE id = ?', [req.params.id]);
-  if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id))
-    return res.status(404).json({ error: 'lead not found' });
-
-  const [callRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM calls WHERE lead_id = ?', [req.params.id]);
-  if (callRefs[0].cnt > 0) {
-    return res.status(409).json({ error: `Cannot delete - ${callRefs[0].cnt} call record(s) reference this lead.` });
-  }
-  const [responseRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM form_responses WHERE lead_id = ?', [
+  const [rows] = await pool.query('SELECT id, campaign_id FROM leads WHERE id = ? AND deleted_at IS NULL', [
     req.params.id,
   ]);
-  if (responseRefs[0].cnt > 0) {
-    return res
-      .status(409)
-      .json({ error: `Cannot delete - ${responseRefs[0].cnt} form response(s) reference this lead.` });
+  if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id)) {
+    return res.status(404).json({ error: 'lead not found' });
   }
-  const [callbackRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM callbacks WHERE lead_id = ?', [req.params.id]);
-  if (callbackRefs[0].cnt > 0) {
-    return res.status(409).json({ error: `Cannot delete - ${callbackRefs[0].cnt} callback(s) reference this lead.` });
-  }
-
-  await pool.query('DELETE FROM leads WHERE id = ?', [req.params.id]);
-  res.json({ status: 'ok' });
+  const notes = await deleteLead(Number(req.params.id), req.session.user.id);
+  if (notes === null) return res.status(404).json({ error: 'lead not found' });
+  res.json({ status: 'ok', notes });
 });
 
 router.post('/admin/leads/import', requirePermission('leads', 'import'), receiveLeadFile, async (req, res) => {
   const { listId } = req.body;
   if (!req.file) return res.status(400).json({ error: 'choose an .xlsx or .csv file' });
   if (!listId) return res.status(400).json({ error: 'listId is required - create a list first' });
-  const [listRows] = await pool.query('SELECT * FROM lists WHERE id = ?', [listId]);
+  const [listRows] = await pool.query('SELECT * FROM lists WHERE id = ? AND deleted_at IS NULL', [listId]);
   const list = listRows[0];
   if (!list || !campaignInScope(req.access.scope, list.campaign_id)) {
     return res.status(400).json({ error: 'list not found' });
@@ -355,7 +348,9 @@ router.post('/admin/leads/import', requirePermission('leads', 'import'), receive
 
   // Duplicates and DNC compared on the normalised number, so "+91 98400
   // 12345" in the file matches "9840012345" already in the campaign.
-  const [existingRows] = await pool.query('SELECT phone FROM leads WHERE campaign_id = ?', [campaignId]);
+  const [existingRows] = await pool.query('SELECT phone FROM leads WHERE campaign_id = ? AND deleted_at IS NULL', [
+    campaignId,
+  ]);
   const existing = new Set(existingRows.map((r) => normalizePhone(r.phone)));
   const [dncRows] = await pool.query('SELECT phone FROM dnc_numbers WHERE tenant_id = 1');
   const dnc = new Set(dncRows.map((r) => r.phone));
@@ -456,7 +451,10 @@ router.get('/admin/leads/template', requirePermission('leads', 'view'), async (r
   let fields = [];
   let fileName = 'leads-template';
   if (req.query.listId) {
-    const [rows] = await pool.query('SELECT l.name, l.campaign_id FROM lists l WHERE l.id = ?', [req.query.listId]);
+    const [rows] = await pool.query(
+      'SELECT l.name, l.campaign_id FROM lists l WHERE l.id = ? AND l.deleted_at IS NULL',
+      [req.query.listId],
+    );
     if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id)) {
       return res.status(404).json({ error: 'list not found' });
     }

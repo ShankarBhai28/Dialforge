@@ -31,6 +31,7 @@ import {
   type Extension,
   type SipPasswordReply,
 } from './api';
+import { toastDeleted } from '@/lib/deleted';
 
 const NONE = <span className="text-muted-foreground">—</span>;
 
@@ -335,7 +336,7 @@ export function ExtensionsPage() {
           }
         }}
         title={`Delete extension ${deleting?.name}?`}
-        description="Only possible when no user has it. Past calls keep the number."
+        description="Asterisk stops knowing it. Users who have it lose it and are logged out. Past calls keep the number."
         confirmLabel="Delete"
         destructive
         pending={remove.isPending}
@@ -343,8 +344,8 @@ export function ExtensionsPage() {
         onConfirm={() =>
           deleting &&
           remove.mutate(deleting.id, {
-            onSuccess: () => {
-              toast.success(`Extension ${deleting.name} deleted`);
+            onSuccess: (r) => {
+              toastDeleted('Extension', r);
               setDeleting(null);
             },
           })

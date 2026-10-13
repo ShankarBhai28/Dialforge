@@ -36,6 +36,7 @@ import {
 } from './api';
 import { DEFAULT_DISPOSITIONS, statusLabel } from './statuses';
 import { useCan } from '@/features/auth/access';
+import { toastDeleted } from '@/lib/deleted';
 
 const muted = (text: string) => <span className="text-muted-foreground">{text}</span>;
 
@@ -388,7 +389,7 @@ export function LeadsTab() {
           }
         }}
         title={`Delete lead "${deleting?.phone}"?`}
-        description="Leads with call records, form responses or callbacks can't be deleted."
+        description="It's no longer dialed or shown; a pending callback is cancelled. Its past calls and answers are kept."
         confirmLabel="Delete"
         destructive
         pending={remove.isPending}
@@ -396,8 +397,8 @@ export function LeadsTab() {
         onConfirm={() =>
           deleting &&
           remove.mutate(deleting.id, {
-            onSuccess: () => {
-              toast.success('Lead deleted');
+            onSuccess: (r) => {
+              toastDeleted('Lead', r);
               setDeleting(null);
               // Deleting the last row of the last page: step back so the table isn't empty.
               if (rows.length === 1 && page > 1) setPage(page - 1);

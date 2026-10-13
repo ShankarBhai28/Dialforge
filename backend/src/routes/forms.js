@@ -1,4 +1,5 @@
 const express = require('express');
+const { deleteForm } = require('../services/softDelete');
 const pool = require('../../db');
 const { requirePermission, requireAdminSide, requireCaller } = require('../middleware/auth');
 const { findCurrentCampaign } = require('../services/agents');
@@ -9,9 +10,9 @@ const { scopeCondition } = require('../services/access');
 const router = express.Router();
 
 router.get('/admin/forms', requireAdminSide, async (req, res) => {
-  const forms = await loadFormsWithFields();
+  const forms = await loadFormsWithFields('WHERE deleted_at IS NULL');
   const [usage] = await pool.query(
-    "SELECT form_id, GROUP_CONCAT(name ORDER BY name SEPARATOR ', ') AS campaigns FROM campaigns WHERE form_id IS NOT NULL GROUP BY form_id",
+    "SELECT form_id, GROUP_CONCAT(name ORDER BY name SEPARATOR ', ') AS campaigns FROM campaigns WHERE form_id IS NOT NULL AND deleted_at IS NULL GROUP BY form_id",
   );
   const [counts] = await pool.query('SELECT form_id, COUNT(*) AS cnt FROM form_responses GROUP BY form_id');
   res.json(
@@ -68,7 +69,7 @@ async function handleFormSave(req, res, formId) {
   // Deactivating a form a campaign still points at would silently remove
   // the form from agents' screens - make the admin unlink it first.
   if (formId && req.body.status === 'inactive') {
-    const [refs] = await pool.query('SELECT name FROM campaigns WHERE form_id = ?', [formId]);
+    const [refs] = await pool.query('SELECT name FROM campaigns WHERE form_id = ? AND deleted_at IS NULL', [formId]);
     if (refs.length) {
       return res.status(409).json({
         error: `Cannot deactivate - used by campaign(s): ${refs.map((r) => r.name).join(', ')}. Pick another form for them first.`,
@@ -88,25 +89,19 @@ async function handleFormSave(req, res, formId) {
 router.post('/admin/forms', requirePermission('forms', 'create'), (req, res) => handleFormSave(req, res, null));
 
 router.put('/admin/forms/:id', requirePermission('forms', 'edit'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id FROM forms WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query('SELECT id FROM forms WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'form not found' });
   return handleFormSave(req, res, Number(req.params.id));
 });
 
 // Blocked while referenced: a campaign using it, or saved responses
 // (those are real call data - deactivate the form instead).
+// Delete always works and keeps history (its saved answers): campaigns
+// using it lose it.
 router.delete('/admin/forms/:id', requirePermission('forms', 'delete'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id FROM forms WHERE id = ?', [req.params.id]);
-  if (!rows[0]) return res.status(404).json({ error: 'form not found' });
-  const [campRefs] = await pool.query('SELECT name FROM campaigns WHERE form_id = ?', [req.params.id]);
-  const [respRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM form_responses WHERE form_id = ?', [req.params.id]);
-  const blockers = [];
-  if (campRefs.length) blockers.push(`campaign(s) ${campRefs.map((c) => c.name).join(', ')}`);
-  if (respRefs[0].cnt > 0) blockers.push(`${respRefs[0].cnt} saved response(s) - set it Inactive instead`);
-  if (blockers.length)
-    return res.status(409).json({ error: `Cannot delete - still referenced by ${blockers.join(' and ')}.` });
-  await pool.query('DELETE FROM forms WHERE id = ?', [req.params.id]);
-  res.json({ status: 'ok' });
+  const notes = await deleteForm(Number(req.params.id), req.session.user.id);
+  if (notes === null) return res.status(404).json({ error: 'form not found' });
+  res.json({ status: 'ok', notes });
 });
 
 router.get('/admin/forms/:id/responses', requirePermission('forms', 'view'), async (req, res) => {

@@ -56,7 +56,7 @@ function parseCampaignSettings(body) {
 // Only an active form can be attached to a campaign.
 async function checkCampaignForm(formId) {
   if (!formId) return null;
-  const [rows] = await pool.query('SELECT status FROM forms WHERE id = ?', [formId]);
+  const [rows] = await pool.query('SELECT status FROM forms WHERE id = ? AND deleted_at IS NULL', [formId]);
   if (!rows[0]) return 'form not found';
   if (rows[0].status !== 'active') return 'that form is inactive';
   return null;

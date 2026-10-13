@@ -11,7 +11,7 @@ const { checkPassword, parseNewUser, parseUserUpdate } = require('../services/us
 const router = express.Router();
 
 async function extensionExists(id) {
-  const [rows] = await pool.query('SELECT 1 FROM extensions WHERE id = ?', [id]);
+  const [rows] = await pool.query('SELECT 1 FROM extensions WHERE id = ? AND deleted_at IS NULL', [id]);
   return rows.length > 0;
 }
 

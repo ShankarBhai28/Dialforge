@@ -12,7 +12,7 @@ const router = express.Router();
 // separate dialer-engine.js process; these only flip state / read status) ---
 router.post('/admin/campaigns/:id/dialer', requirePermission('dialer', 'control'), async (req, res) => {
   const { action } = req.body;
-  const [rows] = await pool.query('SELECT * FROM campaigns WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query('SELECT * FROM campaigns WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
   const c = rows[0];
   if (!c || !campaignInScope(req.access.scope, c.id)) return res.status(404).json({ error: 'campaign not found' });
   const next = { start: 'running', pause: 'paused', stop: 'stopped' }[action];

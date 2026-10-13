@@ -82,6 +82,8 @@ An agent who never logs out is taken offline in two ways (`src/services/agentLog
 | Access | `roles` (see ADR 0005), `sessions` (logins, so a restart doesn't log anyone out) |
 | Audit | `audit_log`: every admin-side change (who, when, request, row before / after, refused ones too), logins / logouts / failed logins, agent outcomes, automatic logouts. Written by `src/services/audit.js`; nothing in the app updates or deletes it. Viewed on the **Audit Log** screen. |
 
+**Deleting keeps history.** Campaigns, queues, lists, leads, forms and extensions are never removed: a delete sets `deleted_at` / `deleted_by` (migration `0003`, `src/services/softDelete.js`) and unlinks what pointed at them (a deleted campaign's dialer stops, its DIDs are unassigned, its lists and leads go with it; campaigns lose a deleted queue or form; users lose a deleted extension). Every list, dropdown and by-id lookup filters `deleted_at IS NULL`; history (call log, reports) still shows them as "Name (deleted)". Roles have no history and are really deleted. Names of deleted items can be reused.
+
 Every table has `tenant_id` (always 1 today; multi-tenant is planned). The structure is `backend/migrations/NNNN_*.sql`, applied in order by `npm run db:migrate` and recorded in `schema_migrations`: `0001_baseline.sql` is the whole structure as of 2026-10-13; earlier loose files are kept in `migrations/archive/` for history only. A new install: `npm run db:migrate` then `npm run create-admin -- --username <name>`.
 
 ## 6. Code map

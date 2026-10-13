@@ -35,7 +35,7 @@ function parseTeam(body) {
 async function checkTeamRefs({ memberIds, campaignIds }, deps = { pool }) {
   const checks = [
     [memberIds, "SELECT id FROM users WHERE role IN ('agent', 'staff') AND id IN (?)", 'member'],
-    [campaignIds, 'SELECT id FROM campaigns WHERE id IN (?)', 'campaign'],
+    [campaignIds, 'SELECT id FROM campaigns WHERE id IN (?) AND deleted_at IS NULL', 'campaign'],
   ];
   for (const [ids, sql, label] of checks) {
     if (!ids.length) continue;

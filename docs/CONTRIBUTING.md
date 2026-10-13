@@ -32,6 +32,7 @@ Editor: install the **ESLint**, **Prettier** and **EditorConfig** extensions, an
 ## 3. Pull request checklist
 - [ ] `npm run check` passes (CI runs the same thing).
 - [ ] New logic has a test in `backend/tests/` (or `web/`, from Stage 2).
+- [ ] New query on campaigns / queues / lists / leads / forms / extensions → add `deleted_at IS NULL` unless it's showing history (deleted items stay in the table, see ARCHITECTURE §5).
 - [ ] Schema change → new `backend/migrations/NNNN_<topic>.sql` (next number), safe to run on a live DB; never edit a file that was already applied anywhere. Mentioned in the PR.
 - [ ] Anything touching calls (ARI/AMI, dialplan, queues, dialer) lists how you tested it, and is tested on a test server with **internal extensions or your own numbers**.
 - [ ] Docs updated: `ARCHITECTURE.md` if a flow changed, plus a `RUNBOOK.md` entry for anything deployed.

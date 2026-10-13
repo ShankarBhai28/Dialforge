@@ -1,4 +1,6 @@
 const express = require('express');
+const { deleteExtension } = require('../services/softDelete');
+const { revokeUserSessions } = require('../services/sessions');
 const pool = require('../../db');
 const ari = require('../../ari');
 const { requireAdminSide, requirePermission } = require('../middleware/auth');
@@ -19,7 +21,7 @@ router.get('/admin/extensions', requireAdminSide, async (req, res) => {
             (e.sip_password IS NOT NULL AND e.sip_password <> '') AS has_password,
             (SELECT GROUP_CONCAT(u.username ORDER BY u.username SEPARATOR ', ')
                FROM users u WHERE u.extension_id = e.id) AS used_by
-     FROM extensions e ORDER BY e.name`,
+     FROM extensions e WHERE e.deleted_at IS NULL ORDER BY e.name`,
   );
   // Registered right now (a browser or phone is connected)? null = Asterisk didn't answer.
   const states = await ari.endpointStates();
@@ -53,7 +55,10 @@ router.post('/admin/extensions', requirePermission('extensions', 'create'), asyn
 // can't register again (a browser already connected stays until its
 // registration ends - force-logout the agent to cut it at once).
 router.put('/admin/extensions/:id', requirePermission('extensions', 'edit'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id, name, label, enabled FROM extensions WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query(
+    'SELECT id, name, label, enabled FROM extensions WHERE id = ? AND deleted_at IS NULL',
+    [req.params.id],
+  );
   if (!rows[0]) return res.status(404).json({ error: 'extension not found' });
   const { error, changes } = parseExtensionUpdate(req.body, rows[0]);
   if (error) return res.status(400).json({ error });
@@ -68,7 +73,9 @@ router.put('/admin/extensions/:id', requirePermission('extensions', 'edit'), asy
 // A new SIP password (e.g. a desk phone was lost). The agent screen picks
 // it up on its next connect.
 router.post('/admin/extensions/:id/password', requirePermission('extensions', 'edit'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id, name FROM extensions WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query('SELECT id, name FROM extensions WHERE id = ? AND deleted_at IS NULL', [
+    req.params.id,
+  ]);
   if (!rows[0]) return res.status(404).json({ error: 'extension not found' });
   const password = generateSipPassword();
   await pool.query('UPDATE extensions SET sip_password = ? WHERE id = ?', [password, rows[0].id]);
@@ -76,17 +83,13 @@ router.post('/admin/extensions/:id/password', requirePermission('extensions', 'e
 });
 
 // Only while no user has it as their extension (calls keep the number as text, so history stays).
+// Delete always works and keeps history (calls keep the number): its users
+// lose it and are logged out, Asterisk no longer knows it.
 router.delete('/admin/extensions/:id', requirePermission('extensions', 'delete'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id, name FROM extensions WHERE id = ?', [req.params.id]);
-  if (!rows[0]) return res.status(404).json({ error: 'extension not found' });
-  const [users] = await pool.query('SELECT username FROM users WHERE extension_id = ? ORDER BY username', [rows[0].id]);
-  if (users.length) {
-    return res.status(409).json({
-      error: `Cannot delete - ${rows[0].name} is the extension of ${users.map((u) => u.username).join(', ')}. Give them another extension first (Users), or disable it instead.`,
-    });
-  }
-  await pool.query('DELETE FROM extensions WHERE id = ?', [rows[0].id]);
-  res.json({ status: 'ok' });
+  const result = await deleteExtension(Number(req.params.id), req.session.user.id);
+  if (result === null) return res.status(404).json({ error: 'extension not found' });
+  for (const id of result.userIds) revokeUserSessions(id);
+  res.json({ status: 'ok', notes: result.notes });
 });
 
 module.exports = router;

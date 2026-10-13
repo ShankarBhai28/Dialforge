@@ -22,6 +22,7 @@ import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader } from '@/co
 import { ErrorState } from '@/components/ErrorState';
 import { RING_STRATEGIES, useDeleteQueue, useQueues, useSaveQueue, type Queue } from './api';
 import { useCan } from '@/features/auth/access';
+import { toastDeleted } from '@/lib/deleted';
 
 const strategyLabel = (v: string) => RING_STRATEGIES.find((s) => s.value === v)?.label ?? v;
 const yesNo = (v: string) => (v === 'yes' ? 'Yes' : v === 'no' ? 'No' : v);
@@ -259,7 +260,7 @@ export function QueuesPage() {
           }
         }}
         title={`Delete queue "${deleting?.name}"?`}
-        description="This also removes it from Asterisk."
+        description="Asterisk stops using it. Campaigns that use it lose it (and stop dialing until you give them another queue). Past calls keep it."
         confirmLabel="Delete"
         destructive
         pending={remove.isPending}
@@ -267,8 +268,8 @@ export function QueuesPage() {
         onConfirm={() =>
           deleting &&
           remove.mutate(deleting.id, {
-            onSuccess: () => {
-              toast.success('Queue deleted');
+            onSuccess: (r) => {
+              toastDeleted('Queue', r);
               setDeleting(null);
             },
           })

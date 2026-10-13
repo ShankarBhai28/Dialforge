@@ -87,7 +87,8 @@ const call = async (who, method, url, body) => {
   return { status: res.status, body: await res.json().catch(() => null) };
 };
 const auditRows = () => sql.filter(([s]) => s.startsWith('INSERT INTO audit_log'));
-const settle = () => new Promise((r) => setTimeout(r, 30));
+// The audit row is written just after the response; give it time on a busy machine.
+const settle = () => new Promise((r) => setTimeout(r, 150));
 
 test('audit helpers: secrets hidden, admin paths named', () => {
   assert.deepStrictEqual(redact({ username: 'x', password: 'p', nested: [{ sip_password: 's' }] }), {

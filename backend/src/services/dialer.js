@@ -18,6 +18,7 @@ async function dialerOverview(deps = { pool }) {
     LEFT JOIN queues q ON q.id = c.queue_id
     LEFT JOIN users u ON u.id = c.dialer_state_changed_by
     LEFT JOIN dialer_status s ON s.campaign_id = c.id
+    WHERE c.deleted_at IS NULL
     ORDER BY c.dialer_state = 'running' DESC, c.dialer_state = 'paused' DESC, c.name
   `);
   // Today = since midnight in India (server clock is UTC).

@@ -46,13 +46,13 @@ describe('Extensions', () => {
     await waitFor(() => expect(screen.queryByLabelText('SIP password')).not.toBeInTheDocument());
   });
 
-  it("disables after confirming; delete shows the server's reason when the extension is in use", async () => {
+  it("disables after confirming; a failed delete shows the server's reason", async () => {
     const calls = fakeApi({
       'GET /admin/extensions': LIST,
       'PUT /admin/extensions/1': { body: {} },
       'DELETE /admin/extensions/1': {
-        status: 409,
-        body: { error: 'Cannot delete - 1001 is the extension of agent1001.' },
+        status: 404,
+        body: { error: 'extension not found' },
       },
     });
     renderPage(<ExtensionsPage />);
@@ -64,7 +64,7 @@ describe('Extensions', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Delete 1001' }));
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
-    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('extension of agent1001');
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('extension not found');
   });
 
   it('view-only role: no change buttons', async () => {

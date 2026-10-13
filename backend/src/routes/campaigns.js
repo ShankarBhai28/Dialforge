@@ -1,4 +1,5 @@
 const express = require('express');
+const { deleteCampaign } = require('../services/softDelete');
 const pool = require('../../db');
 const { requirePermission, requireAdminSide, requireAllScope } = require('../middleware/auth');
 const { checkCampaignForm, parseCampaignSettings } = require('../services/campaigns');
@@ -22,7 +23,7 @@ router.get('/admin/campaigns', requireAdminSide, async (req, res) => {
     FROM campaigns c
     LEFT JOIN queues q ON q.id = c.queue_id
     LEFT JOIN forms f ON f.id = c.form_id
-    ${cond ? `WHERE ${cond}` : ''}
+    WHERE c.deleted_at IS NULL${cond ? ` AND ${cond}` : ''}
     ORDER BY c.id DESC
   `,
     params,
@@ -83,7 +84,9 @@ router.post(
 router.put('/admin/campaigns/:id', requirePermission('campaigns', 'edit'), async (req, res) => {
   const { name, queueId, outboundCallerId, autoAnswer, status, formId } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
-  const [rows] = await pool.query('SELECT id, status FROM campaigns WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query('SELECT id, status FROM campaigns WHERE id = ? AND deleted_at IS NULL', [
+    req.params.id,
+  ]);
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].id))
     return res.status(404).json({ error: 'campaign not found' });
   const statusError = checkCampaignStatus(status, rows[0].status);
@@ -113,46 +116,16 @@ router.put('/admin/campaigns/:id', requirePermission('campaigns', 'edit'), async
   res.json({ id: Number(req.params.id), name });
 });
 
+// Delete always works and keeps history (services/softDelete.js): the dialer
+// stops, DIDs / teams are unlinked, its lists and leads go with it.
 router.delete(
   '/admin/campaigns/:id',
   requirePermission('campaigns', 'delete'),
   requireAllScope('delete campaigns'),
   async (req, res) => {
-    const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [req.params.id]);
-    if (!rows[0]) return res.status(404).json({ error: 'campaign not found' });
-
-    // Checked explicitly (rather than relying on the raw FK error) so the
-    // message can actually say what's in the way, not just "a constraint
-    // failed" - the whole point of the "block with a clear error" choice.
-    const [didRefs] = await pool.query('SELECT number FROM dids WHERE campaign_id = ?', [req.params.id]);
-    const [leadRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM leads WHERE campaign_id = ?', [req.params.id]);
-    const [callRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM calls WHERE campaign_id = ?', [req.params.id]);
-    const [responseRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM form_responses WHERE campaign_id = ?', [
-      req.params.id,
-    ]);
-    const [callbackRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM callbacks WHERE campaign_id = ?', [
-      req.params.id,
-    ]);
-
-    const blockers = [];
-    if (didRefs.length) blockers.push(`${didRefs.length} DID number(s) (${didRefs.map((d) => d.number).join(', ')})`);
-    if (leadRefs[0].cnt > 0) blockers.push(`${leadRefs[0].cnt} lead(s)`);
-    if (callRefs[0].cnt > 0) blockers.push(`${callRefs[0].cnt} call record(s)`);
-    if (responseRefs[0].cnt > 0) blockers.push(`${responseRefs[0].cnt} form response(s)`);
-    if (callbackRefs[0].cnt > 0) blockers.push(`${callbackRefs[0].cnt} callback(s)`);
-    if (blockers.length) {
-      return res.status(409).json({
-        error: `Cannot delete - still referenced by ${blockers.join(' and ')}. Reassign or remove them first.`,
-      });
-    }
-
-    // Its settings rows go with it - a leftover team mapping would point at
-    // a campaign that no longer exists.
-    for (const table of ['team_campaigns', 'campaign_recycle_rules', 'campaign_dispositions', 'dialer_status']) {
-      await pool.query(`DELETE FROM ${table} WHERE campaign_id = ?`, [req.params.id]);
-    }
-    await pool.query('DELETE FROM campaigns WHERE id = ?', [req.params.id]);
-    res.json({ status: 'ok' });
+    const notes = await deleteCampaign(Number(req.params.id), req.session.user.id);
+    if (notes === null) return res.status(404).json({ error: 'campaign not found' });
+    res.json({ status: 'ok', notes });
   },
 );
 
@@ -165,7 +138,7 @@ router.get('/admin/campaigns/:id/dispositions', requireAdminSide, async (req, re
 // Replaces the whole set. Leads keep whatever code they already have -
 // a removed code just shows as its raw code in lists.
 router.put('/admin/campaigns/:id/dispositions', requirePermission('campaigns', 'edit'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].id))
     return res.status(404).json({ error: 'campaign not found' });
   const { error, dispositions } = validateDispositions(req.body.dispositions);

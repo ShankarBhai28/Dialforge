@@ -1,4 +1,5 @@
 const express = require('express');
+const { deleteList } = require('../services/softDelete');
 const pool = require('../../db');
 const { requirePermission, requireAdminSide } = require('../middleware/auth');
 
@@ -14,13 +15,13 @@ router.get('/admin/lists', requireAdminSide, async (req, res) => {
   const [rows] = await pool.query(
     `
     SELECT ls.*, c.name AS campaign_name,
-      (SELECT COUNT(*) FROM leads WHERE leads.list_id = ls.id) AS lead_count,
-      (SELECT COUNT(*) FROM leads WHERE leads.list_id = ls.id AND leads.is_final = 0
+      (SELECT COUNT(*) FROM leads WHERE leads.list_id = ls.id AND leads.deleted_at IS NULL) AS lead_count,
+      (SELECT COUNT(*) FROM leads WHERE leads.list_id = ls.id AND leads.deleted_at IS NULL AND leads.is_final = 0
          AND leads.attempts < COALESCE(c.max_attempts, 3)
          AND (leads.next_call_at IS NULL OR leads.next_call_at <= NOW())) AS dialable_count
     FROM lists ls
     LEFT JOIN campaigns c ON c.id = ls.campaign_id
-    ${cond ? `WHERE ${cond}` : ''}
+    WHERE ls.deleted_at IS NULL${cond ? ` AND ${cond}` : ''}
     ORDER BY ls.id DESC
   `,
     params,
@@ -31,7 +32,7 @@ router.get('/admin/lists', requireAdminSide, async (req, res) => {
 // A list must belong to a real campaign (the FK would otherwise give a raw 500).
 // ...and, for a team-scoped role, to one of its teams' campaigns.
 async function campaignExists(id, scope) {
-  const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [id]);
+  const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ? AND deleted_at IS NULL', [id]);
   return !!rows[0] && campaignInScope(scope, rows[0].id);
 }
 
@@ -65,7 +66,9 @@ router.put('/admin/lists/:id', requirePermission('leads', 'edit'), async (req, r
   if (priority === null) return res.status(400).json({ error: 'priority must be a whole number -100..100' });
   if (!(await campaignExists(campaignId, req.access.scope)))
     return res.status(400).json({ error: 'campaign not found' });
-  const [rows] = await pool.query('SELECT id, campaign_id FROM lists WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query('SELECT id, campaign_id FROM lists WHERE id = ? AND deleted_at IS NULL', [
+    req.params.id,
+  ]);
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id))
     return res.status(404).json({ error: 'list not found' });
   await pool.query('UPDATE lists SET name = ?, campaign_id = ?, is_active = ?, priority = ? WHERE id = ?', [
@@ -78,18 +81,17 @@ router.put('/admin/lists/:id', requirePermission('leads', 'edit'), async (req, r
   res.json({ id: Number(req.params.id), name, campaignId });
 });
 
+// Delete always works and keeps history: its leads go with it.
 router.delete('/admin/lists/:id', requirePermission('leads', 'delete'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id, campaign_id FROM lists WHERE id = ?', [req.params.id]);
-  if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id))
+  const [rows] = await pool.query('SELECT id, campaign_id FROM lists WHERE id = ? AND deleted_at IS NULL', [
+    req.params.id,
+  ]);
+  if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id)) {
     return res.status(404).json({ error: 'list not found' });
-  const [leadRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM leads WHERE list_id = ?', [req.params.id]);
-  if (leadRefs[0].cnt > 0) {
-    return res.status(409).json({
-      error: `Cannot delete - ${leadRefs[0].cnt} lead(s) still belong to this list. Reassign or remove them first.`,
-    });
   }
-  await pool.query('DELETE FROM lists WHERE id = ?', [req.params.id]);
-  res.json({ status: 'ok' });
+  const notes = await deleteList(Number(req.params.id), req.session.user.id);
+  if (notes === null) return res.status(404).json({ error: 'list not found' });
+  res.json({ status: 'ok', notes });
 });
 
 module.exports = router;

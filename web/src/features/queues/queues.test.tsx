@@ -89,11 +89,11 @@ describe('Queues', () => {
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('a queue with a matching name already exists');
   });
 
-  it("shows the server's reason when a delete is blocked", async () => {
-    const blocked = 'Cannot delete - still used by campaign(s): Predictive_Test. Reassign or delete them first.';
+  it("shows the server's reason when a delete fails", async () => {
+    const blocked = 'queue not found';
     fakeApi({
       'GET /admin/queues': { body: [SALES] },
-      'DELETE /admin/queues/3': { status: 409, body: { error: blocked } },
+      'DELETE /admin/queues/3': { status: 404, body: { error: blocked } },
     });
     renderPage(<QueuesPage />);
     await userEvent.click(await screen.findByRole('button', { name: 'Delete Sales Team' }));

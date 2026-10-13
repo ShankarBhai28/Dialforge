@@ -31,9 +31,11 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
   baseMissing = `http://127.0.0.1:${serverMissing.address().port}`;
 });
-after(() => {
-  server.close();
-  serverMissing.close();
+after(async () => {
+  for (const s of [server, serverMissing]) {
+    s.closeAllConnections();
+    await new Promise((r) => s.close(r));
+  }
   fs.rmSync(dist, { recursive: true, force: true });
 });
 

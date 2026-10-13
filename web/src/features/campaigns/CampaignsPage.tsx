@@ -1,7 +1,6 @@
 // Campaigns: list, create/edit with all dialer settings, delete, and the
 // per-campaign Dispositions and Recycle rules editors (tabs in one dialog).
 import { useState } from 'react';
-import { toast } from 'sonner';
 import { ListChecks, Megaphone, Pencil, Plus, Repeat, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -16,6 +15,7 @@ import { CampaignSettingsForm } from './CampaignSettingsForm';
 import { DispositionsEditor } from './DispositionsEditor';
 import { RecycleRulesEditor } from './RecycleRulesEditor';
 import { useCan } from '@/features/auth/access';
+import { toastDeleted } from '@/lib/deleted';
 
 type Tab = 'settings' | 'dispositions' | 'recycle';
 
@@ -216,7 +216,7 @@ export function CampaignsPage() {
           }
         }}
         title={`Delete campaign "${deleting?.name}"?`}
-        description="Only possible when no DID numbers, leads, calls, form responses or callbacks still use it."
+        description="It disappears everywhere and its dialer stops. Its lists and leads go with it, its DID numbers are unassigned. Past calls and reports keep it."
         confirmLabel="Delete"
         destructive
         pending={remove.isPending}
@@ -224,8 +224,8 @@ export function CampaignsPage() {
         onConfirm={() =>
           deleting &&
           remove.mutate(deleting.id, {
-            onSuccess: () => {
-              toast.success('Campaign deleted');
+            onSuccess: (r) => {
+              toastDeleted('Campaign', r);
               setDeleting(null);
             },
           })

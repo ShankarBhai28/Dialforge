@@ -20,7 +20,7 @@ const RECYCLE_RULE_LABELS = {
 };
 
 router.get('/admin/campaigns/:id/recycle-rules', requirePermission('campaigns', 'view'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].id))
     return res.status(404).json({ error: 'campaign not found' });
   const rules = await getRecycleRules(pool, Number(req.params.id));
@@ -28,7 +28,7 @@ router.get('/admin/campaigns/:id/recycle-rules', requirePermission('campaigns', 
 });
 
 router.put('/admin/campaigns/:id/recycle-rules', requirePermission('campaigns', 'edit'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].id))
     return res.status(404).json({ error: 'campaign not found' });
   const input = req.body.rules || {};
@@ -63,7 +63,7 @@ const NEVER_RECYCLE = ['do_not_call'];
 async function listWithCampaign(listId) {
   const [rows] = await pool.query(
     `SELECT ls.id, ls.name, ls.campaign_id, COALESCE(c.max_attempts, 3) AS max_attempts
-     FROM lists ls LEFT JOIN campaigns c ON c.id = ls.campaign_id WHERE ls.id = ?`,
+     FROM lists ls LEFT JOIN campaigns c ON c.id = ls.campaign_id WHERE ls.id = ? AND ls.deleted_at IS NULL`,
     [listId],
   );
   return rows[0] || null;
@@ -80,7 +80,7 @@ router.get('/admin/lists/:id/recycle', requirePermission('leads', 'view'), async
        SUM(is_final = 0 AND attempts < ? AND (next_call_at IS NULL OR next_call_at <= NOW())) AS dialable,
        SUM(is_final = 0 AND attempts < ? AND next_call_at > NOW()) AS scheduled,
        SUM(is_final = 1 OR attempts >= ?) AS done
-     FROM leads WHERE list_id = ? GROUP BY status ORDER BY total DESC`,
+     FROM leads WHERE list_id = ? AND deleted_at IS NULL GROUP BY status ORDER BY total DESC`,
     [list.max_attempts, list.max_attempts, list.max_attempts, list.id],
   );
   const labels = Object.fromEntries((await getDispositions(list.campaign_id)).map((d) => [d.code, d.label]));
@@ -123,7 +123,7 @@ router.post('/admin/lists/:id/recycle', requirePermission('leads', 'recycle'), a
   const [candidates] = await pool.query(
     `SELECT l.id, l.phone,
        EXISTS (SELECT 1 FROM dial_attempts da WHERE da.lead_id = l.id AND da.status <> 'ended') AS on_call
-     FROM leads l WHERE l.list_id = ? AND l.status IN (?)`,
+     FROM leads l WHERE l.list_id = ? AND l.deleted_at IS NULL AND l.status IN (?)`,
     [list.id, statuses],
   );
   const phones = [...new Set(candidates.map((c) => normalizePhone(c.phone)))];

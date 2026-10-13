@@ -142,19 +142,19 @@ describe('Leads & Lists - lists', () => {
     });
   });
 
-  it("shows the server's reason when a list can't be deleted", async () => {
+  it("shows the server's reason when a list delete fails", async () => {
     fakeApi({
       ...base,
       'DELETE /admin/lists/7': {
-        status: 409,
-        body: { error: 'Cannot delete - 120 lead(s) still belong to this list. Reassign or remove them first.' },
+        status: 404,
+        body: { error: 'list not found' },
       },
     });
     renderPage(<LeadsPage />);
     await userEvent.click(await screen.findByRole('button', { name: 'Delete October cold' }));
     const dialog = screen.getByRole('dialog');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('120 lead(s) still belong to this list');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('list not found');
   });
 });
 
@@ -414,12 +414,12 @@ describe('Leads & Lists - leads', () => {
     await waitFor(() => expect(calls.filter((c) => c.key === FIRST)).toHaveLength(2));
   });
 
-  it("shows the server's reason when a lead can't be deleted", async () => {
+  it("shows the server's reason when a lead delete fails", async () => {
     fakeApi({
       ...base,
       'DELETE /admin/leads/31': {
-        status: 409,
-        body: { error: 'Cannot delete - 3 call record(s) reference this lead.' },
+        status: 404,
+        body: { error: 'lead not found' },
       },
     });
     renderPage(<LeadsPage />);
@@ -427,7 +427,7 @@ describe('Leads & Lists - leads', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Delete 9840012345' }));
     const dialog = screen.getByRole('dialog');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('3 call record(s) reference this lead');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('lead not found');
   });
 
   it('shows an error state with retry when leads fail to load', async () => {

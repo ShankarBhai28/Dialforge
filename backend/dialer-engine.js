@@ -121,7 +121,7 @@ async function cleanHopper(c) {
      JOIN leads l ON l.id = h.lead_id
      LEFT JOIN lists ls ON ls.id = l.list_id
      WHERE h.campaign_id = ? AND h.status = 'ready' AND (
-       l.is_final = 1 OR l.campaign_id IS NULL OR l.campaign_id <> h.campaign_id
+       l.is_final = 1 OR l.deleted_at IS NOT NULL OR l.campaign_id IS NULL OR l.campaign_id <> h.campaign_id
        OR (l.next_call_at IS NOT NULL AND l.next_call_at > NOW())
        OR l.attempts >= ? OR (ls.id IS NOT NULL AND ls.is_active = 0)
        OR ${LEAD_HAS_OPEN_ATTEMPT}
@@ -152,7 +152,7 @@ async function fillHopper(c, idleAgents, counts) {
      LEFT JOIN lists ls ON ls.id = l.list_id
      LEFT JOIN dial_hopper h ON h.lead_id = l.id
      LEFT JOIN callbacks cb ON cb.lead_id = l.id AND cb.status = 'pending'
-     WHERE l.campaign_id = ? AND l.is_final = 0 AND l.attempts < ?
+     WHERE l.campaign_id = ? AND l.deleted_at IS NULL AND l.is_final = 0 AND l.attempts < ?
        AND (l.next_call_at IS NULL OR l.next_call_at <= NOW())
        AND (ls.id IS NULL OR ls.is_active = 1)
        AND l.status <> 'do_not_call'
@@ -409,7 +409,7 @@ const HANGUP_CAUSE_RESULT = {
 // Our own extensions (test leads like 1002) are dialed directly, everything
 // else through the trunk - same rule as the backend's click-to-call.
 async function endpointFor(phone) {
-  const [rows] = await pool.query('SELECT 1 FROM extensions WHERE name = ? LIMIT 1', [phone]);
+  const [rows] = await pool.query('SELECT 1 FROM extensions WHERE name = ? AND deleted_at IS NULL LIMIT 1', [phone]);
   return rows.length ? `PJSIP/${phone}` : `PJSIP/${phone}@${TRUNK_ENDPOINT}`;
 }
 
@@ -487,7 +487,7 @@ async function paceTick() {
   try {
     const [campaigns] = await pool.query(
       `SELECT c.* FROM campaigns c
-       WHERE c.dialer_state = 'running' AND c.status = 'active' AND c.queue_id IS NOT NULL
+       WHERE c.dialer_state = 'running' AND c.status = 'active' AND c.queue_id IS NOT NULL AND c.deleted_at IS NULL
          AND c.dial_mode IN ('progressive', 'predictive')`,
     );
     for (const c of campaigns) {

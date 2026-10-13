@@ -47,7 +47,7 @@ router.get('/admin/calls', requirePermission('calls', 'view'), async (req, res) 
     scopeCondition(req.access.scope, 'campaigns', 'ca.campaign_id'),
   ]);
   const [rows] = await pool.query(
-    `SELECT ca.*, c.name AS campaign_name, l.name AS lead_name
+    `SELECT ca.*, CONCAT(c.name, IF(c.deleted_at IS NULL, '', ' (deleted)')) AS campaign_name, l.name AS lead_name
      FROM calls ca
      LEFT JOIN campaigns c ON c.id = ca.campaign_id
      LEFT JOIN leads l ON l.id = ca.lead_id
@@ -87,7 +87,9 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
 
   // Calling hours only apply to real outside calls through the trunk,
   // not to internal extension-to-extension test calls.
-  const [extRows] = await pool.query('SELECT 1 FROM extensions WHERE name = ? LIMIT 1', [toNumber]);
+  const [extRows] = await pool.query('SELECT 1 FROM extensions WHERE name = ? AND deleted_at IS NULL LIMIT 1', [
+    toNumber,
+  ]);
   if (campaign && extRows.length === 0 && !isWithinCallWindow(campaign)) {
     return res.status(403).json({
       error: `outside this campaign's calling hours (${campaign.call_window_start.slice(0, 5)}-${campaign.call_window_end.slice(0, 5)} ${campaign.timezone})`,

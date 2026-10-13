@@ -158,19 +158,19 @@ describe('Forms', () => {
     expect((calls.find((c) => c.key === 'PUT /admin/forms/3')?.body as { status: string }).status).toBe('inactive');
   });
 
-  it("shows the server's reason when a delete is blocked", async () => {
+  it("shows the server's reason when a delete fails", async () => {
     fakeApi({
       'GET /admin/forms': { body: [LOAN_FORM] },
       'DELETE /admin/forms/3': {
-        status: 409,
-        body: { error: 'Cannot delete - still referenced by campaign(s) Predictive_Test.' },
+        status: 404,
+        body: { error: 'form not found' },
       },
     });
     renderPage(<FormsPage />);
     await userEvent.click(await screen.findByRole('button', { name: 'Delete Loan enquiry' }));
     const dialog = screen.getByRole('dialog');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('still referenced by campaign(s)');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('form not found');
   });
 
   it('shows responses with one column per field', async () => {

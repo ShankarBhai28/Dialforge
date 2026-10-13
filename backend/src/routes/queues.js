@@ -1,4 +1,5 @@
 const express = require('express');
+const { deleteQueue } = require('../services/softDelete');
 const pool = require('../../db');
 const ami = require('../../ami');
 const { requirePermission, requireAdminSide } = require('../middleware/auth');
@@ -20,7 +21,7 @@ async function refreshInAsterisk() {
   }
 }
 router.get('/admin/queues', requireAdminSide, async (req, res) => {
-  const [rows] = await pool.query('SELECT * FROM queues ORDER BY id DESC');
+  const [rows] = await pool.query('SELECT * FROM queues WHERE deleted_at IS NULL ORDER BY id DESC');
   res.json(rows);
 });
 
@@ -33,7 +34,9 @@ router.post('/admin/queues', requirePermission('queues', 'create'), async (req, 
   if (error) return res.status(400).json({ error });
   const { ringStrategy, waitTimeout, announce, retry, timeoutRestart } = settings;
 
-  const [existing] = await pool.query('SELECT id FROM queues WHERE asterisk_name = ?', [asteriskName]);
+  const [existing] = await pool.query('SELECT id FROM queues WHERE asterisk_name = ? AND deleted_at IS NULL', [
+    asteriskName,
+  ]);
   if (existing[0]) {
     return res.status(409).json({ error: 'a queue with a matching name already exists' });
   }
@@ -49,7 +52,7 @@ router.post('/admin/queues', requirePermission('queues', 'create'), async (req, 
 });
 
 router.put('/admin/queues/:id', requirePermission('queues', 'edit'), async (req, res) => {
-  const [rows] = await pool.query('SELECT * FROM queues WHERE id = ?', [req.params.id]);
+  const [rows] = await pool.query('SELECT * FROM queues WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
   const queue = rows[0];
   if (!queue) return res.status(404).json({ error: 'queue not found' });
 
@@ -74,35 +77,13 @@ router.put('/admin/queues/:id', requirePermission('queues', 'edit'), async (req,
   res.json({ id: Number(req.params.id), ...updated });
 });
 
+// Delete always works and keeps history: campaigns using it lose it (and
+// stop dialing); Asterisk no longer sees it (ast_queues view).
 router.delete('/admin/queues/:id', requirePermission('queues', 'delete'), async (req, res) => {
-  const [rows] = await pool.query('SELECT * FROM queues WHERE id = ?', [req.params.id]);
-  const queue = rows[0];
-  if (!queue) return res.status(404).json({ error: 'queue not found' });
-
-  const [campaignRefs] = await pool.query('SELECT name FROM campaigns WHERE queue_id = ?', [req.params.id]);
-  if (campaignRefs.length) {
-    return res.status(409).json({
-      error: `Cannot delete - still used by campaign(s): ${campaignRefs.map((c) => c.name).join(', ')}. Reassign or delete them first.`,
-    });
-  }
-
-  // agent_status_log.queue_id also FKs to queues - any agent who ever
-  // logged into this queue leaves a historical row here, so a queue with
-  // real usage history is never actually deletable. That's correct (don't
-  // lose history), but it needs the same clear-error treatment as the
-  // campaign check above instead of surfacing as a raw FK error.
-  const [statusLogRefs] = await pool.query('SELECT COUNT(*) AS cnt FROM agent_status_log WHERE queue_id = ?', [
-    req.params.id,
-  ]);
-  if (statusLogRefs[0].cnt > 0) {
-    return res.status(409).json({
-      error: `Cannot delete - ${statusLogRefs[0].cnt} historical agent status record(s) reference this queue.`,
-    });
-  }
-
-  await pool.query('DELETE FROM queues WHERE id = ?', [req.params.id]);
+  const notes = await deleteQueue(Number(req.params.id), req.session.user.id);
+  if (notes === null) return res.status(404).json({ error: 'queue not found' });
+  res.json({ status: 'ok', notes });
   await refreshInAsterisk();
-  res.json({ status: 'ok' });
 });
 
 module.exports = router;

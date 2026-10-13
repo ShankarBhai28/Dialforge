@@ -1,4 +1,6 @@
 const express = require('express');
+const { deleteRole } = require('../services/softDelete');
+const { revokeUserSessions } = require('../services/sessions');
 const pool = require('../../db');
 const { requireRole, requireAdminSide } = require('../middleware/auth');
 const { ACTION_LABELS, SCREENS, TEAM_SCOPE_BLOCKED, forgetRoles, parseRole, toRole } = require('../services/access');
@@ -65,17 +67,14 @@ router.put('/admin/roles/:id', requireRole('admin'), async (req, res) => {
   }
 });
 
+// Roles have no history: really deleted. Its users lose it (and their admin
+// access) and are logged out.
 router.delete('/admin/roles/:id', requireRole('admin'), async (req, res) => {
-  const [users] = await pool.query('SELECT username FROM users WHERE role_id = ? ORDER BY username', [req.params.id]);
-  if (users.length) {
-    return res.status(409).json({
-      error: `Cannot delete - ${users.map((u) => u.username).join(', ')} still ${users.length === 1 ? 'has' : 'have'} this role. Give them another role first.`,
-    });
-  }
-  const [result] = await pool.query('DELETE FROM roles WHERE id = ?', [req.params.id]);
-  if (!result.affectedRows) return res.status(404).json({ error: 'role not found' });
+  const result = await deleteRole(Number(req.params.id));
+  if (result === null) return res.status(404).json({ error: 'role not found' });
+  for (const id of result.userIds) revokeUserSessions(id);
   rolesChanged();
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', notes: result.notes });
 });
 
 module.exports = router;

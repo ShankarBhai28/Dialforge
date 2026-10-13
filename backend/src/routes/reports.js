@@ -49,8 +49,8 @@ router.get('/admin/reports/campaigns', requirePermission('reports', 'view'), asy
   const { from, to } = dateRange(req);
   const [rows] = await pool.query(
     `SELECT
-       c.id AS campaign_id, c.name AS campaign_name,
-       (SELECT COUNT(*) FROM leads l WHERE l.campaign_id = c.id) AS total_leads,
+       c.id AS campaign_id, CONCAT(c.name, IF(c.deleted_at IS NULL, '', ' (deleted)')) AS campaign_name,
+       (SELECT COUNT(*) FROM leads l WHERE l.campaign_id = c.id AND l.deleted_at IS NULL) AS total_leads,
        COUNT(ca.id) AS total_calls,
        SUM(ca.answer_time IS NOT NULL) AS answered,
        SUM(ca.answer_time IS NULL AND (ca.disposition IS NULL OR ca.disposition != 'abandoned')) AS not_answered,

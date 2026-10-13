@@ -13,6 +13,7 @@ import { toFormInput, useDeleteForm, useForms, useSaveForm, type Form } from './
 import { FormBuilderDialog } from './FormBuilderDialog';
 import { ResponsesDialog } from './ResponsesDialog';
 import { useCan } from '@/features/auth/access';
+import { toastDeleted } from '@/lib/deleted';
 
 export function FormsPage() {
   const can = useCan('forms');
@@ -182,7 +183,7 @@ export function FormsPage() {
           }
         }}
         title={`Delete form "${deleting?.name}"?`}
-        description="A form used by a campaign or with saved responses can't be deleted - set it Inactive instead."
+        description="Campaigns that use it lose it. Its saved answers are kept."
         confirmLabel="Delete"
         destructive
         pending={remove.isPending}
@@ -190,8 +191,8 @@ export function FormsPage() {
         onConfirm={() =>
           deleting &&
           remove.mutate(deleting.id, {
-            onSuccess: () => {
-              toast.success('Form deleted');
+            onSuccess: (r) => {
+              toastDeleted('Form', r);
               setDeleting(null);
             },
           })

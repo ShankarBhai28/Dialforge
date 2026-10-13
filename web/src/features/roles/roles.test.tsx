@@ -96,11 +96,11 @@ describe('Roles', () => {
     });
   });
 
-  it("shows the server's reason when a role in use can't be deleted", async () => {
-    api({ 'DELETE /admin/roles/5': { status: 409, body: { error: 'Cannot delete - tl.ravi still has this role.' } } });
+  it("shows the server's reason when a role delete fails", async () => {
+    api({ 'DELETE /admin/roles/5': { status: 404, body: { error: 'role not found' } } });
     renderPage(<RolesPage />);
     await userEvent.click(await screen.findByRole('button', { name: 'Delete Team Leader' }));
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
-    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('tl.ravi still has');
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('role not found');
   });
 });

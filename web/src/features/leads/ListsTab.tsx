@@ -1,5 +1,5 @@
 // Lists: named batches of leads within a campaign. Create/edit in a dialog,
-// delete (blocked by the server while leads remain), recycle, import.
+// delete (its leads go with it; history kept), recycle, import.
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import { ListPlus, Pencil, Plus, RotateCcw, Trash2, Upload } from 'lucide-react';
@@ -24,6 +24,7 @@ import { useCampaigns } from '@/features/campaigns/api';
 import { useDeleteList, useLists, useSaveList, type LeadList } from './api';
 import { RecycleDialog } from './RecycleDialog';
 import { useCan } from '@/features/auth/access';
+import { toastDeleted } from '@/lib/deleted';
 
 function ListDialog({ list, onOpenChange }: { list: LeadList | null; onOpenChange: (open: boolean) => void }) {
   const campaigns = useCampaigns();
@@ -235,7 +236,7 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
           }
         }}
         title={`Delete list "${deleting?.name}"?`}
-        description="Only an empty list can be deleted - reassign or remove its leads first."
+        description="Its leads go with it (pending callbacks are cancelled). Past calls keep them."
         confirmLabel="Delete"
         destructive
         pending={remove.isPending}
@@ -243,8 +244,8 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
         onConfirm={() =>
           deleting &&
           remove.mutate(deleting.id, {
-            onSuccess: () => {
-              toast.success('List deleted');
+            onSuccess: (r) => {
+              toastDeleted('List', r);
               setDeleting(null);
             },
           })

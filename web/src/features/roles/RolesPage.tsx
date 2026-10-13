@@ -32,6 +32,7 @@ import {
   type RoleScope,
   type RolesResponse,
 } from './api';
+import { toastDeleted } from '@/lib/deleted';
 
 const MAIN: Action[] = ['view', 'create', 'edit', 'delete'];
 
@@ -353,7 +354,7 @@ export function RolesPage() {
           }
         }}
         title={`Delete role "${deleting?.name}"?`}
-        description="Only possible when nobody has this role."
+        description="People with this role lose their admin access and are logged out - give them another role in Users."
         confirmLabel="Delete"
         destructive
         pending={remove.isPending}
@@ -361,8 +362,8 @@ export function RolesPage() {
         onConfirm={() =>
           deleting &&
           remove.mutate(deleting.id, {
-            onSuccess: () => {
-              toast.success('Role deleted');
+            onSuccess: (r) => {
+              toastDeleted('Role', r);
               setDeleting(null);
             },
           })

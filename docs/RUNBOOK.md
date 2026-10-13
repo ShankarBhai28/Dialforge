@@ -1358,3 +1358,15 @@ Reported by the user after trying the agent panel:
 - **Server:** `/etc/asterisk/extensions-monitor.conf` installed + `#include` added to `extensions.conf` (backup `~/backups/pre-monitor-20261013-055149/`), `dialplan reload` (no call impact). No endpoint has `df-monitor` as its context, so nobody can dial into it.
 - **App:** `web/src/features/monitor/` (`monitorLine.ts` keeps the line connected across admin screens; JsSIP loads only on connect; disconnected on logout), `MonitorBar.tsx`; Live Agents rewritten with filters + per-row Listen / Whisper / Barge / Force logout. Audit log: `live-agents.monitor` with the mode.
 - Tests: `backend/tests/monitor.test.js` (ChanSpy options per mode; refusals: not on a call, no / disabled / unconnected line, own line, other team, bad mode), web `live.test.tsx` (filters + remembered choice, connect line, listen, auto-answer only "Monitor" calls, whisper = key 5, stop, refusal message, no rights = no bar). 89 backend, 170 web.
+
+## Delete always works, history kept (2026-10-13)
+- **Asked by the user:** deleting was refused with "still referenced by ..." (foreign keys protecting call history); a delete should just delete. User's choice (asked): delete always works, history kept.
+- **Migration `0003_soft_delete.sql`:** `deleted_at` + `deleted_by` on campaigns, queues, lists, leads, forms, extensions. Unique names only among live rows (generated column `alive` in the unique keys of forms and extensions). The Asterisk views (`ps_*`, `ast_queues`) skip deleted rows.
+- **`src/services/softDelete.js`** (one transaction each, returns what was unlinked, shown under the "deleted" message):
+  - campaign: marked, dialer stopped + paused, DIDs unassigned, removed from teams, its lists + leads marked, hopper cleared, pending callbacks cancelled;
+  - queue: campaigns lose it (their dialer stops); list: its leads go with it; lead: hopper + pending callback removed;
+  - form: campaigns lose it; extension: users lose it and are logged out; role: really deleted, its users lose it and are logged out.
+- **Filters:** every admin list / dropdown, the agent's leads and the dialer's lead picking skip deleted rows; edits / deletes of a deleted row answer 404. Call log and reports show "Name (deleted)".
+- **Screens:** the delete dialogs say what will happen instead of "only possible when ..."; the success message lists what was unlinked.
+- **Tests:** `tests/soft-delete.test.js` (what each delete unlinks + notes, not found, rollback). Also: the backend test servers now close their connections before the test run exits, and `audit.test.js` waits a bit longer for the audit row - a once-seen intermittent failure (Node on Windows crashing at exit).
+- 94 backend, 170 web.

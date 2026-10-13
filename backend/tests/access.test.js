@@ -67,7 +67,12 @@ before(async () => {
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
-after(() => server.close());
+// Close open keep-alive connections and wait, so the process doesn't exit
+// mid-close (that crashes Node on Windows with --test-force-exit).
+after(async () => {
+  server.closeAllConnections();
+  await new Promise((r) => server.close(r));
+});
 
 async function call(who, method, url, body) {
   const res = await fetch(base + url, {

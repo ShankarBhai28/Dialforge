@@ -211,12 +211,12 @@ describe('Campaigns', () => {
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('that form is inactive');
   });
 
-  it("shows the server's reason when a delete is blocked", async () => {
-    const blocked = 'Cannot delete - still referenced by 12 lead(s). Reassign or remove them first.';
+  it("shows the server's reason when a delete fails (e.g. deleted meanwhile)", async () => {
+    const blocked = 'campaign not found';
     fakeApi({
       ...base,
       'GET /admin/campaigns': { body: [PREDICTIVE] },
-      'DELETE /admin/campaigns/5': { status: 409, body: { error: blocked } },
+      'DELETE /admin/campaigns/5': { status: 404, body: { error: blocked } },
     });
     renderPage(<CampaignsPage />);
     await userEvent.click(await screen.findByRole('button', { name: 'Delete Predictive_Test' }));
