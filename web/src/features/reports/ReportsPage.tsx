@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/form-controls';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { EmptyState, Field, SectionHeader } from '@/components/common';
+import { EmptyState, Field, Pager, SectionHeader } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
 import { cn } from '@/lib/utils';
 import { useAccess } from '@/features/auth/access';
@@ -35,6 +35,7 @@ import {
   reportParams,
   type Filters,
 } from './reportHelpers';
+import { RecordingPlayer } from '@/components/RecordingPlayer';
 
 function FilterBar({
   report,
@@ -219,6 +220,17 @@ function RecordingCell({ callId, playing, onToggle }: { callId: number; playing:
   );
 }
 
+const PAGE_SIZES = [10, 25, 50, 100];
+const PAGE_SIZE_KEY = 'df-report-page-size';
+function readPageSize() {
+  try {
+    const n = Number(localStorage.getItem(PAGE_SIZE_KEY));
+    return PAGE_SIZES.includes(n) ? n : PAGE_SIZES[0];
+  } catch {
+    return PAGE_SIZES[0];
+  }
+}
+
 function ResultTable({ result }: { result: ReportResult }) {
   const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(null);
   const [playing, setPlaying] = useState<number | null>(null);
@@ -235,96 +247,143 @@ function ResultTable({ result }: { result: ReportResult }) {
     });
   }, [result.rows, sort]);
 
-  const onSort = (key: string) =>
+  const onSort = (key: string) => {
     setSort((s) => (s?.key !== key ? { key, desc: false } : s.desc ? null : { key, desc: true }));
+    setPage(1);
+  };
+
+  // Pages: 10 rows by default; 25 / 50 / 100 on request (remembered).
+  const [pageSize, setPageSize] = useState(readPageSize);
+  const [page, setPage] = useState(1);
+  const [forRows, setForRows] = useState(result.rows);
+  if (forRows !== result.rows) {
+    // New data (filters changed, refresh): back to the first page.
+    setForRows(result.rows);
+    setPage(1);
+  }
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const current = Math.min(page, pages);
+  const pageRows = rows.slice((current - 1) * pageSize, current * pageSize);
+  function changeSize(n: number) {
+    setPageSize(n);
+    setPage(1);
+    try {
+      localStorage.setItem(PAGE_SIZE_KEY, String(n));
+    } catch {
+      /* private mode */
+    }
+  }
 
   return (
-    <Table aria-label={result.title}>
-      <TableHeader>
-        <TableRow>
-          {result.columns.map((c) => (
-            <TableHead
-              key={c.key}
-              className={isNumeric(c) ? 'text-right' : undefined}
-              aria-sort={sort?.key === c.key ? (sort.desc ? 'descending' : 'ascending') : undefined}
-            >
-              <button
-                type="button"
-                className="inline-flex cursor-pointer items-center gap-1 uppercase hover:text-foreground"
-                onClick={() => onSort(c.key)}
+    <>
+      <Table aria-label={result.title}>
+        <TableHeader>
+          <TableRow>
+            {result.columns.map((c) => (
+              <TableHead
+                key={c.key}
+                className={isNumeric(c) ? 'text-right' : undefined}
+                aria-sort={sort?.key === c.key ? (sort.desc ? 'descending' : 'ascending') : undefined}
               >
-                {c.label}
-                {sort?.key === c.key && (sort.desc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />)}
-              </button>
-            </TableHead>
-          ))}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((r, i) => {
-          const rec = result.columns.find((c) => c.type === 'recording');
-          const recId = rec ? (r[rec.key] as number | null) : null;
-          return (
-            <Fragment key={i}>
-              <TableRow>
-                {result.columns.map((c) => (
+                <button
+                  type="button"
+                  className="inline-flex cursor-pointer items-center gap-1 uppercase hover:text-foreground"
+                  onClick={() => onSort(c.key)}
+                >
+                  {c.label}
+                  {sort?.key === c.key &&
+                    (sort.desc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />)}
+                </button>
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {pageRows.map((r, i) => {
+            const rec = result.columns.find((c) => c.type === 'recording');
+            const recId = rec ? (r[rec.key] as number | null) : null;
+            return (
+              <Fragment key={i}>
+                <TableRow>
+                  {result.columns.map((c) => (
+                    <TableCell
+                      key={c.key}
+                      className={cn(
+                        'whitespace-nowrap',
+                        isNumeric(c) && 'text-right tabular-nums',
+                        warn(c, r[c.key]) && 'font-semibold text-destructive',
+                      )}
+                    >
+                      {c.type === 'recording' && typeof r[c.key] === 'number' ? (
+                        <RecordingCell
+                          callId={r[c.key] as number}
+                          playing={playing === r[c.key]}
+                          onToggle={() => setPlaying(playing === r[c.key] ? null : (r[c.key] as number))}
+                        />
+                      ) : (
+                        formatCell(r[c.key], c.type)
+                      )}
+                    </TableCell>
+                  ))}
+                </TableRow>
+                {recId !== null && playing === recId && (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={result.columns.length} className="bg-muted/30">
+                      <RecordingPlayer
+                        src={`/admin/calls/${recId}/recording`}
+                        label={`Recording of call ${recId}`}
+                        seconds={typeof r.talk_seconds === 'number' ? r.talk_seconds : null}
+                        downloadUrl={`/admin/calls/${recId}/recording?download=1`}
+                        onClose={() => setPlaying(null)}
+                      />
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
+            );
+          })}
+          {result.totals && (
+            <TableRow className="bg-muted/60 font-semibold hover:bg-muted/60" data-testid="totals">
+              {result.columns.map((c) => {
+                const v = result.totals![c.key];
+                return (
                   <TableCell
                     key={c.key}
                     className={cn(
                       'whitespace-nowrap',
                       isNumeric(c) && 'text-right tabular-nums',
-                      warn(c, r[c.key]) && 'font-semibold text-destructive',
+                      warn(c, v ?? null) && 'text-destructive',
                     )}
                   >
-                    {c.type === 'recording' && typeof r[c.key] === 'number' ? (
-                      <RecordingCell
-                        callId={r[c.key] as number}
-                        playing={playing === r[c.key]}
-                        onToggle={() => setPlaying(playing === r[c.key] ? null : (r[c.key] as number))}
-                      />
-                    ) : (
-                      formatCell(r[c.key], c.type)
-                    )}
+                    {v === undefined || v === null ? '' : formatCell(v, c.type)}
                   </TableCell>
-                ))}
-              </TableRow>
-              {recId !== null && playing === recId && (
-                <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={result.columns.length} className="bg-muted/30">
-                    <audio
-                      controls
-                      autoPlay
-                      src={`/admin/calls/${recId}/recording`}
-                      className="h-9 w-full max-w-xl"
-                      aria-label={`Recording of call ${recId}`}
-                    />
-                  </TableCell>
-                </TableRow>
-              )}
-            </Fragment>
-          );
-        })}
-        {result.totals && (
-          <TableRow className="bg-muted/60 font-semibold hover:bg-muted/60" data-testid="totals">
-            {result.columns.map((c) => {
-              const v = result.totals![c.key];
-              return (
-                <TableCell
-                  key={c.key}
-                  className={cn(
-                    'whitespace-nowrap',
-                    isNumeric(c) && 'text-right tabular-nums',
-                    warn(c, v ?? null) && 'text-destructive',
-                  )}
-                >
-                  {v === undefined || v === null ? '' : formatCell(v, c.type)}
-                </TableCell>
-              );
-            })}
-          </TableRow>
-        )}
-      </TableBody>
-    </Table>
+                );
+              })}
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+      {rows.length > PAGE_SIZES[0] && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            Rows per page
+            <Select
+              value={pageSize}
+              onChange={(e) => changeSize(Number(e.target.value))}
+              className="h-8 w-20 px-2"
+              aria-label="Rows per page"
+            >
+              {PAGE_SIZES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <Pager page={current} pageSize={pageSize} total={rows.length} onPage={setPage} className="mt-0" />
+        </div>
+      )}
+    </>
   );
 }
 

@@ -24,6 +24,7 @@ import { formatDate, formatTime } from '@/lib/format';
 import { cn, formatSeconds } from '@/lib/utils';
 import { useAgentCalls, type CallPeriod, type CallRow } from './api';
 import { useController } from './AgentProvider';
+import { RecordingPlayer } from '@/components/RecordingPlayer';
 
 // --- what a call is ---
 const answered = (c: CallRow) => !!(c.agent_connect_time ?? c.answer_time);
@@ -219,12 +220,11 @@ function CallItem({ c, playing, onPlay }: { c: CallRow; playing: boolean; onPlay
         </div>
       </div>
       {playing && (
-        <audio
-          controls
-          autoPlay
+        <RecordingPlayer
           src={`/agent/calls/${c.id}/recording`}
-          className="mt-2 h-9 w-full"
-          aria-label={`Recording of call ${c.id}`}
+          label={`Recording of call ${c.id}`}
+          seconds={c.talk_seconds}
+          className="mt-2"
         />
       )}
     </li>

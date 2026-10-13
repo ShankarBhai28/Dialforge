@@ -23,6 +23,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { formatDateTime } from '@/lib/format';
 import { cn, formatSeconds } from '@/lib/utils';
 import { useLeadHistory, type HistoryItem, type HistorySide, type LeadHistory } from './api';
+import { RecordingPlayer } from '@/components/RecordingPlayer';
 
 const show = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : String(v));
 
@@ -145,12 +146,11 @@ function CallRow({
       </div>
       {item.note && <p className="mt-1 rounded-md bg-muted/50 px-2 py-1 text-sm">“{item.note}”</p>}
       {playing && item.recordingUrl && (
-        <audio
-          controls
-          autoPlay
+        <RecordingPlayer
           src={item.recordingUrl}
-          className="mt-2 h-9 w-full"
-          aria-label={`Recording of call ${item.callId}`}
+          label={`Recording of call ${item.callId}`}
+          seconds={item.talkSeconds}
+          className="mt-2"
         />
       )}
     </Row>

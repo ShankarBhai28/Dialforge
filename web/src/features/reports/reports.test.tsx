@@ -207,6 +207,34 @@ describe('Reports', () => {
     expect(within(table).queryByRole('button', { name: /play recording/i })).not.toBeInTheDocument();
   });
 
+  it('10 rows a page by default; 25 / 50 / 100 on request (remembered); totals cover all rows', async () => {
+    const many = result({
+      columns: [
+        { key: 'id', label: 'Call', type: 'id' },
+        { key: 'agent', label: 'Agent' },
+      ],
+      rows: Array.from({ length: 23 }, (_, i) => ({ id: 100 - i, agent: `a${i + 1}` })),
+      totals: { id: '23 calls' },
+    });
+    fakeApi({
+      'GET /admin/reports': { body: CATALOG },
+      [`GET /admin/reports/cdr?from=${today}&to=${today}`]: { body: many },
+    });
+    renderPage(<ReportsPage />);
+    const table = await screen.findByRole('table', { name: 'Call Detail (CDR)' });
+    // 10 rows + header + totals
+    expect(within(table).getAllByRole('row')).toHaveLength(12);
+    expect(screen.getByText('1–10 of 23')).toBeInTheDocument();
+    expect(within(screen.getByTestId('totals')).getByText('23 calls')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(within(table).getByText('a11')).toBeInTheDocument();
+    expect(within(table).queryByText('a1')).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Rows per page'), '25');
+    expect(within(table).getAllByRole('row')).toHaveLength(25);
+    expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument();
+    expect(localStorage.getItem('df-report-page-size')).toBe('25');
+  });
+
   it('no Export CSV without that right', async () => {
     fakeApi({
       'GET /auth/me': {

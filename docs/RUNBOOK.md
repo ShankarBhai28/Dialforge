@@ -1427,3 +1427,7 @@ Reported by the user after trying the agent panel:
 
 ## Reports -> Call Detail: Play instead of "Recorded: Yes" (2026-10-13)
 - Report column type `recording` (value = call id): the screen shows **Play** (inline player under the row, `/admin/calls/:id/recording`, audited) for roles with Call Log -> Play recordings, "Recorded" for others; the CSV still says "Yes".
+
+## Reports paging + one recording player everywhere (2026-10-14)
+- Reports table: 10 rows a page, **Rows per page** 10 / 25 / 50 / 100 (remembered per browser), Previous / Next; totals row covers all rows; a new search / sort goes back to page 1.
+- "Recording time not running": the file and the route are fine (ffprobe 6.77 s CBR; 200 / 206 with Content-Length, Accept-Ranges), and Chrome's own player showed 0:00 / 0:06 at our sizes - not reproduced here. All screens now use our own `web/src/components/RecordingPlayer.tsx` (Call Log, Reports, agent call log, customer history): play / pause, elapsed / length from the audio clock, seek bar, 1x / 1.5x / 2x, length falls back to the downloaded part or the talk time, a missing file says so. If time still doesn't run: ask which browser, and whether sound plays.

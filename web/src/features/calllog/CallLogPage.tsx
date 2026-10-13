@@ -2,7 +2,7 @@
 // paged on the server.
 import { Fragment, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Download, PhoneCall, Play, RefreshCw, Search, X } from 'lucide-react';
+import { PhoneCall, Play, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState, Pager, SectionHeader, StatusPill } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
+import { RecordingPlayer } from '@/components/RecordingPlayer';
 import { formatDateTime, formatTime } from '@/lib/format';
 import { useDebouncedValue } from '@/lib/hooks';
 import { useRealtime } from '@/lib/realtime';
@@ -33,21 +34,18 @@ function talkTime(c: CallRow) {
   return (new Date(c.end_time).getTime() - new Date(c.answer_time).getTime()) / 1000;
 }
 
-/** The browser plays the recording straight from the server (same login cookie). */
-function RecordingPlayer({ call, onClose }: { call: CallRow; onClose: () => void }) {
+/** The call's recording (same login cookie), with Download. */
+function CallRecording({ call, onClose }: { call: CallRow; onClose: () => void }) {
   const src = `/admin/calls/${call.id}/recording`;
   return (
-    <div className="flex flex-wrap items-center gap-3 py-1">
-      <audio controls autoPlay src={src} className="h-9 max-w-full" aria-label={`Recording of call ${call.id}`} />
-      <Button variant="outline" size="sm" asChild>
-        <a href={`${src}?download=1`} download>
-          <Download /> Download
-        </a>
-      </Button>
-      <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close player">
-        <X />
-      </Button>
-    </div>
+    <RecordingPlayer
+      src={src}
+      label={`Recording of call ${call.id}`}
+      seconds={talkTime(call)}
+      downloadUrl={`${src}?download=1`}
+      onClose={onClose}
+      className="py-1"
+    />
   );
 }
 
@@ -193,7 +191,7 @@ export function CallLogPage() {
                       {playing === c.id && (
                         <TableRow>
                           <TableCell colSpan={9} className="bg-muted/20">
-                            <RecordingPlayer call={c} onClose={() => setPlaying(null)} />
+                            <CallRecording call={c} onClose={() => setPlaying(null)} />
                           </TableCell>
                         </TableRow>
                       )}
