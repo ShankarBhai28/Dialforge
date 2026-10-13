@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../../db');
-const { requireAdminSide, requirePermission } = require('../middleware/auth');
+const { requireAdminSide, requirePermission, requireRole } = require('../middleware/auth');
+const { collectHealth } = require('../services/health');
 const { can, scopeCondition } = require('../services/access');
 const { MonitorError, MODES, monitoringExtension, startMonitor } = require('../services/monitor');
 const { findOtherActiveHolder } = require('../services/extensionGuard');
@@ -76,6 +77,12 @@ router.post('/admin/live-agents/:id/logout', requirePermission('live', 'logout')
   if (open) await takeOffline(agent.id, open.extension_name);
   revokeUserSessions(agent.id);
   res.json({ id: agent.id, status: 'ok', was: open ? open.status : 'offline' });
+});
+
+// --- System health (Super Admin): the same checks the minute-by-minute
+// watch alerts on (services/health.js) ---
+router.get('/admin/system/health', requireRole('admin'), async (req, res) => {
+  res.json(await collectHealth());
 });
 
 // --- Call monitoring (listen / whisper / barge) - see services/monitor.js ---

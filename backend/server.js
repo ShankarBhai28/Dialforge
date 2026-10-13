@@ -34,6 +34,7 @@ const pool = require('./db');
 const { MySqlSessionStore } = require('./src/services/sessionStore');
 const sessions = require('./src/services/sessions');
 const { startStaleAgentCleanup } = require('./src/services/agentLogout');
+const { startHealthWatch } = require('./src/services/health');
 const dialerFeed = require('./src/realtime/dialerFeed');
 
 ami.connect();
@@ -57,4 +58,5 @@ const server = https.createServer(tlsOptions, app);
 hub.attach(server, sessionMiddleware);
 dialerFeed.start();
 startStaleAgentCleanup();
+startHealthWatch();
 server.listen(PORT, () => console.log(`DialForge backend listening on port ${PORT} (HTTPS)`));

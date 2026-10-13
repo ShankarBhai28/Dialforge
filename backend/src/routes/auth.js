@@ -6,6 +6,7 @@ const { releasePreviewLocks } = require('../services/preview');
 const { sessionUser } = require('../middleware/auth');
 const { accessFor } = require('../services/access');
 const { audit } = require('../services/audit');
+const { guard } = require('../services/loginGuard');
 
 const router = express.Router();
 
@@ -13,6 +14,14 @@ const router = express.Router();
 router.post('/auth/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'username and password required' });
+
+  // Too many wrong passwords for this username or from this address: wait.
+  const wait = guard.blockedFor(username, req.ip);
+  if (wait) {
+    return res
+      .status(429)
+      .json({ error: `Too many failed logins - try again in ${wait} minute${wait === 1 ? '' : 's'}.` });
+  }
 
   const [rows] = await pool.query(
     `SELECT users.*, extensions.name AS extension_name
@@ -22,9 +31,17 @@ router.post('/auth/login', async (req, res) => {
   );
   const user = rows[0];
   if (!user || !(await bcrypt.compare(password, user.password_hash))) {
-    void audit({ username: String(username).slice(0, 50), action: 'auth.login_failed', status: 401, ip: req.ip });
+    const locked = guard.fail(username, req.ip);
+    void audit({
+      username: String(username).slice(0, 50),
+      action: locked ? 'auth.login_locked' : 'auth.login_failed',
+      status: 401,
+      summary: locked ? 'too many failed logins - locked for 15 minutes' : null,
+      ip: req.ip,
+    });
     return res.status(401).json({ error: 'invalid username or password' });
   }
+  guard.succeed(username);
   if (user.status === 'inactive') {
     void audit({ user, action: 'auth.login_refused', status: 403, summary: 'account disabled', ip: req.ip });
     return res.status(403).json({ error: 'this account is disabled - ask your admin' });

@@ -159,4 +159,9 @@ function on(eventName, handler) {
   events.on(eventName, handler);
 }
 
-module.exports = { connect, queueAdd, queueRemove, queuePause, queueReload, originate, redirect, on };
+/** Logged in to AMI right now (for the health check). */
+function isReady() {
+  return !!socket && loggedIn;
+}
+
+module.exports = { connect, isReady, queueAdd, queueRemove, queuePause, queueReload, originate, redirect, on };

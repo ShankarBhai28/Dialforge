@@ -1,0 +1,11 @@
+# DialForge nightly backup - installed to /etc/systemd/system/ (see ops/README.md).
+[Unit]
+Description=DialForge nightly backup (database + Asterisk config, S3 if configured)
+After=mysql.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/bin/bash /home/ubuntu/dialforge-backend/ops/backup.sh
+Nice=10
+IOSchedulingClass=idle

@@ -8,6 +8,8 @@ import { useRealtime } from '@/lib/realtime';
 import { formatSeconds } from '@/lib/utils';
 import { dashboardKeys, useDashboardSummary, useLiveAgents, type LiveAgent } from './api';
 import { AgentStatusBadge } from './AgentStatusBadge';
+import { useAccess } from '@/features/auth/access';
+import { SystemHealthCard } from './SystemHealthCard';
 
 function StatTile({
   label,
@@ -91,6 +93,7 @@ export function DashboardPage() {
   });
 
   const s = summary.data;
+  const { isSuperAdmin } = useAccess();
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -100,6 +103,7 @@ export function DashboardPage() {
         <StatTile label="Avg handle time" value={s && formatSeconds(s.avgHandleSeconds)} icon={Clock} />
       </div>
       {summary.error && <ErrorState message={summary.error.message} onRetry={() => summary.refetch()} />}
+      {isSuperAdmin && <SystemHealthCard />}
 
       <Card>
         <CardHeader>
