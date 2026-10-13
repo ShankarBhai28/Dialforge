@@ -2,9 +2,9 @@
 // table (sortable, totals last), export the same thing as CSV. Every report
 // has the same shape (columns + rows + totals), so one table shows them all.
 // The chosen report is in the URL (?r=agents) so a link opens it.
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { ArrowDown, ArrowUp, BarChart3, Download, Info, RefreshCw } from 'lucide-react';
+import { ArrowDown, ArrowUp, BarChart3, Download, Info, Play, RefreshCw, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -202,8 +202,26 @@ const warn = (c: ReportColumn, v: Cell) =>
   typeof v === 'number' &&
   ((c.warnAbove !== undefined && v > c.warnAbove) || (c.warnBelow !== undefined && v < c.warnBelow));
 
+/** Play / stop a call's recording (Call Detail); "Recorded" without the right to play. */
+function RecordingCell({ callId, playing, onToggle }: { callId: number; playing: boolean; onToggle: () => void }) {
+  const canPlay = useAccess().can('calls', 'recordings');
+  if (!canPlay) return <span className="text-muted-foreground">Recorded</span>;
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 px-2"
+      onClick={onToggle}
+      aria-label={`${playing ? 'Stop' : 'Play'} recording of call ${callId}`}
+    >
+      {playing ? <Square /> : <Play />} {playing ? 'Stop' : 'Play'}
+    </Button>
+  );
+}
+
 function ResultTable({ result }: { result: ReportResult }) {
   const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(null);
+  const [playing, setPlaying] = useState<number | null>(null);
   const rows = useMemo(() => {
     if (!sort) return result.rows;
     const dir = sort.desc ? -1 : 1;
@@ -243,22 +261,49 @@ function ResultTable({ result }: { result: ReportResult }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((r, i) => (
-          <TableRow key={i}>
-            {result.columns.map((c) => (
-              <TableCell
-                key={c.key}
-                className={cn(
-                  'whitespace-nowrap',
-                  isNumeric(c) && 'text-right tabular-nums',
-                  warn(c, r[c.key]) && 'font-semibold text-destructive',
-                )}
-              >
-                {formatCell(r[c.key], c.type)}
-              </TableCell>
-            ))}
-          </TableRow>
-        ))}
+        {rows.map((r, i) => {
+          const rec = result.columns.find((c) => c.type === 'recording');
+          const recId = rec ? (r[rec.key] as number | null) : null;
+          return (
+            <Fragment key={i}>
+              <TableRow>
+                {result.columns.map((c) => (
+                  <TableCell
+                    key={c.key}
+                    className={cn(
+                      'whitespace-nowrap',
+                      isNumeric(c) && 'text-right tabular-nums',
+                      warn(c, r[c.key]) && 'font-semibold text-destructive',
+                    )}
+                  >
+                    {c.type === 'recording' && typeof r[c.key] === 'number' ? (
+                      <RecordingCell
+                        callId={r[c.key] as number}
+                        playing={playing === r[c.key]}
+                        onToggle={() => setPlaying(playing === r[c.key] ? null : (r[c.key] as number))}
+                      />
+                    ) : (
+                      formatCell(r[c.key], c.type)
+                    )}
+                  </TableCell>
+                ))}
+              </TableRow>
+              {recId !== null && playing === recId && (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={result.columns.length} className="bg-muted/30">
+                    <audio
+                      controls
+                      autoPlay
+                      src={`/admin/calls/${recId}/recording`}
+                      className="h-9 w-full max-w-xl"
+                      aria-label={`Recording of call ${recId}`}
+                    />
+                  </TableCell>
+                </TableRow>
+              )}
+            </Fragment>
+          );
+        })}
         {result.totals && (
           <TableRow className="bg-muted/60 font-semibold hover:bg-muted/60" data-testid="totals">
             {result.columns.map((c) => {

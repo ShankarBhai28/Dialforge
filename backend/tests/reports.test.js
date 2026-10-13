@@ -123,6 +123,21 @@ test('a call is "Answered" only when someone talked to an agent', () => {
   assert.strictEqual(resultLabel({ disposition: null, ended: 0 }), 'In progress');
 });
 
+test('CSV: a recording column says Yes (the screen gets the call id to play)', () => {
+  const csv = toCsv({
+    columns: [
+      { key: 'id', label: 'Call' },
+      { key: 'recording', label: 'Recording', type: 'recording' },
+    ],
+    rows: [
+      { id: 7, recording: 7 },
+      { id: 8, recording: null },
+    ],
+    totals: null,
+  });
+  assert.strictEqual(csv, BOM + ['Call,Recording', '7,Yes', '8,', ''].join('\r\n'));
+});
+
 test('CSV: labels as header, totals last, Excel-safe (BOM, no formulas)', () => {
   const csv = toCsv({
     columns: [

@@ -80,7 +80,8 @@ async function cdr(ctx) {
     result: resultLabel(r),
     outcome: r.outcome ? outcomeLabel(r.outcome, r.outcome_label) : null,
     transferred: r.transferred ? 'Yes' : null,
-    recorded: r.recorded ? 'Yes' : null,
+    // The call id: the screen plays /admin/calls/<id>/recording; the CSV says "Yes".
+    recording: r.recorded ? r.id : null,
   }));
   return {
     columns: [
@@ -99,7 +100,7 @@ async function cdr(ctx) {
       { key: 'result', label: 'Result' },
       { key: 'outcome', label: 'Outcome' },
       { key: 'transferred', label: 'Transferred' },
-      { key: 'recorded', label: 'Recorded' },
+      { key: 'recording', label: 'Recording', type: 'recording' },
     ],
     rows: out,
     totals: {

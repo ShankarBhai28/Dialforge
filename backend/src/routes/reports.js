@@ -23,7 +23,9 @@ function toCsv({ columns, rows, totals }) {
     if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const line = (r) => columns.map((c) => cell(r[c.key])).join(',');
+  // A recording column holds the call id (for the player); a file just says Yes.
+  const value = (c, v) => (c.type === 'recording' ? (v ? 'Yes' : null) : v);
+  const line = (r) => columns.map((c) => cell(value(c, r[c.key]))).join(',');
   const lines = [columns.map((c) => cell(c.label)).join(','), ...rows.map(line)];
   if (totals) lines.push(line(totals));
   return `${BOM}${lines.join('\r\n')}\r\n`;

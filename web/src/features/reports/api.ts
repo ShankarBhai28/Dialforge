@@ -22,7 +22,17 @@ export type ReportCatalog = {
 
 // GET /admin/reports/:key - every report has the same shape; the screen
 // formats each cell by its column type. ?format=csv = the same as a file.
-export type ColumnType = 'text' | 'id' | 'number' | 'decimal' | 'seconds' | 'percent' | 'date' | 'datetime';
+export type ColumnType =
+  | 'text'
+  | 'id'
+  | 'number'
+  | 'decimal'
+  | 'seconds'
+  | 'percent'
+  | 'date'
+  | 'datetime'
+  /** A call id with a recording: shown as a Play button. */
+  | 'recording';
 export type ReportColumn = {
   key: string;
   label: string;

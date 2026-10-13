@@ -1,7 +1,8 @@
 // The reports (docs/plans/REPORTS_PLAN.md). Each one takes
 // { db, range, q, scope, csv } and returns
 // { columns: [{ key, label, type?, warnAbove?, warnBelow? }], rows, totals, meta?, notes? }.
-// Column types: text (default), id, number, decimal, seconds, percent, date, datetime.
+// Column types: text (default), id, number, decimal, seconds, percent, date, datetime,
+// recording (a call id: the screen shows a Play button, the CSV "Yes").
 // `filters` tells the screen which inputs to show.
 const calls = require('./callReports');
 const agents = require('./agentReports');

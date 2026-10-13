@@ -155,6 +155,58 @@ describe('Reports', () => {
     expect(within(table).getByRole('columnheader', { name: 'Leads' })).toHaveAttribute('aria-sort', 'descending');
   });
 
+  it('Call Detail: a recorded call has Play (inline player); without the right it just says Recorded', async () => {
+    const withRec = result({
+      columns: [
+        { key: 'id', label: 'Call', type: 'id' },
+        { key: 'recording', label: 'Recording', type: 'recording' },
+      ],
+      rows: [
+        { id: 71, recording: 71 },
+        { id: 70, recording: null },
+      ],
+    });
+    fakeApi({
+      'GET /admin/reports': { body: CATALOG },
+      [`GET /admin/reports/cdr?from=${today}&to=${today}`]: { body: withRec },
+    });
+    renderPage(<ReportsPage />);
+    const table = await screen.findByRole('table', { name: 'Call Detail (CDR)' });
+    expect(within(table).queryByText('Yes')).not.toBeInTheDocument();
+    expect(within(table).getAllByRole('button', { name: /play recording/i })).toHaveLength(1);
+    await userEvent.click(within(table).getByRole('button', { name: 'Play recording of call 71' }));
+    expect(within(table).getByLabelText('Recording of call 71')).toHaveAttribute('src', '/admin/calls/71/recording');
+    await userEvent.click(within(table).getByRole('button', { name: 'Stop recording of call 71' }));
+    expect(within(table).queryByLabelText('Recording of call 71')).not.toBeInTheDocument();
+  });
+
+  it('Call Detail without the right to play recordings: "Recorded", no player', async () => {
+    fakeApi({
+      'GET /auth/me': {
+        body: {
+          id: 9,
+          username: 'tl',
+          role: 'staff',
+          roleName: 'TL',
+          scope: 'all',
+          teamCount: 0,
+          permissions: { reports: ['view'] },
+        },
+      },
+      'GET /admin/reports': { body: CATALOG },
+      [`GET /admin/reports/cdr?from=${today}&to=${today}`]: {
+        body: result({
+          columns: [{ key: 'recording', label: 'Recording', type: 'recording' }],
+          rows: [{ recording: 71 }],
+        }),
+      },
+    });
+    renderPage(<ReportsPage />);
+    const table = await screen.findByRole('table', { name: 'Call Detail (CDR)' });
+    expect(within(table).getByText('Recorded')).toBeInTheDocument();
+    expect(within(table).queryByRole('button', { name: /play recording/i })).not.toBeInTheDocument();
+  });
+
   it('no Export CSV without that right', async () => {
     fakeApi({
       'GET /auth/me': {

@@ -1424,3 +1424,6 @@ Reported by the user after trying the agent panel:
 - **Needs outcome**: answered calls with no outcome are flagged (banner + filter); "Give outcome" opens the outcome dialog for that call (`giveOutcomeLater`, can be cancelled, no auto-Available).
 - Dialpad: number + Call on one line, keypad folds away (remembered) to give the log room.
 - Backend `GET /calls` (agents): `?period`, `talk_seconds`, `is_callback`, up to 300 calls.
+
+## Reports -> Call Detail: Play instead of "Recorded: Yes" (2026-10-13)
+- Report column type `recording` (value = call id): the screen shows **Play** (inline player under the row, `/admin/calls/:id/recording`, audited) for roles with Call Log -> Play recordings, "Recorded" for others; the CSV still says "Yes".
