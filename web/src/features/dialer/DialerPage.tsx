@@ -4,7 +4,7 @@
 // flips campaigns.dialer_state and reads what the engine last reported.
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Inbox, Pause, Play, PhoneOff, Square, X } from 'lucide-react';
+import { Inbox, Pause, Play, PhoneOff, Radio, Square, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -22,6 +22,7 @@ import {
   type DialerToday,
 } from './api';
 import { useCan } from '@/features/auth/access';
+import { LiveCallsCard } from './LiveCalls';
 
 const NONE = <span className="text-muted-foreground">—</span>;
 
@@ -158,6 +159,7 @@ export function DialerPage() {
   const act = useDialerAction();
   const [confirming, setConfirming] = useState<Confirming | null>(null);
   const [hopperFor, setHopperFor] = useState<{ id: number; name: string } | null>(null);
+  const [liveFor, setLiveFor] = useState<{ id: number; name: string } | null>(null);
 
   function run(c: DialerCampaign, action: 'start' | 'pause' | 'stop') {
     act.mutate(
@@ -320,6 +322,14 @@ export function DialerPage() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          onClick={() => setLiveFor({ id: row.id, name: row.name })}
+                          aria-label={`Live calls ${row.name}`}
+                        >
+                          <Radio /> Live
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => setHopperFor({ id: row.id, name: row.name })}
                           aria-label={`Hopper ${row.name}`}
                         >
@@ -335,6 +345,7 @@ export function DialerPage() {
         </CardContent>
       </Card>
 
+      {liveFor && <LiveCallsCard key={liveFor.id} campaign={liveFor} onClose={() => setLiveFor(null)} />}
       {hopperFor && <HopperCard key={hopperFor.id} campaign={hopperFor} onClose={() => setHopperFor(null)} />}
 
       <ConfirmDialog

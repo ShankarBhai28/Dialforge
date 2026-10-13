@@ -28,6 +28,7 @@ const ACTION_LABELS = {
   export: 'Export CSV',
   logout: 'Force logout',
   recordings: 'Play recordings',
+  hangup: 'Hang up live calls',
   listen: 'Listen',
   whisper: 'Whisper',
   barge: 'Barge',
@@ -37,7 +38,7 @@ const CRUD = ['view', 'create', 'edit', 'delete'];
 const SCREENS = [
   { key: 'dashboard', label: 'Dashboard', actions: ['view'] },
   { key: 'live', label: 'Live Agents', actions: ['view', 'logout', 'listen', 'whisper', 'barge'] },
-  { key: 'dialer', label: 'Dialer', actions: ['view', 'control'] },
+  { key: 'dialer', label: 'Dialer', actions: ['view', 'control', 'hangup'] },
   { key: 'calls', label: 'Call Log', actions: ['view', 'recordings'] },
   { key: 'campaigns', label: 'Campaigns', actions: CRUD },
   { key: 'leads', label: 'Leads & Lists', actions: [...CRUD, 'import', 'recycle'] },

@@ -233,4 +233,123 @@ describe('Dialer', () => {
     renderPage(<DialerPage />);
     expect(await screen.findByRole('alert')).toHaveTextContent('database unavailable');
   });
+
+  it('Live: every number in progress with its state and timer, counts, just finished; Hang up with a confirm', async () => {
+    const t = (secAgo: number) => new Date(Date.now() - secAgo * 1000).toISOString();
+    const calls = fakeApi({
+      'GET /admin/dialer': OVERVIEW,
+      'GET /admin/campaigns/1/dialer-live': {
+        body: {
+          live: [
+            {
+              id: 9,
+              leadId: 1,
+              leadName: 'Ravi',
+              phone: '9840012345',
+              state: 'connected',
+              since: t(65),
+              startedAt: t(90),
+              agent: 'agent1001',
+              callId: 70,
+            },
+            {
+              id: 10,
+              leadId: 2,
+              leadName: null,
+              phone: '9000000001',
+              state: 'ringing',
+              since: t(4),
+              startedAt: t(7),
+              agent: null,
+              callId: null,
+            },
+            {
+              id: 11,
+              leadId: 3,
+              leadName: 'Meena',
+              phone: '9876543210',
+              state: 'waiting',
+              since: t(2),
+              startedAt: t(20),
+              agent: null,
+              callId: 71,
+            },
+          ],
+          counts: { dialing: 0, ringing: 1, waiting: 1, connected: 1 },
+          finished: [
+            {
+              id: 5,
+              leadId: 4,
+              leadName: 'Yogi',
+              phone: '95',
+              result: 'busy',
+              resultLabel: 'Busy',
+              endedAt: t(30),
+              agent: null,
+              talkSeconds: null,
+            },
+          ],
+        },
+      },
+      'POST /admin/dialer/attempts/10/hangup': { body: { status: 'ok', id: 10, was: 'ringing' } },
+    });
+    renderPage(<DialerPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Live calls Predictive_Test' }));
+    const table = await screen.findByRole('table', { name: 'Calls in progress' });
+    const ravi = within(table).getByText('Ravi').closest('tr')!;
+    expect(within(ravi).getByText(/With agent - agent1001/)).toBeInTheDocument();
+    expect(within(ravi).getByText(/^01:0[5-6]$/)).toBeInTheDocument();
+    expect(within(table).getByText('Ringing')).toBeInTheDocument();
+    expect(within(table).getByText('Waiting for an agent')).toBeInTheDocument();
+    const counts = screen.getByLabelText('Live counts');
+    expect(within(counts).getByText('With agent').previousSibling).toHaveTextContent('1');
+    expect(screen.getByText(/Yogi/).closest('li')).toHaveTextContent('Yogi · Busy');
+
+    const ringing = within(table).getByText('9000000001').closest('tr')!;
+    await userEvent.click(within(ringing).getByRole('button', { name: 'Hang up 9000000001' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('not dialed again for an hour');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Hang up' }));
+    await waitFor(() => expect(calls.some((c) => c.key === 'POST /admin/dialer/attempts/10/hangup')).toBe(true));
+  });
+
+  it('Live without the right to hang up: no Hang up button', async () => {
+    fakeApi({
+      'GET /auth/me': {
+        body: {
+          id: 9,
+          username: 'tl',
+          role: 'staff',
+          roleName: 'TL',
+          scope: 'all',
+          teamCount: 0,
+          permissions: { dialer: ['view'] },
+        },
+      },
+      'GET /admin/dialer': OVERVIEW,
+      'GET /admin/campaigns/1/dialer-live': {
+        body: {
+          live: [
+            {
+              id: 10,
+              leadId: 2,
+              leadName: null,
+              phone: '9000000001',
+              state: 'dialing',
+              since: new Date().toISOString(),
+              startedAt: new Date().toISOString(),
+              agent: null,
+              callId: null,
+            },
+          ],
+          counts: { dialing: 1, ringing: 0, waiting: 0, connected: 0 },
+          finished: [],
+        },
+      },
+    });
+    renderPage(<DialerPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Live calls Predictive_Test' }));
+    await screen.findByRole('table', { name: 'Calls in progress' });
+    expect(screen.queryByRole('button', { name: /hang up/i })).not.toBeInTheDocument();
+  });
 });

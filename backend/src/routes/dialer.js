@@ -5,6 +5,8 @@ const { dialerOverview, scopeOverview } = require('../services/dialer');
 const dialerFeed = require('../realtime/dialerFeed');
 
 const { campaignInScope } = require('../services/access');
+const { audit } = require('../services/audit');
+const { dialerLive, hangupAttempt, HangupError } = require('../services/dialerLive');
 
 const router = express.Router();
 
@@ -53,6 +55,37 @@ router.get('/admin/campaigns/:id/hopper', requirePermission('dialer', 'view'), a
     [req.params.id],
   );
   res.json(rows);
+});
+
+// --- Live calls of a campaign (Dialer screen; polled while open) ---
+router.get('/admin/campaigns/:id/dialer-live', requirePermission('dialer', 'view'), async (req, res) => {
+  if (!campaignInScope(req.access.scope, req.params.id)) return res.status(404).json({ error: 'campaign not found' });
+  res.json(await dialerLive(Number(req.params.id)));
+});
+
+// --- A supervisor hangs up one live dialer call (right: Dialer -> Hang up live calls) ---
+router.post('/admin/dialer/attempts/:id/hangup', requirePermission('dialer', 'hangup'), async (req, res) => {
+  try {
+    const r = await hangupAttempt(Number(req.params.id), {
+      user: req.session.user,
+      inScope: (id) => campaignInScope(req.access.scope, id),
+    });
+    void audit({
+      user: req.session.user,
+      action: 'dialer.hangup',
+      entity: 'dial_attempts',
+      entityId: r.id,
+      status: 200,
+      summary: `hung up while ${r.was}`,
+      ip: req.ip,
+    });
+    dialerFeed.check({ force: true });
+    res.json({ status: 'ok', ...r });
+  } catch (err) {
+    if (err instanceof HangupError) return res.status(err.status).json({ error: err.message });
+    console.error('[dialer hangup]', err);
+    res.status(500).json({ error: 'could not hang up' });
+  }
 });
 
 module.exports = router;

@@ -42,6 +42,7 @@ const RESULT: Record<string, string> = {
   failed: 'Failed',
   invalid: 'Invalid number',
   agent_unanswered: 'You missed it',
+  cancelled: 'Hung up by supervisor',
 };
 
 type Tone = 'good' | 'callback' | 'warn' | 'muted' | 'bad';

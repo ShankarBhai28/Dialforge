@@ -83,7 +83,55 @@ export type DialerAction = 'start' | 'pause' | 'stop';
 export const dialerKeys = {
   overview: ['admin', 'dialer'] as const,
   hopper: (id: number) => ['admin', 'dialer', 'hopper', id] as const,
+  live: (id: number) => ['admin', 'dialer', 'live', id] as const,
 };
+
+// GET /admin/campaigns/:id/dialer-live (backend/src/services/dialerLive.js).
+export type LiveState = 'dialing' | 'ringing' | 'waiting' | 'connected';
+export type LiveCall = {
+  id: number;
+  leadId: number | null;
+  leadName: string | null;
+  phone: string;
+  state: LiveState;
+  /** When the current state began (ISO). */
+  since: string;
+  startedAt: string;
+  agent: string | null;
+  callId: number | null;
+};
+export type FinishedCall = {
+  id: number;
+  leadId: number | null;
+  leadName: string | null;
+  phone: string;
+  result: string | null;
+  resultLabel: string;
+  endedAt: string;
+  agent: string | null;
+  talkSeconds: number | null;
+};
+export type DialerLive = { live: LiveCall[]; counts: Record<LiveState, number>; finished: FinishedCall[] };
+
+/** Live calls of one campaign: every 2 s while the panel is open (plus on every dialer.status push). */
+export function useDialerLive(campaignId: number | null) {
+  return useQuery({
+    queryKey: dialerKeys.live(campaignId ?? 0),
+    queryFn: () => get<DialerLive>(`/admin/campaigns/${campaignId}/dialer-live`),
+    enabled: campaignId !== null,
+    refetchInterval: 2000,
+  });
+}
+
+export function useHangup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (attemptId: number) =>
+      post<{ status: string; was: LiveState }>(`/admin/dialer/attempts/${attemptId}/hangup`),
+    meta: { errorInline: true },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'dialer', 'live'] }),
+  });
+}
 
 // The backend pushes `dialer.status` (the same payload as GET /admin/dialer)
 // whenever the screen would change - see backend/src/realtime/dialerFeed.js.
@@ -96,6 +144,7 @@ export function useDialer() {
     qc.setQueryData(dialerKeys.overview, msg.data as DialerOverview);
     // Hopper counts moved too; refresh an open hopper (not the overview just set).
     void qc.invalidateQueries({ queryKey: ['admin', 'dialer', 'hopper'] });
+    void qc.invalidateQueries({ queryKey: ['admin', 'dialer', 'live'] });
   });
   return useQuery({
     queryKey: dialerKeys.overview,

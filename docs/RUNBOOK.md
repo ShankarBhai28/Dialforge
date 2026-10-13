@@ -1453,3 +1453,8 @@ Reported by the user after trying the agent panel:
 
 ## Dev: trunk channel cap 30 (2026-10-14)
 - `DIALER_MAX_TRUNK_CHANNELS=30` added to dev `.env` (backup `~/backups/pre-trunk30-20261013-185350/.env`), only `dialforge-dialer` restarted (no calls, campaign stopped); dialer.log: "trunk cap 30". Campaign Predictive_Test still has Max channels 10, so it dials at most 10 at once.
+
+## Dialer -> Live calls + supervisor Hang up (2026-10-14)
+- Dialer screen -> **Live** on a campaign: every number in progress - Dialing / Ringing / Waiting for an agent / With agent (agent name) - with time in state and since dialed (refreshed every 2 s + on every dialer.status push), counts per state, and "Just finished (last 30 min)" with results. `GET /admin/campaigns/:id/dialer-live` (`src/services/dialerLive.js`).
+- **Ringing**: migration `0009` adds `dial_attempts.ringing_at`, set by the dialer engine on ARI ChannelStateChange "Ringing" (SIP 180). The nxtra trunk often sends only 183 (early media): those calls show Dialing until answered.
+- **Hang up** (new role right Dialer -> "Hang up live calls"; Super Admin has it): before an agent -> result `cancelled` ("Hung up by supervisor"), the lead waits 60 min before it can be dialed again; with an agent -> the call just ends (agent goes to wrap-up). ARI DELETE on the customer channel `dfd-<attempt>`; audit `dialer.hangup`; call event `hangup_by_supervisor`.

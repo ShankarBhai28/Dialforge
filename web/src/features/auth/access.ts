@@ -40,7 +40,8 @@ export type Action =
   | 'listen'
   | 'whisper'
   | 'barge'
-  | 'recordings';
+  | 'recordings'
+  | 'hangup';
 
 export function canDo(user: User | null | undefined, screen: NavScreen, action: Action) {
   if (!user) return false;

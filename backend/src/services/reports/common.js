@@ -48,6 +48,7 @@ const RESULT_LABELS = {
   failed: 'Failed',
   invalid: 'Invalid number',
   agent_unanswered: "Agent didn't answer",
+  cancelled: 'Hung up by supervisor',
 };
 
 function resultLabel(call) {

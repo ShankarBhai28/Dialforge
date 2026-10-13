@@ -545,6 +545,16 @@ async function onAriEvent(event) {
         .catch(() => {});
       await ari.continueInDialplan(event.channel.id, { context: 'dialer-answered', extension: 's', priority: 1 });
       log(`attempt ${attemptId}: answered -> queue ${a.asterisk_name}`);
+    } else if (
+      event.type === 'ChannelStateChange' &&
+      event.channel.id.startsWith('dfd-') &&
+      event.channel.state === 'Ringing'
+    ) {
+      // The customer's phone rings (SIP 180) - the Dialer screen shows "Ringing".
+      await pool.query(
+        "UPDATE dial_attempts SET ringing_at = COALESCE(ringing_at, NOW()) WHERE id = ? AND status = 'dialing'",
+        [Number(event.channel.id.slice(4))],
+      );
     } else if (event.type === 'ChannelDestroyed' && event.channel.id.startsWith('dfd-')) {
       // Fires for every one of our channels; only matters if it never got
       // answered (answered calls are finished by the backend's AMI events).
