@@ -1444,3 +1444,9 @@ Reported by the user after trying the agent panel:
 ## Product name VIZTEX + new login page (2026-10-14)
 - Everything people see says **VIZTEX** (upper case): logo (`web/src/components/Logo.tsx`: mark + VIZ**TEX** wordmark), favicon (`web/public/favicon.svg`), page titles, login, sidebar, agent bar, alerts (`APP_DISPLAY_NAME`, default VIZTEX). One place for the name: `web/src/lib/brand.ts`. Internal names stay `dialforge` (repo, database, services, paths, AMI/ARI app names) - renaming those would mean a server migration for no visible gain.
 - Login page: product panel with features on large screens, sign-in card (icons in fields, show / hide password, Caps Lock warning, "Remember my username" in this browser only, never the password), logged-in-elsewhere prompt and session-ended notice kept. Checked by screenshots at 1440 px and 520 px.
+
+## Lead upload: duplicate check options, Check file, skipped-rows Excel (2026-10-14)
+- Leads -> Import -> **Duplicate check**: In this campaign (default, as before) / In this list / In all campaigns / Within this file only / No duplicate check. Numbers compared normalised, against a lead's phone or alt phone. DNC numbers and invalid rows are always skipped. The choice is remembered per browser.
+- **Check file**: the same run without saving (`dryRun=1`) - shows what would be imported.
+- Result: counts (imported / repeated in file / already exist / DNC / invalid) and **Download skipped rows (.xlsx)** - every row not imported with its row number, type, reason ("Duplicate: same number as row 12 in this file", "Already in campaign Sales - list Oct (lead #345)") and the file's own columns, plus a Summary sheet. Report kept 1 hour, only for the uploader (`GET /admin/leads/import-report/:id`).
+- Code: `backend/src/services/leadDedupe.js` (findExisting looks up only the file's numbers, in chunks).

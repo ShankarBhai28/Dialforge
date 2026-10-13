@@ -13,13 +13,21 @@ const {
   LEAD_BASE_COLUMNS,
   applyCustomEdits,
   getCampaignFormFields,
-  parseLeadCustomValue,
   readLeadUpload,
   receiveLeadFile,
 } = require('../services/leadImport');
 
 const { campaignInScope, can, scopeCondition } = require('../services/access');
 const { agentCanSeeLead, leadHistory } = require('../services/leadHistory');
+const {
+  DEFAULT_SCOPE,
+  DUP_SCOPES,
+  findExisting,
+  getReport,
+  planImport,
+  reportWorkbook,
+  saveReport,
+} = require('../services/leadDedupe');
 
 const router = express.Router();
 
@@ -423,103 +431,86 @@ router.post('/admin/leads/import', requirePermission('leads', 'import'), receive
     });
   }
 
-  // Duplicates and DNC compared on the normalised number, so "+91 98400
-  // 12345" in the file matches "9840012345" already in the campaign.
-  const [existingRows] = await pool.query('SELECT phone FROM leads WHERE campaign_id = ? AND deleted_at IS NULL', [
-    campaignId,
-  ]);
-  const existing = new Set(existingRows.map((r) => normalizePhone(r.phone)));
+  // Duplicate check scope (services/leadDedupe.js); default = the campaign.
+  const scope = DUP_SCOPES.includes(req.body.duplicateCheck) ? req.body.duplicateCheck : DEFAULT_SCOPE;
+  const dryRun = req.body.dryRun === '1' || req.body.dryRun === 'true';
+  const numbers = rows.map((r) => normalizePhone(r.values.phone)).filter(Boolean);
+  const existing = await findExisting(numbers, scope, { listId: list.id, campaignId });
   const [dncRows] = await pool.query('SELECT phone FROM dnc_numbers WHERE tenant_id = 1');
   const dnc = new Set(dncRows.map((r) => r.phone));
+  const { toInsert, skipped, summary } = planImport({
+    rows,
+    fields,
+    scope,
+    existing,
+    dnc,
+    campaignInScope: (id) => campaignInScope(req.access.scope, id),
+  });
 
-  const summary = { total: rows.length, imported: 0, duplicates: 0, dnc: 0, invalid: 0 };
-  const errors = [];
-  const toInsert = [];
-  const rowError = (rowNum, reason) => {
-    summary.invalid++;
-    if (errors.length < 50) errors.push({ row: rowNum, reason });
-  };
-
-  for (const { rowNum, values } of rows) {
-    const phone = normalizePhone(values.phone);
-    if (phone.length < 7 || phone.length > 15) {
-      rowError(rowNum, `invalid phone "${values.phone}"`);
-      continue;
-    }
-    let altPhone = null;
-    if (values.alt_phone) {
-      altPhone = normalizePhone(values.alt_phone);
-      if (altPhone.length < 7 || altPhone.length > 15) {
-        rowError(rowNum, `invalid alt_phone "${values.alt_phone}"`);
-        continue;
+  if (!dryRun && toInsert.length) {
+    // One transaction, multi-row INSERTs in chunks - all or nothing, and
+    // far fewer round-trips than one INSERT per lead.
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const values = toInsert.map((r) => [
+        1,
+        r.phone,
+        r.altPhone,
+        r.name,
+        campaignId,
+        list.id,
+        r.priority,
+        Object.keys(r.custom).length ? JSON.stringify(r.custom) : null,
+      ]);
+      for (let i = 0; i < values.length; i += 500) {
+        await conn.query(
+          'INSERT INTO leads (tenant_id, phone, alt_phone, name, campaign_id, list_id, priority, custom_data) VALUES ?',
+          [values.slice(i, i + 500)],
+        );
       }
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback();
+      console.error('[lead import failed]', err);
+      return res.status(500).json({ error: 'import failed - nothing was saved' });
+    } finally {
+      conn.release();
     }
-    let priority = 0;
-    if (values.priority) {
-      priority = Number(values.priority);
-      if (!Number.isInteger(priority) || priority < -100 || priority > 100) {
-        rowError(rowNum, 'priority must be a whole number -100..100');
-        continue;
-      }
-    }
-    const custom = {};
-    let bad = null;
-    for (const f of fields) {
-      const raw = values[f.field_key];
-      if (!raw) continue;
-      const r = parseLeadCustomValue(f, raw);
-      if (r.error) {
-        bad = `${f.field_key} ${r.error}`;
-        break;
-      }
-      custom[f.field_key] = r.value;
-    }
-    if (bad) {
-      rowError(rowNum, bad);
-      continue;
-    }
-    if (dnc.has(phone)) {
-      summary.dnc++;
-      continue;
-    }
-    if (existing.has(phone)) {
-      summary.duplicates++;
-      continue;
-    }
-    existing.add(phone);
-    toInsert.push([
-      1,
-      phone,
-      altPhone,
-      values.name || null,
-      campaignId,
-      list.id,
-      priority,
-      Object.keys(custom).length ? JSON.stringify(custom) : null,
-    ]);
   }
+  if (dryRun) summary.imported = 0;
+  const reportId = skipped.length
+    ? saveReport(req.session.user.id, {
+        headers,
+        skipped,
+        summary: { ...summary, imported: toInsert.length },
+        listName: list.name,
+        scope,
+        dryRun,
+      })
+    : null;
+  res.json({
+    ...summary,
+    wouldImport: toInsert.length,
+    duplicates: summary.inFile + summary.existing,
+    scope,
+    dryRun,
+    reportId,
+    errors: skipped
+      .filter((x) => x.kind === 'invalid')
+      .slice(0, 50)
+      .map((x) => ({ row: x.rowNum, reason: x.reason })),
+  });
+});
 
-  // One transaction, multi-row INSERTs in chunks - all or nothing, and
-  // far fewer round-trips than one INSERT per lead.
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    for (let i = 0; i < toInsert.length; i += 500) {
-      await conn.query(
-        'INSERT INTO leads (tenant_id, phone, alt_phone, name, campaign_id, list_id, priority, custom_data) VALUES ?',
-        [toInsert.slice(i, i + 500)],
-      );
-    }
-    await conn.commit();
-    summary.imported = toInsert.length;
-  } catch (err) {
-    await conn.rollback();
-    console.error('[lead import failed]', err);
-    return res.status(500).json({ error: 'import failed - nothing was saved' });
-  } finally {
-    conn.release();
-  }
-  res.json({ ...summary, errors });
+// The rows an upload skipped, with the reason (Excel). Only for the uploader, kept 1 hour.
+router.get('/admin/leads/import-report/:id', requirePermission('leads', 'import'), async (req, res) => {
+  const report = getReport(req.session.user.id, req.params.id);
+  if (!report) return res.status(404).json({ error: 'that report has expired - upload or check the file again' });
+  const buf = await reportWorkbook(report);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="leads-not-imported.xlsx"');
+  res.send(Buffer.from(buf));
 });
 
 // Template built from the list's campaign form, so the columns always

@@ -45,15 +45,33 @@ export const LEAD_PAGE_SIZE = 50;
 
 export type Disposition = { code: string; label: string };
 
+/** Duplicate check of a lead upload (backend/src/services/leadDedupe.js). */
+export type DuplicateCheck = 'none' | 'file' | 'list' | 'campaign' | 'all';
+
 export type ImportResult = {
   total: number;
+  /** Saved (0 when only checked). */
   imported: number;
+  /** Rows that pass every check (= imported, or would be on a check). */
+  wouldImport?: number;
+  /** inFile + existing */
   duplicates: number;
+  /** Repeated inside the file. */
+  inFile?: number;
+  /** Already in the database (list / campaign / everywhere, by the check). */
+  existing?: number;
   dnc: number;
   invalid: number;
+  scope?: DuplicateCheck;
+  /** Only checked - nothing saved. */
+  dryRun?: boolean;
+  /** The skipped rows as Excel: GET /admin/leads/import-report/:id (1 hour). */
+  reportId?: string | null;
   /** First 50 invalid rows only; `invalid` is the full count. */
   errors: { row: number; reason: string }[];
 };
+
+export const importReportUrl = (id: string) => `/admin/leads/import-report/${id}`;
 
 export type RecycleInfo = {
   list: { id: number; name: string; maxAttempts: number };
@@ -195,15 +213,28 @@ export function useDispositions(campaignId: number | null) {
 export function useImportLeads() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ listId, file }: { listId: number; file: File }) => {
-      // Field names come from the route: multer's single('file') + req.body.listId.
+    mutationFn: ({
+      listId,
+      file,
+      duplicateCheck = 'campaign',
+      dryRun = false,
+    }: {
+      listId: number;
+      file: File;
+      duplicateCheck?: DuplicateCheck;
+      dryRun?: boolean;
+    }) => {
+      // Field names come from the route: multer's single('file') + req.body.
       const form = new FormData();
       form.append('file', file);
       form.append('listId', String(listId));
+      form.append('duplicateCheck', duplicateCheck);
+      if (dryRun) form.append('dryRun', '1');
       return post<ImportResult>('/admin/leads/import', form);
     },
     meta: { errorInline: true },
-    onSuccess: () => {
+    onSuccess: (r) => {
+      if (r.dryRun) return; // nothing saved
       qc.invalidateQueries({ queryKey: leadKeys.lists });
       qc.invalidateQueries({ queryKey: leadKeys.leads });
     },

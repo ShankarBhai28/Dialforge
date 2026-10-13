@@ -447,9 +447,15 @@ describe('Leads & Lists - import', () => {
         body: {
           total: 10,
           imported: 6,
+          wouldImport: 6,
           duplicates: 1,
+          inFile: 1,
+          existing: 0,
           dnc: 1,
           invalid: 2,
+          scope: 'campaign',
+          dryRun: false,
+          reportId: 'abc123',
           errors: [
             { row: 4, reason: 'invalid phone "12"' },
             { row: 9, reason: 'priority must be a whole number -100..100' },
@@ -474,14 +480,56 @@ describe('Leads & Lists - import', () => {
     await userEvent.upload(screen.getByLabelText('File'), file);
     await userEvent.click(screen.getByRole('button', { name: 'Import' }));
 
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'Imported 6 of 10 (1 duplicate, 1 on DNC list, 2 invalid).',
+    expect(await screen.findByRole('status')).toHaveTextContent('Imported 6 of 10. Duplicate check: In this campaign.');
+    const summary = screen.getByLabelText('Import result');
+    expect(within(summary).getByText('Repeated in file').previousSibling).toHaveTextContent('1');
+    expect(within(summary).getByText('Invalid').previousSibling).toHaveTextContent('2');
+    expect(screen.getByRole('link', { name: /download skipped rows/i })).toHaveAttribute(
+      'href',
+      '/admin/leads/import-report/abc123',
     );
     expect(screen.getByText('Row 4: invalid phone "12"')).toBeInTheDocument();
     expect(screen.getByText('Row 9: priority must be a whole number -100..100')).toBeInTheDocument();
     expect(uploads).toHaveLength(1);
     expect(uploads[0].get('listId')).toBe('8');
     expect((uploads[0].get('file') as File).name).toBe('leads.csv');
+    expect(uploads[0].get('duplicateCheck')).toBe('campaign'); // the default
+    expect(uploads[0].get('dryRun')).toBeNull();
+  });
+
+  it('"Check file" with the chosen duplicate check saves nothing and says what would happen', async () => {
+    const { uploads } = fakeApiWithUploads({
+      ...base,
+      'POST /admin/leads/import': {
+        body: {
+          total: 3,
+          imported: 0,
+          wouldImport: 3,
+          duplicates: 0,
+          inFile: 0,
+          existing: 0,
+          dnc: 0,
+          invalid: 0,
+          scope: 'none',
+          dryRun: true,
+          reportId: null,
+          errors: [],
+        },
+      },
+    });
+    renderPage(<LeadsPage />);
+    await userEvent.click(await screen.findByRole('tab', { name: 'Import' }));
+    await userEvent.upload(screen.getByLabelText('File'), new File(['phone,name'], 'l.csv', { type: 'text/csv' }));
+    await userEvent.selectOptions(screen.getByLabelText('Duplicate check'), 'No duplicate check');
+    expect(screen.getByText(/the same customer may be called more than once/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Check file' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Checked only - nothing saved. 3 of 3 row(s) would be imported. Duplicate check: No duplicate check.',
+    );
+    expect(uploads[0].get('duplicateCheck')).toBe('none');
+    expect(uploads[0].get('dryRun')).toBe('1');
+    expect(screen.queryByRole('link', { name: /download skipped rows/i })).not.toBeInTheDocument();
+    expect(localStorage.getItem('viztex-import-duplicate-check')).toBe('none');
   });
 
   it('asks for a file, and shows the server error', async () => {
