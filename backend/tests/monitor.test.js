@@ -58,3 +58,21 @@ test('refused with a reason the supervisor can act on', async () => {
   await assert.rejects(run({ lineState: null }), /isn't connected/);
   await assert.rejects(run({ supLine: { id: 9, name: '1003', enabled: 1 } }), /your own line/);
 });
+
+test('an Asterisk refusal is explained, not a bare "Permission denied"', async () => {
+  const d = deps();
+  d.ami.originate = async () => {
+    throw new Error('Permission denied');
+  };
+  await assert.rejects(startMonitor({ supervisorId: 1, agentId: 21, mode: 'listen', scope: null }, d), {
+    status: 500,
+    message: /lacks the "originate" right/,
+  });
+  d.ami.originate = async () => {
+    throw new Error('AMI not ready');
+  };
+  await assert.rejects(startMonitor({ supervisorId: 1, agentId: 21, mode: 'listen', scope: null }, d), {
+    status: 502,
+    message: /couldn't start the monitoring call: AMI not ready/,
+  });
+});

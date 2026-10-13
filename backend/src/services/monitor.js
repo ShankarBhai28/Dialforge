@@ -59,13 +59,24 @@ async function startMonitor({ supervisorId, agentId, mode, scope }, deps = { poo
       `your monitoring line ${line.name} isn't connected - press "Connect monitoring line" first`,
     );
   }
-  await deps.ami.originate({
-    channel: `PJSIP/${line.name}`,
-    context: 'df-monitor',
-    exten: agentExt,
-    callerId: `"Monitor ${agent.username}" <${agentExt}>`,
-    variables: { DF_SPY_OPTS: SPY_OPTIONS[mode] },
-  });
+  try {
+    await deps.ami.originate({
+      channel: `PJSIP/${line.name}`,
+      context: 'df-monitor',
+      exten: agentExt,
+      callerId: `"Monitor ${agent.username}" <${agentExt}>`,
+      variables: { DF_SPY_OPTS: SPY_OPTIONS[mode] },
+    });
+  } catch (err) {
+    // The app's AMI login needs the "originate" write right (manager.conf, DEPLOY.md §11).
+    if (/permission denied/i.test(err.message)) {
+      throw new MonitorError(
+        500,
+        'Asterisk refused to place the monitoring call: the AMI login lacks the "originate" right (manager.conf) - ask your admin',
+      );
+    }
+    throw new MonitorError(502, `Asterisk couldn't start the monitoring call: ${err.message}`);
+  }
   return { agent: agent.username, extension: agentExt, mode, line: line.name };
 }
 

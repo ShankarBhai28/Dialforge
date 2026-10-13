@@ -1370,3 +1370,9 @@ Reported by the user after trying the agent panel:
 - **Screens:** the delete dialogs say what will happen instead of "only possible when ..."; the success message lists what was unlinked.
 - **Tests:** `tests/soft-delete.test.js` (what each delete unlinks + notes, not found, rollback). Also: the backend test servers now close their connections before the test run exits, and `audit.test.js` waits a bit longer for the audit row - a once-seen intermittent failure (Node on Windows crashing at exit).
 - 94 backend, 170 web.
+
+## Fix: call monitoring said "Permission denied" (2026-10-13)
+- **Reported by the user:** Listen on an agent's live call -> "could not start monitoring: Permission denied".
+- **Cause:** that text came from Asterisk. Starting the monitoring call uses AMI , which needs the **** write right; the app's AMI login  in  only had . Missed when monitoring was built: only the refusals (not on a call, no line) could be tested without a live call.
+- **Fix on dev:** backup ; ; ; the app's AMI session kicked () so it reconnected with the new right (0 calls were active). Verified: an Originate to a non-existent context now gets "Extension does not exist" instead of "Permission denied" (nothing rang).
+- **Code:** a refused Originate is now explained ("the AMI login lacks the 'originate' right") instead of a bare "Permission denied";  §11 includes  for new installs.

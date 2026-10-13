@@ -492,7 +492,7 @@ secret=<same value as AMI_PASS in .env>
 deny=0.0.0.0/0.0.0.0
 permit=127.0.0.1/255.255.255.255
 read=system,call,agent,user,config
-write=system,call,agent,user,config
+write=system,call,agent,user,config,originate
 ```
 (Scoped permissions, not `all` - least privilege. Bound to localhost via
 `permit`/`deny` here, and `manager.conf`'s `[general]` `bindaddr=127.0.0.1`
