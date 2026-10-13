@@ -53,6 +53,8 @@ export type LeadHistory = {
     pendingCallback: { due: string } | null;
   };
   latestForm: { form: string; at: string; agent: string | null; answers: { label: string; value: string }[] } | null;
+  /** The last answers saved with each form (by form id; raw values by field key). */
+  formData?: Record<string, { data: Record<string, unknown>; at: string; agent: string | null }>;
   timeline: HistoryItem[];
 };
 

@@ -57,14 +57,24 @@ export type AgentFormField = {
 };
 export type AgentForm = { id: number; name: string; fields: AgentFormField[] };
 
+// One row of the agent's call log (GET /calls).
 export type CallRow = {
   id: number;
+  lead_id?: number | null;
+  lead_name?: string | null;
   direction: string;
   to_number: string;
   start_time: string;
   answer_time: string | null;
   end_time: string | null;
+  /** When the agent and customer were connected (null = nobody talked). */
+  agent_connect_time?: string | null;
+  /** How the call ended, technically: ended / abandoned / no_answer / busy / ... */
   disposition: string | null;
+  /** The outcome the agent gave (code + label). */
+  outcome?: string | null;
+  outcome_label?: string | null;
+  has_recording?: boolean;
 };
 
 export type PreviewLead = Lead & {

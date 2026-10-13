@@ -137,7 +137,7 @@ test('history: calls carry agent, talk, outcome + note; forms, callbacks, edits;
       ],
     ],
   ]);
-  const h = await leadHistory(9, { canPlay: true }, { pool: d });
+  const h = await leadHistory(9, { recordingUrl: (id) => `/admin/calls/${id}/recording` }, { pool: d });
   assert.deepStrictEqual(
     h.timeline.map((t) => t.type),
     ['callback', 'form', 'call', 'edit', 'call', 'created'], // the form (10:02) after the call started (10:00),
@@ -178,12 +178,15 @@ test('history: calls carry agent, talk, outcome + note; forms, callbacks, edits;
     { calls: 2, answered: 1, lastSpokeWith: 'agent1003', lastOutcome: 'Call Back', agents: ['agent1003'] },
   );
   assert.deepStrictEqual(h.lead.customData, { city: 'Chennai' });
+  // The last answers per form, raw, for filling the agent's form.
+  assert.deepStrictEqual(h.formData[1].data, { interest: 'Home loan', budget: '40L', x: '' });
+  assert.strictEqual(h.formData[1].agent, 'agent1003');
   // Calls not linked to the lead are found by its number, in every stored form.
   const [, params] = d.seen.find(([s]) => s.includes('FROM calls ca'));
   assert.deepStrictEqual(params[1], ['9840012345', '919840012345', '09840012345', '+919840012345']);
 });
 
-test('agents (no recording right) get no recording link; unknown lead -> null', async () => {
+test('no recording link without a player route; unknown lead -> null', async () => {
   const d = db([
     ['FROM leads l', [LEAD]],
     [
@@ -199,7 +202,7 @@ test('agents (no recording right) get no recording link; unknown lead -> null', 
       ],
     ],
   ]);
-  const h = await leadHistory(9, { canPlay: false }, { pool: d });
+  const h = await leadHistory(9, {}, { pool: d });
   assert.strictEqual(h.timeline[0].recorded, true);
   assert.strictEqual(h.timeline[0].recordingUrl, undefined);
   assert.strictEqual(await leadHistory(1, {}, { pool: db([]) }), null);

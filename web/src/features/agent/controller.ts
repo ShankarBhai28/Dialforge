@@ -405,6 +405,15 @@ export class AgentController {
     if (ws.lead?.id === lead.id) return;
     this.openWorkspace(lead, ws.lead ? ws.callId : null, describe(lead, lead.phone));
   }
+  /** Opens a lead by id (e.g. from the call log). */
+  async openLeadById(leadId: number) {
+    if (this.state.workspace.lead?.id === leadId) return;
+    try {
+      this.selectLead(await get<Lead>(`/agent/leads/${leadId}`));
+    } catch (err) {
+      this.say((err as Error).message, true);
+    }
+  }
   openBlankForm() {
     this.set({ workspace: { ...emptyWorkspace(this.state.workspace.formVersion + 1), blankOpen: true } });
   }
@@ -414,6 +423,7 @@ export class AgentController {
   }
   /** After the form is saved: the classic page closed the lead too. */
   formSaved() {
+    this.refresh('history'); // the next opening fills the form with these answers
     this.set({ workspace: emptyWorkspace(this.state.workspace.formVersion + 1) });
     this.say('Form saved.');
   }

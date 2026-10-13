@@ -15,7 +15,8 @@ const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/
 const { campaignInScope, scopeCondition } = require('../services/access');
 const { audit } = require('../services/audit');
 const { playableFile } = require('../services/recording');
-const { findLeadByPhone } = require('../services/leadHistory');
+const { agentCanSeeLead, findLeadByPhone } = require('../services/leadHistory');
+const { outcomeLabel } = require('../services/reports/common');
 
 const router = express.Router();
 
@@ -25,10 +26,57 @@ router.get('/calls', requireCaller, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM calls ORDER BY id DESC LIMIT 100');
     return res.json(rows);
   }
-  const [rows] = await pool.query('SELECT * FROM calls WHERE from_extension = ? ORDER BY id DESC LIMIT 100', [
-    req.session.user.extensionName,
-  ]);
-  res.json(rows);
+  // The agent's own calls (taken by them, or on their extension), with the
+  // outcome they gave and whether there's a recording (never its path).
+  const ext = req.session.user.extensionName || '';
+  const [rows] = await pool.query(
+    `SELECT ca.id, ca.lead_id, ca.direction, ca.to_number, ca.disposition, ca.start_time, ca.answer_time,
+            ca.end_time, ca.agent_connect_time, ca.campaign_id, ca.outcome, cd.label AS outcome_label,
+            l.name AS lead_name, ca.recording_path IS NOT NULL AS has_recording
+     FROM calls ca
+     LEFT JOIN leads l ON l.id = ca.lead_id
+     LEFT JOIN campaign_dispositions cd ON cd.campaign_id = ca.campaign_id AND cd.code = ca.outcome
+     WHERE ca.agent_user_id = ? OR ca.from_extension = ?
+     ORDER BY ca.id DESC LIMIT 100`,
+    [req.session.user.id, ext],
+  );
+  res.json(
+    rows.map((r) => ({
+      ...r,
+      outcome_label: r.outcome ? outcomeLabel(r.outcome, r.outcome_label) : null,
+      has_recording: !!Number(r.has_recording),
+    })),
+  );
+});
+
+// --- Agent: play a recording (their own call, or a call on a lead they may open) ---
+router.get('/agent/calls/:id/recording', requireCaller, async (req, res) => {
+  const user = req.session.user;
+  const [rows] = await pool.query(
+    'SELECT id, lead_id, agent_user_id, from_extension, transfer_ext, recording_path FROM calls WHERE id = ?',
+    [req.params.id],
+  );
+  const call = rows[0];
+  if (!call) return res.status(404).json({ error: 'call not found' });
+  const ext = user.extensionName || '';
+  let allowed =
+    user.role !== 'agent' ||
+    call.agent_user_id === user.id ||
+    (!!ext && (call.from_extension === ext || call.transfer_ext === ext));
+  if (!allowed && call.lead_id) {
+    const [leads] = await pool.query('SELECT id, campaign_id FROM leads WHERE id = ?', [call.lead_id]);
+    allowed = !!leads[0] && (await agentCanSeeLead(user, leads[0], findCurrentCampaign));
+  }
+  if (!allowed) return res.status(403).json({ error: 'that call is not one you can listen to' });
+  if (!call.recording_path) return res.status(404).json({ error: 'this call was not recorded' });
+  const found = playableFile(call.recording_path);
+  if (!found)
+    return res.status(410).json({ error: 'the recording is no longer on the server (older than the keep period)' });
+  void audit({ user, action: 'calls.recording_play', entity: 'calls', entityId: call.id, ip: req.ip });
+  res.type(found.type);
+  res.sendFile(found.file, (err) => {
+    if (err && !res.headersSent) res.status(500).json({ error: 'could not read the recording' });
+  });
 });
 
 // --- Admin: call log, searched and paged on the server ---

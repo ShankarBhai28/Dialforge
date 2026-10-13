@@ -13,6 +13,9 @@ import { FieldInput, fieldValues, type FieldValues } from '@/features/forms/Fiel
 import { useController, usePhone } from './AgentProvider';
 import { LeadStatusChip } from './LeadsPanel';
 import { CustomerHistory } from '@/features/history/CustomerHistory';
+import { useLeadHistory } from '@/features/history/api';
+import { Skeleton } from '@/components/ui/skeleton';
+import { formatDateTime } from '@/lib/format';
 
 const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : String(v));
 
@@ -191,10 +194,24 @@ function LeadDetail({
   );
 }
 
-function AgentFormCard({ form }: { form: AgentForm }) {
+type SavedAnswers = { data: Record<string, unknown>; at: string; agent: string | null };
+
+/** The form, filled with the lead's last saved answers (else its uploaded data) - not empty. */
+function LeadForm({ form }: { form: AgentForm }) {
+  const { state } = useController();
+  const leadId = state.workspace.lead?.id ?? null;
+  const history = useLeadHistory('agent', leadId);
+  if (leadId && history.isPending) return <Skeleton className="h-40" />;
+  const saved = history.data?.formData?.[String(form.id)] ?? null;
+  return <AgentFormCard key={state.workspace.formVersion} form={form} saved={saved} />;
+}
+
+function AgentFormCard({ form, saved }: { form: AgentForm; saved: SavedAnswers | null }) {
   const { controller, state } = useController();
   const ws = state.workspace;
-  const [values, setValues] = useState<FieldValues>(() => fieldValues(form.fields, ws.lead?.custom_data));
+  const [values, setValues] = useState<FieldValues>(() =>
+    fieldValues(form.fields, { ...(ws.lead?.custom_data ?? {}), ...(saved?.data ?? {}) }),
+  );
   const save = useMutation({
     mutationFn: () => post('/agent/form-responses', { leadId: ws.lead?.id ?? null, callId: ws.callId, data: values }),
     meta: { errorInline: true },
@@ -215,6 +232,12 @@ function AgentFormCard({ form }: { form: AgentForm }) {
             ? `Saving against: ${ws.contextText}`
             : 'Not linked to a lead - answers will be saved without one.'}
         </p>
+        {saved && (
+          <p className="text-xs text-muted-foreground">
+            Filled with the answers saved {saved.agent ? `by ${saved.agent} ` : ''}on {formatDateTime(saved.at)} -
+            change what's new and save.
+          </p>
+        )}
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="grid gap-4">
@@ -278,7 +301,7 @@ export function Workspace() {
             <LeadDetail lead={ws.lead} contextText={ws.contextText} formKeys={formKeys} />
           )}
           {form ? (
-            <AgentFormCard key={ws.formVersion} form={form} />
+            <LeadForm form={form} />
           ) : (
             <p className="text-sm text-muted-foreground">
               This campaign has no form - pick the outcome when the call ends.

@@ -217,4 +217,80 @@ describe('agent screen', () => {
       }),
     );
   });
+
+  it('call log: outcome instead of "ended", plays the recording, opens the customer with the last form answers', async () => {
+    await connect(
+      backend({
+        'GET /calls': {
+          body: [
+            {
+              id: 61,
+              lead_id: 7,
+              lead_name: 'Ravi',
+              direction: 'outbound',
+              to_number: '9840012345',
+              start_time: '2026-10-13T10:00:00Z',
+              answer_time: '2026-10-13T10:00:10Z',
+              agent_connect_time: '2026-10-13T10:00:10Z',
+              end_time: '2026-10-13T10:02:00Z',
+              disposition: 'ended',
+              outcome: 'interested',
+              outcome_label: 'Interested',
+              has_recording: true,
+            },
+            {
+              id: 60,
+              lead_id: null,
+              direction: 'outbound',
+              to_number: '9000000001',
+              start_time: '2026-10-13T09:00:00Z',
+              answer_time: null,
+              end_time: '2026-10-13T09:00:30Z',
+              disposition: 'busy',
+              has_recording: false,
+            },
+          ],
+        },
+        'GET /agent/leads/7': {
+          body: { id: 7, name: 'Ravi', phone: '9840012345', status: 'interested', custom_data: { amount: 100 } },
+        },
+        'GET /agent/leads/7/history': {
+          body: {
+            lead: { id: 7 },
+            summary: {
+              calls: 1,
+              answered: 1,
+              talkSeconds: 110,
+              lastCallAt: null,
+              lastSpokeWith: 'agent04',
+              lastSpokeAt: null,
+              lastOutcome: 'Interested',
+              agents: [],
+              pendingCallback: null,
+            },
+            latestForm: null,
+            formData: { 1: { data: { amount: 4500, plan: 'Gold' }, at: '2026-10-13T10:01:00Z', agent: 'agent04' } },
+            timeline: [],
+          },
+        },
+      }),
+    );
+    const log = screen.getByRole('complementary', { name: 'Dialpad and recent calls' });
+    expect(await within(log).findByText('Interested')).toBeInTheDocument();
+    expect(within(log).getByText('Busy')).toBeInTheDocument();
+    expect(within(log).queryByText('ended')).not.toBeInTheDocument();
+
+    await userEvent.click(within(log).getByRole('button', { name: 'Play recording of 9840012345' }));
+    expect(within(log).getByLabelText('Recording of call 61')).toHaveAttribute('src', '/agent/calls/61/recording');
+    expect(within(log).queryByRole('button', { name: 'Play recording of 9000000001' })).not.toBeInTheDocument();
+
+    // Clicking the customer opens them, the form filled with the last saved answers.
+    await userEvent.click(within(log).getByRole('button', { name: 'Ravi · 9840012345' }));
+    expect(await screen.findByLabelText('Amount *')).toHaveValue(4500);
+    expect(screen.getByLabelText('Plan')).toHaveValue('Gold');
+    expect(screen.getByText(/Filled with the answers saved by agent04/)).toBeInTheDocument();
+    await userEvent.click(within(log).getByRole('tab', { name: 'No Answer' }));
+    expect(within(log).queryByText('Interested')).not.toBeInTheDocument();
+    expect(within(log).getByText('Busy')).toBeInTheDocument();
+  });
 });

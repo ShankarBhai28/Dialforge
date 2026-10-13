@@ -52,10 +52,10 @@ const json = (v) => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : 
 const EDIT_FIELDS = { name: 'Name', phone: 'Phone', alt_phone: 'Alt phone', priority: 'Priority', status: 'Status' };
 
 /**
- * The full history of one lead. `canPlay`: include what the recording
- * player needs (admins with Call Log -> Play recordings).
+ * The full history of one lead. `recordingUrl(callId)`: where the player
+ * fetches a call's recording (admin or agent route); omitted = no player.
  */
-async function leadHistory(leadId, { canPlay = false } = {}, deps = { pool }) {
+async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }) {
   const db = deps.pool;
   const [[lead]] = await db.query(
     `SELECT l.id, l.name, l.phone, l.alt_phone, l.status, l.attempts, l.is_final, l.next_call_at, l.created_at,
@@ -154,7 +154,7 @@ async function leadHistory(leadId, { canPlay = false } = {}, deps = { pool }) {
       callbackAt: o ? o.callbackAt : null,
       transferred: !!Number(c.transferred),
       recorded: !!Number(c.recorded),
-      ...(canPlay && Number(c.recorded) ? { recordingUrl: `/admin/calls/${c.id}/recording` } : {}),
+      ...(recordingUrl && Number(c.recorded) ? { recordingUrl: recordingUrl(c.id) } : {}),
     });
   }
   const fieldsByForm = {};
@@ -226,8 +226,30 @@ async function leadHistory(leadId, { canPlay = false } = {}, deps = { pool }) {
     latestForm: answered[0]
       ? { form: answered[0].form, at: answered[0].at, agent: answered[0].agent, answers: answered[0].answers }
       : null,
+    // The last answers saved with each form (raw, by field key): the agent
+    // screen fills the form with them instead of starting empty.
+    formData: Object.fromEntries(
+      [...forms].reverse().map((f) => [f.form_id, { data: json(f.data) || {}, at: f.created_at, agent: f.agent }]),
+    ),
     timeline: timeline.slice(0, MAX_ITEMS),
   };
 }
 
-module.exports = { findLeadByPhone, leadHistory, formAnswers };
+/**
+ * May this agent open this lead (details, history, recordings)? A lead of
+ * the campaign they're working (or of no campaign), or one they have
+ * talked to before. Admin logins on the agent screen may.
+ */
+async function agentCanSeeLead(user, lead, findCurrentCampaign, deps = { pool }) {
+  if (user.role !== 'agent') return true;
+  const campaign = await findCurrentCampaign(user.id);
+  if (!lead.campaign_id || (campaign && campaign.id === lead.campaign_id)) return true;
+  const ext = user.extensionName || '';
+  const [mine] = await deps.pool.query(
+    'SELECT 1 FROM calls WHERE lead_id = ? AND (agent_user_id = ? OR from_extension = ? OR transfer_ext = ?) LIMIT 1',
+    [lead.id, user.id, ext, ext],
+  );
+  return mine.length > 0;
+}
+
+module.exports = { findLeadByPhone, leadHistory, formAnswers, agentCanSeeLead };
