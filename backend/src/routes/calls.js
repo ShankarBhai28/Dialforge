@@ -4,7 +4,7 @@ const ari = require('../../ari');
 const { isWithinCallWindow, normalizePhone } = require('../../dialer-common');
 const { APP_NAME } = require('../config');
 const { requirePermission, requireCaller } = require('../middleware/auth');
-const { findCurrentCampaign } = require('../services/agents');
+const { currentAgentStatus, findCurrentCampaign } = require('../services/agents');
 const { logEvent } = require('../services/calls');
 const { isDnc } = require('../services/dnc');
 const { previewLockOwner } = require('../services/preview');
@@ -157,6 +157,15 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
 
   if (!fromExtension || !toNumber) {
     return res.status(400).json({ error: 'fromExtension and toNumber are required' });
+  }
+
+  // Agents call only once they're logged into a queue (Available, or on a
+  // break / wrap-up of that shift) - not straight after connecting the line.
+  if (req.session.user.role === 'agent' && (await currentAgentStatus(req.session.user.id)) === 'offline') {
+    return res.status(403).json({
+      error: 'Pick your queue and go Available first - then you can make calls.',
+      code: 'not_logged_into_queue',
+    });
   }
 
   // Do Not Call is enforced here, not just a label an agent can override -

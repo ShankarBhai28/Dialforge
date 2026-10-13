@@ -1436,3 +1436,7 @@ Reported by the user after trying the agent panel:
 - Migration `0008_live_agents.sql`: one row per logged-in agent (state, extension, queue, campaign, current call, line registered, screen open, login time, last seen). `src/services/presence.js` rewrites it every 10 s and ~1 s after a status change / call event / screen connect, from agent_status_log, calls, the realtime hub, Asterisk (ARI endpoints) and audit_log. A read model for people - the app keeps reading the sources.
 - `npm run db:check -- --fix`: backs up the touched tables (`~/backups/db-fix-*.sql`), repairs stuck statuses, calls, dial attempts, hopper locks / rows, callbacks of final leads, old sessions; re-checks. Report-only: things needing a decision. New checks: live_agents not refreshed (backend down?), answered calls without the agent's outcome; deleted rows ignored where it matters.
 - Where live state lives and how to unstick each: `backend/ops/README.md` "Who is online, and fixing stuck things".
+
+## Agents must go Available before working (2026-10-14)
+- Agent screen: after the line connects, an agent not logged into a queue (no open status) sees only **Start your shift** - their queues with "Go Available" (last queue highlighted). Leads, dialpad, call log and calls open once they're Available; Break / ACW keep the workbench.
+- Server: `POST /calls/click2call` refuses agents with no open status (403 `not_logged_into_queue`), so it holds even without the screen. Preview already required Available.

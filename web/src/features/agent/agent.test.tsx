@@ -318,4 +318,47 @@ describe('agent screen', () => {
     expect(within(log).getByText('Interested')).toBeInTheDocument();
     expect(within(log).queryByText('Busy')).not.toBeInTheDocument();
   });
+
+  it('before going Available only "Start your shift": no leads, dialpad or calls; picking the queue opens the workbench', async () => {
+    let status = 'offline';
+    const calls = fakeApi(
+      backend({
+        'GET /agent/stats': () => ({
+          body: {
+            loginSeconds: 0,
+            talkSeconds: 0,
+            breakSeconds: 0,
+            acwSeconds: 0,
+            handleSeconds: 0,
+            currentStatus: status,
+            currentReason: null,
+            currentQueueName: null,
+          },
+        }),
+        'GET /queues': { body: [{ id: 4, name: 'Support Queue', campaign_name: 'Sales' }] },
+        'POST /agent/status': () => {
+          status = 'available';
+          return { body: { status: 'ok' } };
+        },
+      }),
+    );
+    const uas = fakeUAFactory();
+    renderPage(<AgentPage createUA={uas.factory} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect' }));
+    await waitFor(() => expect(uas.made.length).toBe(1));
+    act(() => uas.last().register());
+
+    expect(await screen.findByRole('heading', { name: 'Start your shift' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Number to dial')).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Leads and callbacks' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Go Available on Support Queue' }));
+    expect(calls.find((c) => c.key === 'POST /agent/status')?.body).toEqual({
+      status: 'available',
+      reason: null,
+      queueId: 4,
+    });
+    expect(await screen.findByLabelText('Number to dial')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Start your shift' })).not.toBeInTheDocument();
+  });
 });

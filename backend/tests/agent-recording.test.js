@@ -17,10 +17,20 @@ const CALLS = {
 };
 const LEADS = { 7: { id: 7, campaign_id: 2 }, 8: { id: 8, campaign_id: 2 }, 9: { id: 9, campaign_id: 99 } };
 const sql = [];
+let agentStatus = null; // the agent's open status row (null = not logged into a queue)
+fake('ari.js', {
+  originate: async () => {
+    throw new Error('Allocation failed');
+  },
+  endpointState: async () => 'online',
+  endpointStates: async () => ({}),
+});
 fake('db.js', {
   async query(q, params) {
     const s = q.replace(/\s+/g, ' ').trim();
     sql.push([s, params]);
+    if (s.startsWith('SELECT status FROM agent_status_log')) return [agentStatus ? [{ status: agentStatus }] : []];
+    if (s.startsWith('INSERT INTO calls')) return [{ insertId: 90 }];
     if (s.startsWith('SELECT id, lead_id, agent_user_id')) return [[CALLS[params[0]]].filter(Boolean)];
     if (s.startsWith('SELECT id, campaign_id FROM leads')) return [[LEADS[params[0]]].filter(Boolean)];
     if (s.startsWith('SELECT 1 FROM calls WHERE lead_id')) return [[]];
@@ -37,7 +47,12 @@ fake('db.js', {
 });
 fake('src/services/agents.js', {
   ...require(path.join(root, 'src/services/agents.js')),
-  findCurrentCampaign: async () => ({ id: 2 }),
+  findCurrentCampaign: async () => ({
+    id: 2,
+    call_window_start: '00:00:00',
+    call_window_end: '23:59:59',
+    timezone: 'Asia/Kolkata',
+  }),
 });
 fake('src/services/recording.js', {
   ...require(path.join(root, 'src/services/recording.js')),
@@ -116,4 +131,38 @@ test('agent call log period: today = one local day; default 7 days', async () =>
   await get('/calls');
   const [, p] = sql.find(([s]) => s.startsWith('SELECT ca.id'));
   assert.strictEqual((Date.parse(p[3]) - Date.parse(p[2])) / 86400000, 7);
+});
+
+// node:http POST
+const post = (p, body) =>
+  new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = http.request(
+      `${base}${p}`,
+      {
+        method: 'POST',
+        agent: false,
+        headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) },
+      },
+      (res) => {
+        let text = '';
+        res.on('data', (c) => (text += c));
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }));
+      },
+    );
+    req.on('error', reject);
+    req.end(data);
+  });
+
+test('an agent not logged into a queue cannot call; on Available / break they can', async () => {
+  agentStatus = null;
+  const r = await post('/calls/click2call', { toNumber: '9840012345' });
+  assert.strictEqual(r.status, 403);
+  assert.strictEqual(r.body.code, 'not_logged_into_queue');
+  for (const st of ['available', 'break']) {
+    agentStatus = st;
+    const ok = await post('/calls/click2call', { toNumber: '9840012345' });
+    assert.notStrictEqual(ok.status, 403, st); // goes on to ring the line (502 here: fake Asterisk)
+  }
+  agentStatus = null;
 });
