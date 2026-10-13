@@ -567,6 +567,8 @@ once per server, after `db:migrate` (section 9):
 
 Check: `odbc show dialforge` (connected), `realtime load ps_endpoints id <ext>`, `pjsip show endpoints`, `queue show <queue>`. Extensions are then added on the **Extensions** screen.
 
+The `ps_aors` view sets `qualify_frequency = 30` (migration `0005`) - keep it. Without qualify, Asterisk ignores the registration of an extension it didn't know at its last start / reload: the browser is registered but the extension stays "Unavailable" (queues skip the agent, monitoring says the line isn't connected) until `pjsip reload`.
+
 ## 12. Node backend's own cert copy + renewal hook
 
 The Node app can't read Let's Encrypt's root-only cert storage either:
