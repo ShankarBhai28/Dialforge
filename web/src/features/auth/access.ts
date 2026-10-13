@@ -36,7 +36,10 @@ export type Action =
   | 'cancel'
   | 'password'
   | 'export'
-  | 'logout';
+  | 'logout'
+  | 'listen'
+  | 'whisper'
+  | 'barge';
 
 export function canDo(user: User | null | undefined, screen: NavScreen, action: Action) {
   if (!user) return false;

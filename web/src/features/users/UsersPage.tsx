@@ -41,23 +41,45 @@ import {
 
 const PASSWORD_HINT = 'At least 8 characters.';
 
-function ExtensionSelect({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
+/**
+ * Agents: their extension (required). Admin logins: an optional monitoring
+ * line - the extension their browser connects with to listen / whisper /
+ * barge on calls (Live Agents).
+ */
+function ExtensionSelect({
+  id,
+  value,
+  onChange,
+  monitoring = false,
+}: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  monitoring?: boolean;
+}) {
   const extensions = useExtensions();
   return (
     <Field
       id={id}
-      label="Extension"
+      label={monitoring ? 'Monitoring line (optional)' : 'Extension'}
       error={extensions.error ? `Could not load extensions: ${extensions.error.message}` : null}
-      hint={extensions.data?.length === 0 ? 'No extensions exist yet.' : 'The softphone line this agent usually uses.'}
+      hint={
+        extensions.data?.length === 0
+          ? 'No extensions exist yet.'
+          : monitoring
+            ? 'An extension for listening to calls on Live Agents. Use one no agent has.'
+            : 'The softphone line this agent usually uses.'
+      }
     >
       <Select
         id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={!extensions.data?.length}
-        required
+        required={!monitoring}
       >
         {extensions.isPending && <option value="">Loading…</option>}
+        {monitoring && <option value="">None</option>}
         {/* Disabled extensions can't register, so they aren't offered (unless already chosen). */}
         {extensions.data
           ?.filter((x) => x.enabled || String(x.id) === value)
@@ -162,7 +184,8 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (v: boolean) => void
         username: name,
         password,
         role,
-        extensionId: role === 'agent' && extension ? Number(extension) : null,
+        extensionId:
+          role === 'agent' ? (extension ? Number(extension) : null) : extensionId ? Number(extensionId) : null,
         roleId: role === 'staff' && adminRole ? Number(adminRole) : null,
       },
       {
@@ -207,7 +230,11 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (v: boolean) => void
               />
             </Field>
             <AccountTypeFields idPrefix="user" kind={role} roleId={adminRole} onKind={setRole} onRoleId={setRoleId} />
-            {role === 'agent' && <ExtensionSelect id="user-extension" value={extension} onChange={setExtensionId} />}
+            {role === 'agent' ? (
+              <ExtensionSelect id="user-extension" value={extension} onChange={setExtensionId} />
+            ) : (
+              <ExtensionSelect id="user-extension" value={extensionId} onChange={setExtensionId} monitoring />
+            )}
             <FormError message={create.error?.message} />
           </DialogBody>
           <DialogFooter>
@@ -239,7 +266,8 @@ function EditUserDialog({ user, onOpenChange }: { user: User; onOpenChange: (v: 
         id: user.id,
         role,
         status: user.status,
-        extensionId: role === 'agent' && extension ? Number(extension) : null,
+        extensionId:
+          role === 'agent' ? (extension ? Number(extension) : null) : extensionId ? Number(extensionId) : null,
         roleId: role === 'staff' && adminRole ? Number(adminRole) : null,
       },
       {
@@ -263,7 +291,11 @@ function EditUserDialog({ user, onOpenChange }: { user: User; onOpenChange: (v: 
           </DialogHeader>
           <DialogBody className="grid gap-4">
             <AccountTypeFields idPrefix="edit" kind={role} roleId={adminRole} onKind={setRole} onRoleId={setRoleId} />
-            {role === 'agent' && <ExtensionSelect id="edit-extension" value={extension} onChange={setExtensionId} />}
+            {role === 'agent' ? (
+              <ExtensionSelect id="edit-extension" value={extension} onChange={setExtensionId} />
+            ) : (
+              <ExtensionSelect id="edit-extension" value={extensionId} onChange={setExtensionId} monitoring />
+            )}
             <FormError message={update.error?.message} />
           </DialogBody>
           <DialogFooter>

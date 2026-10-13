@@ -1,7 +1,10 @@
 const express = require('express');
 const pool = require('../../db');
-const { requirePermission } = require('../middleware/auth');
-const { scopeCondition } = require('../services/access');
+const { requireAdminSide, requirePermission } = require('../middleware/auth');
+const { can, scopeCondition } = require('../services/access');
+const { MonitorError, MODES, monitoringExtension, startMonitor } = require('../services/monitor');
+const { findOtherActiveHolder } = require('../services/extensionGuard');
+const { buildWebrtcConfig } = require('../services/webrtc');
 const { onActiveCall, openStatus, takeOffline } = require('../services/agentLogout');
 const { revokeUserSessions } = require('../services/sessions');
 const { whereClause } = require('../services/paging');
@@ -73,6 +76,50 @@ router.post('/admin/live-agents/:id/logout', requirePermission('live', 'logout')
   if (open) await takeOffline(agent.id, open.extension_name);
   revokeUserSessions(agent.id);
   res.json({ id: agent.id, status: 'ok', was: open ? open.status : 'offline' });
+});
+
+// --- Call monitoring (listen / whisper / barge) - see services/monitor.js ---
+const canMonitor = (access) => MODES.some((m) => can(access, 'live', m));
+
+// The supervisor's monitoring line: how their browser connects (same as an
+// agent's line, but with the extension given to this admin login in Users).
+router.get('/admin/monitor/line', requireAdminSide, async (req, res) => {
+  if (!canMonitor(req.access)) return res.status(403).json({ error: "Your role doesn't allow call monitoring" });
+  const line = await monitoringExtension(req.session.user.id);
+  if (!line || !line.sip_password) {
+    return res
+      .status(409)
+      .json({ error: 'You have no monitoring line - ask a Super Admin to give you an extension (Users).' });
+  }
+  const holder = await findOtherActiveHolder(line.name, req.session.user.id);
+  if (holder) return res.status(409).json({ error: `Extension ${line.name} is in use by ${holder} right now.` });
+  res.json({
+    extension: line.name,
+    sipPassword: line.sip_password,
+    ...buildWebrtcConfig(process.env, req.hostname, { userId: req.session.user.id }),
+  });
+});
+
+router.post('/admin/live-agents/:id/monitor', requireAdminSide, async (req, res) => {
+  const mode = req.body && req.body.mode;
+  if (MODES.includes(mode) && !can(req.access, 'live', mode)) {
+    return res
+      .status(403)
+      .json({ error: `Your role doesn't allow: Live Agents - ${mode[0].toUpperCase()}${mode.slice(1)}` });
+  }
+  try {
+    const started = await startMonitor({
+      supervisorId: req.session.user.id,
+      agentId: Number(req.params.id),
+      mode,
+      scope: req.access.scope,
+    });
+    res.json({ status: 'ringing', ...started });
+  } catch (err) {
+    if (err instanceof MonitorError) return res.status(err.status).json({ error: err.message });
+    console.error('[monitor]', err);
+    res.status(500).json({ error: 'could not start monitoring: ' + err.message });
+  }
 });
 
 module.exports = router;

@@ -18,7 +18,8 @@ test('new user: checks username, password, role and extension', () => {
   assert.deepStrictEqual(
     parseNewUser({ username: ' ravi.k ', password: 'longenough', role: 'admin', extensionId: 3 }),
     {
-      user: { username: 'ravi.k', password: 'longenough', role: 'admin', extensionId: null, roleId: null },
+      // an admin may keep an extension: their monitoring line
+      user: { username: 'ravi.k', password: 'longenough', role: 'admin', extensionId: 3, roleId: null },
     },
   );
   assert.strictEqual(checkPassword('12345678'), null);
@@ -36,9 +37,9 @@ test('edit: changes role / extension / status, and says when sessions must end',
     changes: { role: 'agent', status: 'inactive', extension_id: 3, role_id: null },
     revoke: true,
   });
-  // Promoted to admin: no extension, sessions end (new rights apply on next login)
+  // Promoted to admin: keeps the extension (monitoring line), sessions end (new rights apply on next login)
   assert.deepStrictEqual(parseUserUpdate({ role: 'admin' }, agent, { meId: 1, activeAdmins: 1 }), {
-    changes: { role: 'admin', status: 'active', extension_id: null, role_id: null },
+    changes: { role: 'admin', status: 'active', extension_id: 3, role_id: null },
     revoke: true,
   });
   assert.match(parseUserUpdate({ role: 'agent' }, admin, { meId: 9, activeAdmins: 2 }).error, /extension/);
@@ -60,7 +61,7 @@ test('staff logins need a role; changing the role ends their sessions', () => {
   assert.match(parseNewUser({ username: 'tl.ravi', password: 'longenough', role: 'staff' }).error, /role/);
   assert.deepStrictEqual(
     parseNewUser({ username: 'tl.ravi', password: 'longenough', role: 'staff', roleId: '4', extensionId: 2 }).user,
-    { username: 'tl.ravi', password: 'longenough', role: 'staff', extensionId: null, roleId: 4 },
+    { username: 'tl.ravi', password: 'longenough', role: 'staff', extensionId: 2, roleId: 4 },
   );
   const tl = { id: 9, role: 'staff', status: 'active', extension_id: null, role_id: 4 };
   assert.deepStrictEqual(parseUserUpdate({ roleId: 5 }, tl, { meId: 1, activeAdmins: 1 }), {

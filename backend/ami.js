@@ -114,6 +114,27 @@ function queuePause(queue, interfaceName, paused) {
   return action('QueuePause', { Queue: queue, Interface: interfaceName, Paused: paused ? 'true' : 'false' });
 }
 
+/**
+ * Calls `channel` (e.g. a supervisor's PJSIP line) and, once answered,
+ * runs `context`/`exten` with the given channel variables. Async: returns
+ * once Asterisk accepted the request, not when the call is answered.
+ */
+function originate({ channel, context, exten, callerId, variables = {}, timeoutMs = 20000 }) {
+  const variable = Object.entries(variables)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(',');
+  return action('Originate', {
+    Channel: channel,
+    Context: context,
+    Exten: exten,
+    Priority: 1,
+    CallerID: callerId,
+    Timeout: timeoutMs,
+    Async: 'true',
+    ...(variable ? { Variable: variable } : {}),
+  });
+}
+
 function queueReload() {
   return action('QueueReload', { Members: 'yes', Rules: 'yes', Parameters: 'yes' });
 }
@@ -138,4 +159,4 @@ function on(eventName, handler) {
   events.on(eventName, handler);
 }
 
-module.exports = { connect, queueAdd, queueRemove, queuePause, queueReload, redirect, on };
+module.exports = { connect, queueAdd, queueRemove, queuePause, queueReload, originate, redirect, on };

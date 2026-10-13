@@ -51,6 +51,7 @@ Dialplan files (installed in `/etc/asterisk/`, `#include`d from `extensions.conf
 | `[queue-dispatch]` | server only | `Queue(${QUEUENAME})` — inbound calls after the app has picked the campaign |
 | `[dialer-answered]` | `backend/asterisk/extensions-dialer.conf` | Dialer call answered: optional AMD → `Queue()` with max wait → abandon prompt |
 | `[df-control]` | `backend/asterisk/extensions-control.conf` | Pulls both legs of a queue call back into Stasis (`adopt`) so a transfer/conference can start |
+| `[df-monitor]` | `backend/asterisk/extensions-monitor.conf` | Call monitoring: `ChanSpy` on the agent's line for the supervisor's monitoring line (`src/services/monitor.js`; options q/E/d + w or B; keys 4/5/6 switch listen/whisper/barge) |
 
 ## 3. Main call flows
 

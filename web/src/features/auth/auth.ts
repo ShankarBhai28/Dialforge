@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, get, post } from '@/lib/api';
 import { stopRealtime } from '@/lib/realtime';
+import { disconnectMonitorLine } from '@/features/monitor/monitorLine';
 
 /** admin = Super Admin; staff = admin login limited by a role (TL, supervisor, ...). */
 export type Role = 'admin' | 'staff' | 'agent';
@@ -59,6 +60,7 @@ export function useLogout() {
     mutationFn: () => post('/auth/logout'),
     onSettled: () => {
       stopRealtime();
+      disconnectMonitorLine();
       qc.setQueryData(meKey, null);
       // Drop every other cached screen's data so the next user starts clean.
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== meKey[0] });

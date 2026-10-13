@@ -1,7 +1,9 @@
 // Account rules shared by the user routes, kept pure so they're easy to test.
 //
 // Account types: admin (Super Admin), staff (admin login limited by a role,
-// role_id) and agent (agent screen; needs an extension).
+// role_id) and agent (agent screen; needs an extension). Admin-side logins
+// may have an extension too: their monitoring line (listen / whisper /
+// barge on Live Agents).
 const ROLES = ['admin', 'agent', 'staff'];
 const STATUSES = ['active', 'inactive'];
 const USERNAME_RE = /^[a-zA-Z0-9._-]{3,50}$/;
@@ -13,12 +15,12 @@ function checkPassword(password) {
   return null;
 }
 
-/** The role-dependent fields: agents need an extension, staff a role; nothing else keeps either. */
+/** The role-dependent fields: agents need an extension (others may have one), staff need a role. */
 function roleFields(role, extensionId, roleId) {
   if (role === 'agent' && !extensionId) return { error: 'agent accounts must be linked to an extension' };
   if (role === 'staff' && !roleId) return { error: 'pick the role for this admin login' };
   return {
-    extensionId: role === 'agent' ? extensionId : null,
+    extensionId: extensionId || null,
     roleId: role === 'staff' ? roleId : null,
   };
 }

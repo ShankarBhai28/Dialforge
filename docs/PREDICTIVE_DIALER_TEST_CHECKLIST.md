@@ -138,5 +138,16 @@ Same setup as above: two agents in **two different browsers** (or one normal + o
 - [ ] Agent Available → supervisor clicks **Force logout** on Live Agents → confirm → agent shows Offline, their screen goes to the login page; `live-agents.logout` in the Audit Log. During a call it's refused ("on a call right now").
 - [ ] On the server: `cd ~/dialforge-backend && npm run db:check` → all OK (shared extensions show as CHECK until fixed in Users).
 
+## Live Agents: filters, monitoring, force logout
+- [ ] Live Agents opens on **Logged in** agents only (offline ones hidden). Click a count (e.g. "Break: 1") → only those; click it again → back. "Show" → **All agents** shows everyone; the choice is remembered. Search by name or extension, filter by queue.
+- [ ] Give your admin login a **monitoring line**: Extensions → add e.g. 2001 → Users → Edit your admin → "Monitoring line (optional)" = 2001 → Save.
+- [ ] Live Agents → **Connect monitoring line** (allow the microphone) → "Monitoring line 2001 connected".
+- [ ] An agent makes a call → on their row **Listen** → you hear both sides; agent and customer hear nothing from you.
+- [ ] Press **Whisper** → only the agent hears you. **Barge** → both hear you. **Listen** again → silent. **Stop** → monitor ends, their call continues.
+- [ ] When the agent's call ends, the monitor ends by itself.
+- [ ] A role with only Live Agents → Listen sees only the Listen button; without any monitoring right there is no monitoring bar.
+- [ ] **Force logout** on a logged-in agent (not on a call) → confirm → they turn Offline.
+- [ ] Audit Log shows `live-agents.monitor` (with the mode) and `live-agents.logout`.
+
 ## After testing
 - [ ] Tell Claude what failed (step + what you saw) — fixes go in before the live trunk.

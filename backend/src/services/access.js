@@ -27,12 +27,15 @@ const ACTION_LABELS = {
   password: 'Reset password',
   export: 'Export CSV',
   logout: 'Force logout',
+  listen: 'Listen',
+  whisper: 'Whisper',
+  barge: 'Barge',
 };
 
 const CRUD = ['view', 'create', 'edit', 'delete'];
 const SCREENS = [
   { key: 'dashboard', label: 'Dashboard', actions: ['view'] },
-  { key: 'live', label: 'Live Agents', actions: ['view', 'logout'] },
+  { key: 'live', label: 'Live Agents', actions: ['view', 'logout', 'listen', 'whisper', 'barge'] },
   { key: 'dialer', label: 'Dialer', actions: ['view', 'control'] },
   { key: 'calls', label: 'Call Log', actions: ['view'] },
   { key: 'campaigns', label: 'Campaigns', actions: CRUD },
