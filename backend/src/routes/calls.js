@@ -153,8 +153,19 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
     activeCalls.set(callId, { agentChannelId: agentChannel.id, destChannelId: null, bridgeId: null });
     res.status(202).json({ callId, status: 'ringing_agent' });
   } catch (err) {
+    // Nothing rang: close the call (it would otherwise look live forever)
+    // and give the lead its attempt back.
     await logEvent(callId, 'error', { message: err.message });
-    res.status(502).json({ error: err.message });
+    await pool.query("UPDATE calls SET end_time = NOW(), disposition = 'agent_unanswered' WHERE id = ?", [callId]);
+    if (leadId) await pool.query('UPDATE leads SET attempts = GREATEST(attempts - 1, 0) WHERE id = ?', [leadId]);
+    // "Allocation failed" = Asterisk couldn't reach the agent's line (browser
+    // not registered right now, e.g. reconnecting).
+    const lineDown = /allocation failed/i.test(err.message);
+    res.status(502).json({
+      error: lineDown
+        ? "Your phone line isn't connected right now - wait a few seconds for it to reconnect (or refresh the page), then call again."
+        : `Could not start the call: ${err.message}`,
+    });
   }
 });
 
