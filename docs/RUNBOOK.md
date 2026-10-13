@@ -1418,3 +1418,9 @@ Reported by the user after trying the agent panel:
 - **Call log** (`GET /calls` for agents): their calls by `agent_user_id` or extension, with the lead name, the outcome they gave (label), and `has_recording` (the file path is no longer sent to the browser). Shows the outcome instead of "ended" ("Answered - no outcome", "Busy", "Dropped"... when none); tabs All / Answered / No Answer; Play button; clicking a customer opens them (`GET /agent/leads/:id`) with details, form and history.
 - **Form not empty any more**: the lead's history carries the last answers per form (`formData`); the agent's form opens filled with them (over the uploaded lead data), with "Filled with the answers saved by X on ...". Saving a form refreshes the history.
 - Tests: 129 backend, 181 web.
+
+## Agent call log redesign (2026-10-13)
+- `web/src/features/agent/CallLog.tsx`: summary (calls · answered · talk), search (name or number), **period** (Today / Yesterday / Last 7 days / Last 30 days, `GET /calls?period=`, the center's days) and **Show** filter with counts (All, Answered, Not answered, **Needs outcome**, Callbacks set, Inbound, Outbound, Recorded); both remembered per browser. Calls grouped by day; each: direction / missed icon, name or number, time, talk time, a coloured chip (outcome; callback amber; "Needs outcome"; No answer / Busy / Dropped...), actions Give outcome / Play / Call.
+- **Needs outcome**: answered calls with no outcome are flagged (banner + filter); "Give outcome" opens the outcome dialog for that call (`giveOutcomeLater`, can be cancelled, no auto-Available).
+- Dialpad: number + Call on one line, keypad folds away (remembered) to give the log room.
+- Backend `GET /calls` (agents): `?period`, `talk_seconds`, `is_callback`, up to 300 calls.

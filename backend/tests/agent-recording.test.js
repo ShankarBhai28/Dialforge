@@ -97,7 +97,23 @@ test('agent call log: own calls by agent or extension, outcome label, recording 
     ],
   );
   assert.ok(rows.every((x) => !('recording_path' in x)));
+  assert.deepStrictEqual(
+    rows.map((x) => x.is_callback),
+    [false, false],
+  );
   const [q, params] = sql.find(([s]) => s.startsWith('SELECT ca.id, ca.lead_id'));
-  assert.match(q, /WHERE ca\.agent_user_id = \? OR ca\.from_extension = \?/);
-  assert.deepStrictEqual(params, [5, '1003']);
+  assert.match(q, /WHERE \(ca\.agent_user_id = \? OR ca\.from_extension = \?\) AND ca\.start_time >= \?/);
+  assert.deepStrictEqual(params.slice(0, 2), [5, '1003']);
+});
+
+test('agent call log period: today = one local day; default 7 days', async () => {
+  const { parseRange, localToday } = require('../src/services/reports/time');
+  sql.length = 0;
+  await get('/calls?period=today');
+  const today = parseRange({ from: localToday() });
+  assert.deepStrictEqual(sql.find(([s]) => s.startsWith('SELECT ca.id'))[1].slice(2), [today.start, today.end]);
+  sql.length = 0;
+  await get('/calls');
+  const [, p] = sql.find(([s]) => s.startsWith('SELECT ca.id'));
+  assert.strictEqual((Date.parse(p[3]) - Date.parse(p[2])) / 86400000, 7);
 });

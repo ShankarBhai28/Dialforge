@@ -208,6 +208,11 @@ export function OutcomeDialog() {
             </div>
           )}
           <FormError message={save.error?.message} />
+          {target?.late && (
+            <Button variant="ghost" className="w-full" onClick={() => controller.cancelLateOutcome()}>
+              Cancel
+            </Button>
+          )}
         </DialogBody>
       </DialogContent>
     </Dialog>

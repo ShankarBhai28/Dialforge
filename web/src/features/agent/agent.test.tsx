@@ -54,7 +54,7 @@ function backend(extra: FakeApi = {}): FakeApi {
     'GET /agent/callbacks': { body: [] },
     'GET /agent/dispositions': { body: DISPOSITIONS },
     'GET /agent/form': { body: FORM },
-    'GET /calls': { body: [] },
+    'GET /calls?period=today': { body: [] },
     'GET /agent/preview': { body: { enabled: false } },
     'GET /agent/call/control': { body: { controlled: false } },
     ...extra,
@@ -221,7 +221,7 @@ describe('agent screen', () => {
   it('call log: outcome instead of "ended", plays the recording, opens the customer with the last form answers', async () => {
     await connect(
       backend({
-        'GET /calls': {
+        'GET /calls?period=today': {
           body: [
             {
               id: 61,
@@ -248,6 +248,19 @@ describe('agent screen', () => {
               end_time: '2026-10-13T09:00:30Z',
               disposition: 'busy',
               has_recording: false,
+            },
+            {
+              id: 59,
+              lead_id: null,
+              direction: 'inbound',
+              to_number: '9000000002',
+              start_time: '2026-10-13T08:00:00Z',
+              answer_time: '2026-10-13T08:00:05Z',
+              agent_connect_time: '2026-10-13T08:00:05Z',
+              end_time: '2026-10-13T08:01:00Z',
+              disposition: 'ended',
+              outcome: null,
+              talk_seconds: 55,
             },
           ],
         },
@@ -285,12 +298,24 @@ describe('agent screen', () => {
     expect(within(log).queryByRole('button', { name: 'Play recording of 9000000001' })).not.toBeInTheDocument();
 
     // Clicking the customer opens them, the form filled with the last saved answers.
-    await userEvent.click(within(log).getByRole('button', { name: 'Ravi · 9840012345' }));
+    expect(within(log).getByText('talked 55s')).toBeInTheDocument();
+    // An answered call without an outcome: flagged, and the outcome can be given now.
+    expect(within(log).getByText('Needs outcome')).toBeInTheDocument();
+    await userEvent.click(within(log).getByRole('button', { name: 'Give outcome for 9000000002' }));
+    const late = await screen.findByRole('dialog', { name: /call outcome/i });
+    await userEvent.click(within(late).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: /call outcome/i })).not.toBeInTheDocument();
+
+    await userEvent.click(within(log).getByRole('button', { name: 'Open Ravi' }));
     expect(await screen.findByLabelText('Amount *')).toHaveValue(4500);
     expect(screen.getByLabelText('Plan')).toHaveValue('Gold');
     expect(screen.getByText(/Filled with the answers saved by agent04/)).toBeInTheDocument();
-    await userEvent.click(within(log).getByRole('tab', { name: 'No Answer' }));
+    await userEvent.selectOptions(within(log).getByLabelText('Show'), 'Not answered (1)');
     expect(within(log).queryByText('Interested')).not.toBeInTheDocument();
     expect(within(log).getByText('Busy')).toBeInTheDocument();
+    await userEvent.selectOptions(within(log).getByLabelText('Show'), 'All calls (3)');
+    await userEvent.type(within(log).getByLabelText('Search calls'), 'ravi');
+    expect(within(log).getByText('Interested')).toBeInTheDocument();
+    expect(within(log).queryByText('Busy')).not.toBeInTheDocument();
   });
 });

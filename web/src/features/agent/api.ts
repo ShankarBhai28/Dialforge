@@ -74,7 +74,11 @@ export type CallRow = {
   /** The outcome the agent gave (code + label). */
   outcome?: string | null;
   outcome_label?: string | null;
+  /** The outcome schedules a callback. */
+  is_callback?: boolean;
   has_recording?: boolean;
+  /** Seconds the agent talked with the customer. */
+  talk_seconds?: number | null;
 };
 
 export type PreviewLead = Lead & {
@@ -163,7 +167,12 @@ export const useAgentDispositions = () =>
   useQuery({ queryKey: agentKeys.dispositions, queryFn: () => get<Disposition[]>('/agent/dispositions') });
 export const useAgentForm = () =>
   useQuery({ queryKey: agentKeys.form, queryFn: () => get<AgentForm | null>('/agent/form') });
-export const useAgentCalls = () => useQuery({ queryKey: agentKeys.calls, queryFn: () => get<CallRow[]>('/calls') });
+export type CallPeriod = 'today' | 'yesterday' | '7d' | '30d';
+export const useAgentCalls = (period: CallPeriod = '7d') =>
+  useQuery({
+    queryKey: [...agentKeys.calls, period],
+    queryFn: () => get<CallRow[]>(`/calls?period=${period}`),
+  });
 /** Consult / conference state - polled only while a call is live. */
 export const useCallControl = (live: boolean) =>
   useQuery({

@@ -30,7 +30,14 @@ export type CallInfo = {
 };
 
 /** The call whose outcome the agent gives: on its lead, or on the call when there's no lead yet. */
-export type OutcomeTarget = { leadId: number | null; callId: number | null; name: string | null; phone: string };
+export type OutcomeTarget = {
+  leadId: number | null;
+  callId: number | null;
+  name: string | null;
+  phone: string;
+  /** Given later from the call log (not right after the call): can be cancelled, no auto-Available. */
+  late?: boolean;
+};
 
 export type Workspace = {
   /** Lead whose details + form are open (null = form without a lead). */
@@ -405,6 +412,15 @@ export class AgentController {
     if (ws.lead?.id === lead.id) return;
     this.openWorkspace(lead, ws.lead ? ws.callId : null, describe(lead, lead.phone));
   }
+  /** The call log's "Give outcome" for an answered call that has none. */
+  giveOutcomeLater(target: Omit<OutcomeTarget, 'late'>) {
+    if (this.state.call || this.state.outcomeFor) return this.say('Finish the current call first.', true);
+    this.set({ outcomeFor: { ...target, late: true } });
+  }
+  cancelLateOutcome() {
+    if (this.state.outcomeFor?.late) this.set({ outcomeFor: null });
+  }
+
   /** Opens a lead by id (e.g. from the call log). */
   async openLeadById(leadId: number) {
     if (this.state.workspace.lead?.id === leadId) return;
@@ -498,8 +514,8 @@ export class AgentController {
       await post(`/leads/${target.leadId}/disposition`, target.callId ? { ...body, callId: target.callId } : body);
     else await post(`/agent/calls/${target.callId}/disposition`, body);
     this.set({ outcomeFor: null });
-    this.refresh('leads', 'callbacks', 'history');
-    await this.scheduleAutoAvailable();
+    this.refresh('leads', 'callbacks', 'history', 'calls'); // the call log shows the outcome
+    if (!target.late) await this.scheduleAutoAvailable();
   }
 
   /** Auto-dial campaigns need agents back promptly: Available again after wrap-up. */
