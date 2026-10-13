@@ -1373,6 +1373,6 @@ Reported by the user after trying the agent panel:
 
 ## Fix: call monitoring said "Permission denied" (2026-10-13)
 - **Reported by the user:** Listen on an agent's live call -> "could not start monitoring: Permission denied".
-- **Cause:** that text came from Asterisk. Starting the monitoring call uses AMI , which needs the **** write right; the app's AMI login  in  only had . Missed when monitoring was built: only the refusals (not on a call, no line) could be tested without a live call.
-- **Fix on dev:** backup ; ; ; the app's AMI session kicked () so it reconnected with the new right (0 calls were active). Verified: an Originate to a non-existent context now gets "Extension does not exist" instead of "Permission denied" (nothing rang).
-- **Code:** a refused Originate is now explained ("the AMI login lacks the 'originate' right") instead of a bare "Permission denied";  §11 includes  for new installs.
+- **Cause:** that text came from Asterisk. Starting the monitoring call uses AMI `Originate`, which needs the **`originate`** write right; the app's AMI login `[dialforge]` in `manager.conf` only had `system,call,agent,user,config`. Missed when monitoring was built: only the refusals (not on a call, no line) could be tested without a live call.
+- **Fix on dev:** backup `~/backups/pre-ami-originate-20261013-065304/manager.conf`; `write = system,call,agent,user,config,originate`; `manager reload`; the app's AMI session kicked (`manager kick session <fd>`) so it reconnected with the new right (0 calls were active). Verified: an Originate to a non-existent context now gets "Extension does not exist" instead of "Permission denied" (nothing rang).
+- **Code:** a refused Originate is now explained ("the AMI login lacks the 'originate' right") instead of a bare "Permission denied"; `docs/DEPLOY.md` §11 includes `originate` for new installs.
