@@ -76,10 +76,12 @@ const TABLES = {
   leads: 'leads',
   callbacks: 'callbacks',
   'live-agents': 'users',
+  extensions: 'extensions',
 };
 // Row snapshots: never secrets (redact() also hides them, this keeps them out of memory).
 const COLUMNS = {
   users: 'id, username, role, role_id, status, extension_id',
+  extensions: 'id, name, label, enabled, created_at',
 };
 
 function parseAdminPath(path) {

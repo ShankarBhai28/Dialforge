@@ -1,5 +1,3 @@
-const QUEUES_CONF_PATH = process.env.QUEUES_CONF_PATH || '/etc/asterisk/queues.conf';
-
 const APP_NAME = 'dialforge-app';
 
 // Live SIP trunk to nxtra (Tata Communications PSTN), set up in Phase 2.
@@ -11,4 +9,4 @@ const TRUNK_ENDPOINT = process.env.TRUNK_ENDPOINT || 'dialforge-nxtra1';
 
 const TRUNK_CALLER_ID = process.env.TRUNK_CALLER_ID || '8065098690'; // DID authorized on the trunk account for outbound CLI
 
-module.exports = { APP_NAME, QUEUES_CONF_PATH, TRUNK_CALLER_ID, TRUNK_ENDPOINT };
+module.exports = { APP_NAME, TRUNK_CALLER_ID, TRUNK_ENDPOINT };

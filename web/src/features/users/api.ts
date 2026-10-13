@@ -28,7 +28,19 @@ export const accountLabel = (u: Pick<User, 'role' | 'role_name'>) =>
   u.role === 'admin' ? 'Super Admin' : u.role === 'staff' ? (u.role_name ?? 'Admin') : 'Agent';
 
 // GET /admin/extensions (the server deliberately leaves out sip_password).
-export type Extension = { id: number; name: string; label: string | null };
+export type Extension = {
+  id: number;
+  name: string;
+  label: string | null;
+  /** Disabled = Asterisk doesn't know it any more (can't register). */
+  enabled: boolean;
+  has_password: boolean;
+  /** Users who have it as their extension, e.g. "agent02, agent1002". */
+  used_by: string | null;
+  /** A browser or phone is connected right now; null = Asterisk didn't answer. */
+  registered: boolean | null;
+  created_at: string;
+};
 
 export type NewUser = {
   username: string;

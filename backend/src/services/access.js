@@ -42,6 +42,7 @@ const SCREENS = [
   { key: 'dnc', label: 'DNC List', actions: ['view', 'create', 'delete'] },
   { key: 'queues', label: 'Queues', actions: CRUD },
   { key: 'numbers', label: 'DID Numbers', actions: CRUD },
+  { key: 'extensions', label: 'Extensions', actions: CRUD },
   { key: 'users', label: 'Users', actions: ['view', 'create', 'edit', 'password'] },
   { key: 'teams', label: 'Teams', actions: CRUD },
   { key: 'reports', label: 'Reports', actions: ['view', 'export'] },

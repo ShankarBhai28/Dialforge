@@ -58,11 +58,15 @@ function ExtensionSelect({ id, value, onChange }: { id: string; value: string; o
         required
       >
         {extensions.isPending && <option value="">Loading…</option>}
-        {extensions.data?.map((x) => (
-          <option key={x.id} value={x.id}>
-            {x.label ? `${x.name} (${x.label})` : x.name}
-          </option>
-        ))}
+        {/* Disabled extensions can't register, so they aren't offered (unless already chosen). */}
+        {extensions.data
+          ?.filter((x) => x.enabled || String(x.id) === value)
+          .map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.label ? `${x.name} (${x.label})` : x.name}
+              {!x.enabled && ' - disabled'}
+            </option>
+          ))}
       </Select>
     </Field>
   );
@@ -136,7 +140,8 @@ function useChosenRole(chosen: string) {
 /** First extension pre-selected once the list loads. */
 function useDefaultExtension(chosen: string) {
   const extensions = useExtensions();
-  return chosen || (extensions.data?.[0] ? String(extensions.data[0].id) : '');
+  const first = extensions.data?.find((x) => x.enabled);
+  return chosen || (first ? String(first.id) : '');
 }
 
 function CreateUserDialog({ onOpenChange }: { onOpenChange: (v: boolean) => void }) {

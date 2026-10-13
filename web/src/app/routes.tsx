@@ -39,6 +39,7 @@ const SCREENS: Record<string, RouteObject['element']> = {
   '/admin/dnc': page(() => import('@/features/dnc/DncPage'), 'DncPage'),
   '/admin/queues': page(() => import('@/features/queues/QueuesPage'), 'QueuesPage'),
   '/admin/numbers': page(() => import('@/features/numbers/NumbersPage'), 'NumbersPage'),
+  '/admin/extensions': page(() => import('@/features/extensions/ExtensionsPage'), 'ExtensionsPage'),
   '/admin/users': page(() => import('@/features/users/UsersPage'), 'UsersPage'),
   '/admin/teams': page(() => import('@/features/teams/TeamsPage'), 'TeamsPage'),
   '/admin/roles': page(() => import('@/features/roles/RolesPage'), 'RolesPage'),

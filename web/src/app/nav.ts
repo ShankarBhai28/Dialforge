@@ -16,6 +16,7 @@ import {
   UsersRound,
   CalendarClock,
   Hash,
+  Headset,
   History,
   ShieldCheck,
   type LucideIcon,
@@ -61,6 +62,7 @@ export const ADMIN_NAV: NavEntry[] = [
     items: [
       { to: '/admin/queues', label: 'Queues', icon: PhoneCall, screen: 'queues' },
       { to: '/admin/numbers', label: 'DID Numbers', icon: Hash, screen: 'numbers' },
+      { to: '/admin/extensions', label: 'Extensions', icon: Headset, screen: 'extensions' },
     ],
   },
   {

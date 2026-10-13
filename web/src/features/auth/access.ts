@@ -18,6 +18,7 @@ export type Screen =
   | 'dnc'
   | 'queues'
   | 'numbers'
+  | 'extensions'
   | 'users'
   | 'teams'
   | 'reports'

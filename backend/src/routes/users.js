@@ -136,11 +136,4 @@ router.post(
   },
 );
 
-router.get('/admin/extensions', requireAdminSide, async (req, res) => {
-  // Never sip_password: only the agent's own /agent/extension-credentials
-  // hands that out, to the browser that registers the line.
-  const [rows] = await pool.query('SELECT id, name, label, created_at FROM extensions ORDER BY id');
-  res.json(rows);
-});
-
 module.exports = router;

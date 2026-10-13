@@ -1,14 +1,24 @@
 const express = require('express');
-const fs = require('fs');
 const pool = require('../../db');
 const ami = require('../../ami');
-const { QUEUES_CONF_PATH } = require('../config');
 const { requirePermission, requireAdminSide } = require('../middleware/auth');
-const { QUEUE_DEFAULTS, parseQueueSettings, queueStanzaRegex, slugify } = require('../services/queueConfig');
+const { QUEUE_DEFAULTS, parseQueueSettings, slugify } = require('../services/queueConfig');
 
 const router = express.Router();
 
 // --- Admin: standalone queue management (reusable across campaigns) ---
+// Queues live only in the database: Asterisk reads them through the
+// ast_queues view (migration 0002, docs/plans/ASTERISK_REALTIME_PLAN.md),
+// so nothing here touches Asterisk's files.
+
+/** Asks Asterisk to re-read a queue's settings now (it also does on next use). Never fails the request. */
+async function refreshInAsterisk() {
+  try {
+    await ami.queueReload();
+  } catch (err) {
+    console.error('[queue reload]', err.message);
+  }
+}
 router.get('/admin/queues', requireAdminSide, async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM queues ORDER BY id DESC');
   res.json(rows);
@@ -34,18 +44,7 @@ router.post('/admin/queues', requirePermission('queues', 'create'), async (req, 
     [name, asteriskName, ringStrategy, waitTimeout, announce, retry, timeoutRestart],
   );
 
-  // Make it real in Asterisk, not just a database row - this is what
-  // makes "queue show" list it and lets agents actually join it.
-  const announceFrequency = announce === 'yes' ? 30 : 0;
-  const stanza = `\n[${asteriskName}]\nstrategy = ${ringStrategy}\ntimeout = ${waitTimeout}\nretry = ${retry}\ntimeoutrestart = ${timeoutRestart}\nannounce-frequency = ${announceFrequency}\nringinuse = no\n`;
-  try {
-    fs.appendFileSync(QUEUES_CONF_PATH, stanza);
-    await ami.queueReload();
-  } catch (err) {
-    console.error('[Queue config write/reload failed]', err.message);
-    return res.status(500).json({ error: 'queue saved but Asterisk could not be updated: ' + err.message });
-  }
-
+  // Asterisk finds the new queue in the database the first time it's used.
   res.status(201).json({ id: result.insertId, name, asteriskName });
 });
 
@@ -54,9 +53,8 @@ router.put('/admin/queues/:id', requirePermission('queues', 'edit'), async (req,
   const queue = rows[0];
   if (!queue) return res.status(404).json({ error: 'queue not found' });
 
-  // Name/asterisk_name is intentionally not editable here - renaming
-  // would require touching every campaign and queues.conf stanza header
-  // that already points at it, not worth it for a ring-behavior change.
+  // Name/asterisk_name is intentionally not editable here - agents' live
+  // queue membership and every campaign point at it.
   // Fields left out keep their current value.
   const { error, settings: updated } = parseQueueSettings(req.body, {
     ringStrategy: queue.ring_strategy,
@@ -72,21 +70,7 @@ router.put('/admin/queues/:id', requirePermission('queues', 'edit'), async (req,
     [updated.ringStrategy, updated.waitTimeout, updated.announce, updated.retry, updated.timeoutRestart, req.params.id],
   );
 
-  const announceFrequency = updated.announce === 'yes' ? 30 : 0;
-  const newStanza = `[${queue.asterisk_name}]\nstrategy = ${updated.ringStrategy}\ntimeout = ${updated.waitTimeout}\nretry = ${updated.retry}\ntimeoutrestart = ${updated.timeoutRestart}\nannounce-frequency = ${announceFrequency}\nringinuse = no\n`;
-  try {
-    const content = fs.readFileSync(QUEUES_CONF_PATH, 'utf-8');
-    const re = queueStanzaRegex(queue.asterisk_name);
-    const match = content.match(re);
-    if (!match) throw new Error(`stanza [${queue.asterisk_name}] not found in queues.conf`);
-    const leadingNewline = match[0].startsWith('\n') ? '\n' : '';
-    fs.writeFileSync(QUEUES_CONF_PATH, content.replace(re, leadingNewline + newStanza));
-    await ami.queueReload();
-  } catch (err) {
-    console.error('[Queue config update failed]', err.message);
-    return res.status(500).json({ error: 'queue saved but Asterisk could not be updated: ' + err.message });
-  }
-
+  await refreshInAsterisk();
   res.json({ id: Number(req.params.id), ...updated });
 });
 
@@ -117,19 +101,7 @@ router.delete('/admin/queues/:id', requirePermission('queues', 'delete'), async 
   }
 
   await pool.query('DELETE FROM queues WHERE id = ?', [req.params.id]);
-
-  try {
-    const content = fs.readFileSync(QUEUES_CONF_PATH, 'utf-8');
-    const re = queueStanzaRegex(queue.asterisk_name);
-    fs.writeFileSync(QUEUES_CONF_PATH, content.replace(re, ''));
-    await ami.queueReload();
-  } catch (err) {
-    console.error('[Queue config removal failed]', err.message);
-    return res
-      .status(500)
-      .json({ error: 'queue deleted from DB but Asterisk config could not be updated: ' + err.message });
-  }
-
+  await refreshInAsterisk();
   res.json({ status: 'ok' });
 });
 

@@ -41,6 +41,8 @@ DialForge uses **two ways to talk to Asterisk**, and knowing which one is in cha
 - **ARI (Stasis)** — our code *owns* the channel: it answers, bridges, plays audio and hangs up. Used for click-to-call, the dialer's outbound legs, and transfer/conference.
 - **Native `Queue()` + AMI events** — Asterisk owns the channel while it waits in a queue and rings agents (ring strategy, `ringinuse=no`, hold music). Stasis sees nothing during that time, so `server.js` listens to **AMI** events (`AgentConnect`, `AgentComplete`, `QueueCallerAbandon`, `UserEvent`) to keep the `calls` table and agent status correct.
 
+**Where Asterisk gets its settings.** Agent extensions and queues come from **MySQL** (Asterisk realtime over ODBC, since 2026-10-13): the views `ps_endpoints`, `ps_auths`, `ps_aors` (built from our `extensions` table) and `ast_queues` (from `queues`), migration `0002`. Asterisk logs in as `asterisk_rt`, which may read only those 4 views. So adding / disabling an extension (Extensions screen) or a queue (Queues screen) needs no Asterisk file change. Only the transports and the trunk stay in `pjsip.conf`; `queues.conf` keeps just `[general]`. Details: `docs/plans/ASTERISK_REALTIME_PLAN.md`, setup steps: `docs/DEPLOY.md` §11b.
+
 Dialplan files (installed in `/etc/asterisk/`, `#include`d from `extensions.conf`):
 
 | Context | File | What it does |

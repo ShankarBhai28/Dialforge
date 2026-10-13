@@ -6,22 +6,8 @@ function slugify(name) {
     .replace(/^_+|_+$/g, '');
 }
 
-// ringinuse = no: never ring a member who is already on a call - essential
-// once the dialer feeds the queue (an agent mid-call must not get a second
-// customer). Optional in the regex so stanzas written before D7 still match.
-// Ring-behavior fields live in a 6-line stanza in queues.conf, written
-// without any brackets in the body - this regex relies on that to find
-// exactly one stanza and nothing past the next queue's `[name]` line.
-// Safe to build directly from asterisk_name since slugify() only ever
-// produces [a-z0-9_], never a regex metacharacter.
-function queueStanzaRegex(asteriskName) {
-  return new RegExp(
-    `\\n?\\[${asteriskName}\\]\\nstrategy = [^\\n]*\\ntimeout = [^\\n]*\\nretry = [^\\n]*\\ntimeoutrestart = [^\\n]*\\nannounce-frequency = [^\\n]*\\n(?:ringinuse = [^\\n]*\\n)?`,
-  );
-}
-
-// Asterisk's queue strategies. Anything else would be written verbatim
-// into queues.conf, so values are checked, never passed through.
+// Asterisk's queue strategies. Asterisk reads these values straight from
+// the database (ast_queues view), so only known values are stored.
 const RING_STRATEGIES = [
   'ringall',
   'leastrecent',
@@ -60,4 +46,4 @@ function parseQueueSettings(body, fallback) {
 
 const QUEUE_DEFAULTS = { ringStrategy: 'ringall', waitTimeout: 30, retry: 1, announce: 'no', timeoutRestart: 'yes' };
 
-module.exports = { queueStanzaRegex, slugify, parseQueueSettings, QUEUE_DEFAULTS, RING_STRATEGIES };
+module.exports = { slugify, parseQueueSettings, QUEUE_DEFAULTS, RING_STRATEGIES };

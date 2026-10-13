@@ -37,8 +37,8 @@ const USERS = {
 };
 const EXTENSIONS = {
   body: [
-    { id: 2, name: '1002', label: 'Desk 2', sip_password: 'secret-1' },
-    { id: 3, name: '1003', label: null, sip_password: 'secret-2' },
+    { id: 2, name: '1002', label: 'Desk 2', enabled: true, sip_password: 'secret-1' },
+    { id: 3, name: '1003', label: null, enabled: true, sip_password: 'secret-2' },
   ],
 };
 

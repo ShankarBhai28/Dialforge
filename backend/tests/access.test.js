@@ -43,7 +43,7 @@ fake('db.js', {
 });
 
 const { createApp } = require('../src/app');
-const { parseRole, scopeCondition, campaignInScope } = require('../src/services/access');
+const { SCREENS, parseRole, scopeCondition, campaignInScope } = require('../src/services/access');
 const { staffView } = require('../src/realtime/hub');
 
 const USERS = {
@@ -89,7 +89,7 @@ test('role rules: ticked actions per screen; any action brings View; unknown one
   assert.deepStrictEqual(role.permissions.dialer, ['view', 'control']); // control brings view
   assert.deepStrictEqual(role.permissions.leads, ['view', 'edit', 'import']);
   assert.deepStrictEqual(role.permissions.users, []);
-  assert.strictEqual(Object.keys(role.permissions).length, 15);
+  assert.strictEqual(Object.keys(role.permissions).length, SCREENS.length);
   assert.match(parseRole({ name: 'X', permissions: { roles: ['view'] } }).error, /unknown screen/);
   assert.match(parseRole({ name: 'X', permissions: { live: ['delete'] } }).error, /no "delete" action/);
   assert.match(parseRole({ name: 'X', permissions: { live: 'view' } }).error, /list of actions/);

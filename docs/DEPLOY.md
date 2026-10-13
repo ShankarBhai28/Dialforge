@@ -512,6 +512,61 @@ first time an admin creates a queue through the UI.
 
 ---
 
+## 11b. Asterisk reads extensions and queues from MySQL (realtime)
+
+Since 2026-10-13 agent extensions and queues are **not** written into
+`pjsip.conf` / `queues.conf`: Asterisk reads them from views in the app's
+database (migration `0002`, applied by `npm run db:migrate`). Set this up
+once per server, after `db:migrate` (section 9):
+
+1. MySQL driver for ODBC: `sudo apt-get install -y odbc-mariadb` (registers the `MariaDB Unicode` driver).
+2. A MySQL login for Asterisk that can only read the 4 views (pick a strong password, letters + digits):
+   ```sql
+   CREATE USER 'asterisk_rt'@'localhost' IDENTIFIED BY '<password>';
+   GRANT SELECT ON dialforge_dev.ps_endpoints TO 'asterisk_rt'@'localhost';
+   GRANT SELECT ON dialforge_dev.ps_auths     TO 'asterisk_rt'@'localhost';
+   GRANT SELECT ON dialforge_dev.ps_aors      TO 'asterisk_rt'@'localhost';
+   GRANT SELECT ON dialforge_dev.ast_queues   TO 'asterisk_rt'@'localhost';
+   ```
+3. `/etc/odbc.ini`:
+   ```
+   [dialforge-asterisk]
+   Driver   = MariaDB Unicode
+   SOCKET   = /var/run/mysqld/mysqld.sock
+   DATABASE = dialforge_dev
+   ```
+   (For Asterisk on its own server: `SERVER = <db host>` and `PORT = 3306` instead of SOCKET, and the MySQL user `'asterisk_rt'@'<asterisk ip>'`.)
+4. `/etc/asterisk/res_odbc.conf` (then `chown root:asterisk`, `chmod 640`):
+   ```
+   [dialforge]
+   enabled => yes
+   dsn => dialforge-asterisk
+   username => asterisk_rt
+   password => <password>
+   pre-connect => yes
+   max_connections => 5
+   ```
+5. `/etc/asterisk/extconfig.conf`, under `[settings]`:
+   ```
+   ps_endpoints => odbc,dialforge
+   ps_auths => odbc,dialforge
+   ps_aors => odbc,dialforge
+   queues => odbc,dialforge,ast_queues
+   ```
+6. `/etc/asterisk/sorcery.conf` - the file first (transports, trunk), then MySQL:
+   ```
+   [res_pjsip]
+   endpoint=config,pjsip.conf,criteria=type=endpoint
+   endpoint=realtime,ps_endpoints
+   auth=config,pjsip.conf,criteria=type=auth
+   auth=realtime,ps_auths
+   aor=config,pjsip.conf,criteria=type=aor
+   aor=realtime,ps_aors
+   ```
+7. `pjsip.conf` keeps only the transports and the trunk; `queues.conf` only `[general]` (`persistentmembers = yes`). Restart Asterisk.
+
+Check: `odbc show dialforge` (connected), `realtime load ps_endpoints id <ext>`, `pjsip show endpoints`, `queue show <queue>`. Extensions are then added on the **Extensions** screen.
+
 ## 12. Node backend's own cert copy + renewal hook
 
 The Node app can't read Let's Encrypt's root-only cert storage either:

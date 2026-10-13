@@ -114,6 +114,16 @@ async function isEndpointOnline(techResource) {
   }
 }
 
+/** { name: 'online' | 'offline' } for every PJSIP endpoint, or null when ARI couldn't be asked. */
+async function endpointStates(tech = 'PJSIP') {
+  try {
+    const list = await ariRequest('GET', `/endpoints/${tech}`);
+    return Object.fromEntries(list.map((e) => [e.resource, e.state === 'online' ? 'online' : 'offline']));
+  } catch (err) {
+    return null;
+  }
+}
+
 // 'online' | 'offline', or null when ARI couldn't be asked - callers that
 // act on "offline" (e.g. the stale-agent cleanup) must not treat an ARI
 // hiccup as everyone being offline.
@@ -166,6 +176,7 @@ module.exports = {
   destroyBridge,
   isEndpointOnline,
   endpointState,
+  endpointStates,
   setChannelVar,
   continueInDialplan,
   connectEvents,

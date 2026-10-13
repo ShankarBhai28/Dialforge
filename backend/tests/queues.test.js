@@ -1,5 +1,5 @@
-// Queue settings are written into Asterisk's queues.conf, so only known
-// values may get through (a newline in a value would inject config).
+// Queue settings are read by Asterisk from the database (ast_queues view),
+// so only known values may be stored.
 const assert = require('node:assert');
 const { test } = require('node:test');
 const { parseQueueSettings, QUEUE_DEFAULTS } = require('../src/services/queueConfig');

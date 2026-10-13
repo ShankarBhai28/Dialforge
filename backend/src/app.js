@@ -26,6 +26,7 @@ const ROUTERS = [
   'leads',
   'calls',
   'users',
+  'extensions',
   'roles',
   'audit',
   'dashboard',

@@ -1,6 +1,6 @@
 # Plan — Asterisk reads extensions and queues from MySQL (step 2)
 
-Status: **proposed, waiting for go-ahead** (2026-10-13). Nothing on the server has been changed for this yet.
+Status: **done on dev, 2026-10-13** (see the RUNBOOK entry of that date for exactly what was changed).
 
 ## Why
 Today two things are set by hand on the Asterisk server:
