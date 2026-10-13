@@ -1450,3 +1450,6 @@ Reported by the user after trying the agent panel:
 - **Check file**: the same run without saving (`dryRun=1`) - shows what would be imported.
 - Result: counts (imported / repeated in file / already exist / DNC / invalid) and **Download skipped rows (.xlsx)** - every row not imported with its row number, type, reason ("Duplicate: same number as row 12 in this file", "Already in campaign Sales - list Oct (lead #345)") and the file's own columns, plus a Summary sheet. Report kept 1 hour, only for the uploader (`GET /admin/leads/import-report/:id`).
 - Code: `backend/src/services/leadDedupe.js` (findExisting looks up only the file's numbers, in chunks).
+
+## Dev: trunk channel cap 30 (2026-10-14)
+- `DIALER_MAX_TRUNK_CHANNELS=30` added to dev `.env` (backup `~/backups/pre-trunk30-20261013-185350/.env`), only `dialforge-dialer` restarted (no calls, campaign stopped); dialer.log: "trunk cap 30". Campaign Predictive_Test still has Max channels 10, so it dials at most 10 at once.
