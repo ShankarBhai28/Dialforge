@@ -3,7 +3,7 @@
 # rebuilding after a server is lost, or moving to a new server.
 #
 # Restores: the database (all leads, calls, users and their passwords,
-# campaigns, settings), the call recordings, and the app's non-secret
+# campaigns, settings), the licence, the call recordings, and the app's non-secret
 # settings from the old .env (alerts, S3 bucket, time zone, trunk caller ID
 # and channels...). The new server keeps the passwords install.sh generated.
 # NOT restored automatically: the SIP trunk - the provider must allow the new
@@ -140,6 +140,11 @@ if [ -n "$CFG_FILE" ]; then
       if grep -q "^$k=" "$ENV_FILE"; then sed -i "s|^$k=.*|$k=$v|" "$ENV_FILE"; else echo "$k=$v" >> "$ENV_FILE"; fi
       info "$k taken over"
     done
+  fi
+  if [ -f "$WORK/cfg/etc/viztex/licence.json" ]; then
+    mkdir -p /etc/viztex
+    install -o root -g root -m 644 "$WORK/cfg/etc/viztex/licence.json" /etc/viztex/licence.json
+    info "licence (seats, lines, end date) taken over"
   fi
   if [ -f "$WORK/cfg/etc/asterisk/pjsip.conf" ]; then
     OLD_TRUNK=/root/viztex-backups/old-pjsip-$NOW.conf
