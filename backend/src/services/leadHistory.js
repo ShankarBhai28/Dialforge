@@ -58,7 +58,7 @@ const EDIT_FIELDS = { name: 'Name', phone: 'Phone', alt_phone: 'Alt phone', prio
 async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }) {
   const db = deps.pool;
   const [[lead]] = await db.query(
-    `SELECT l.id, l.name, l.phone, l.alt_phone, l.status, l.attempts, l.is_final, l.next_call_at, l.created_at,
+    `SELECT l.id, l.name, l.phone, l.alt_phone, l.status, l.attempts, l.is_final, l.next_call_at, l.created_at, l.deleted_at,
             l.custom_data, l.campaign_id, c.name AS campaign, li.name AS list
      FROM leads l LEFT JOIN campaigns c ON c.id = l.campaign_id LEFT JOIN lists li ON li.id = l.list_id
      WHERE l.id = ?`,
@@ -206,6 +206,8 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
       campaign: lead.campaign,
       list: lead.list,
       createdAt: lead.created_at,
+      /** Deleted (e.g. with its list): history only, no more calls. */
+      deletedAt: lead.deleted_at || null,
       customData: json(lead.custom_data),
     },
     summary: {

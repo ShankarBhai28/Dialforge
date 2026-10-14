@@ -119,10 +119,11 @@ router.post('/leads', requireCaller, async (req, res) => {
 // --- Customer history (services/leadHistory.js) ---
 // Agent screen: a lead of the campaign they're working, or one they have
 // talked to before (agentCanSeeLead). Recordings play from /agent/calls/:id/recording.
+// A deleted lead (e.g. its list was deleted) still opens - read-only, with
+// its history ("delete always works, history kept"); the screen says so.
 async function leadForAgent(req, res) {
   const [rows] = await pool.query(
-    `SELECT l.*, ls.name AS list_name FROM leads l LEFT JOIN lists ls ON ls.id = l.list_id
-     WHERE l.id = ? AND l.deleted_at IS NULL`,
+    `SELECT l.*, ls.name AS list_name FROM leads l LEFT JOIN lists ls ON ls.id = l.list_id WHERE l.id = ?`,
     [Number(req.params.id)],
   );
   if (!rows[0]) {

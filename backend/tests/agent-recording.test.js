@@ -31,6 +31,17 @@ fake('db.js', {
     sql.push([s, params]);
     if (s.startsWith('SELECT status FROM agent_status_log')) return [agentStatus ? [{ status: agentStatus }] : []];
     if (s.startsWith('INSERT INTO calls')) return [{ insertId: 90 }];
+    if (s.startsWith('SELECT l.*, ls.name AS list_name')) {
+      // lead 7: its list was deleted (soft delete) - still opens, flagged
+      return [params[0] === 7 ? [{ id: 7, campaign_id: 2, name: 'Ravi', deleted_at: '2026-10-13 18:47:19' }] : []];
+    }
+    if (s.startsWith('SELECT status, deleted_at FROM leads')) {
+      return [
+        params[0] === 7
+          ? [{ status: 'not_interested', deleted_at: '2026-10-13 18:47:19' }]
+          : [{ status: 'new', deleted_at: null }],
+      ];
+    }
     if (s.startsWith('SELECT id, lead_id, agent_user_id')) return [[CALLS[params[0]]].filter(Boolean)];
     if (s.startsWith('SELECT id, campaign_id FROM leads')) return [[LEADS[params[0]]].filter(Boolean)];
     if (s.startsWith('SELECT 1 FROM calls WHERE lead_id')) return [[]];
@@ -164,5 +175,17 @@ test('an agent not logged into a queue cannot call; on Available / break they ca
     const ok = await post('/calls/click2call', { toNumber: '9840012345' });
     assert.notStrictEqual(ok.status, 403, st); // goes on to ring the line (502 here: fake Asterisk)
   }
+  agentStatus = null;
+});
+
+test('a deleted lead (its list was deleted) still opens for the agent, flagged; calling it is refused', async () => {
+  const lead = await get('/agent/leads/7');
+  assert.strictEqual(lead.status, 200);
+  assert.strictEqual(JSON.parse(lead.text).deleted_at, '2026-10-13 18:47:19');
+  assert.strictEqual((await get('/agent/leads/8')).status, 404); // really gone
+  agentStatus = 'available';
+  const r = await post('/calls/click2call', { toNumber: '9840012345', leadId: 7 });
+  assert.strictEqual(r.status, 409);
+  assert.match(r.body.error, /lead was deleted/);
   agentStatus = null;
 });

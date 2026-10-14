@@ -15,7 +15,7 @@ fake('db.js', {
     const s = q.replace(/\s+/g, ' ').trim();
     sql.push([s, params]);
     if (s.startsWith('INSERT INTO calls')) return [{ insertId: 68 }];
-    if (s.startsWith('SELECT status FROM leads')) return [[{ status: 'new' }]];
+    if (s.startsWith('SELECT status, deleted_at FROM leads')) return [[{ status: 'new' }]];
     return [[]];
   },
 });

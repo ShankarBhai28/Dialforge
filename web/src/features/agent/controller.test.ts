@@ -353,3 +353,41 @@ describe('preview mode', () => {
     expect(t.calls.some((c) => c.key === 'POST /agent/preview/next')).toBe(false);
   });
 });
+
+describe('notices', () => {
+  it('a notice clears itself after 2 s; a newer one is not cut short by the older timer', () => {
+    vi.useFakeTimers();
+    try {
+      const t = setup({});
+      t.controller.say('lead not found', true);
+      expect(t.state().message).toEqual({ text: 'lead not found', error: true });
+      vi.advanceTimersByTime(1500);
+      t.controller.say('Calling 98400...');
+      vi.advanceTimersByTime(600); // the first notice's 2 s are over - the second stays
+      expect(t.state().message?.text).toBe('Calling 98400...');
+      vi.advanceTimersByTime(1500);
+      expect(t.state().message).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('deleted leads', () => {
+  it('a lead deleted with its list opens from the call log (history kept)', async () => {
+    const t = setup({
+      'GET /agent/leads/7': {
+        body: {
+          id: 7,
+          name: 'Ravi',
+          phone: '9840012345',
+          status: 'not_interested',
+          deleted_at: '2026-10-13T18:47:19Z',
+        },
+      },
+    });
+    await t.controller.openLeadById(7);
+    expect(t.state().workspace.lead).toMatchObject({ id: 7, deleted_at: '2026-10-13T18:47:19Z' });
+    expect(t.state().message).toBeNull();
+  });
+});

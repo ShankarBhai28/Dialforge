@@ -76,6 +76,8 @@ type Deps = {
 };
 
 const QUEUE_KEY = 'dialforge.agent.queue';
+/** How long a notice under the status bar stays (the agent asked for 2 s). */
+export const MESSAGE_MS = 2000;
 const emptyWorkspace = (v = 0): Workspace => ({
   lead: null,
   callId: null,
@@ -102,6 +104,7 @@ export class AgentController {
   private pendingCall: CallInfo | null = null;
   private watchingCallId: number | null = null;
   private wrapupTimer: ReturnType<typeof setTimeout> | null = null;
+  private messageTimer: ReturnType<typeof setTimeout> | null = null;
   private lastStatus: AgentStats['currentStatus'] = null;
   private unsubscribe: () => void;
 
@@ -143,8 +146,15 @@ export class AgentController {
   private setCall(patch: Partial<CallInfo>) {
     if (this.state.call) this.set({ call: { ...this.state.call, ...patch } });
   }
+  /** A short notice under the status bar; it clears itself after MESSAGE_MS. */
   say(text: string, error = false) {
-    this.set({ message: { text, error } });
+    const message = { text, error };
+    this.set({ message });
+    if (this.messageTimer) clearTimeout(this.messageTimer);
+    this.messageTimer = setTimeout(() => {
+      this.messageTimer = null;
+      if (this.state.message === message) this.set({ message: null });
+    }, MESSAGE_MS);
   }
   private refresh(...keys: (keyof typeof agentKeys)[]) {
     for (const k of keys) void this.qc.invalidateQueries({ queryKey: agentKeys[k] });

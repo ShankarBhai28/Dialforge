@@ -171,7 +171,12 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
   // Do Not Call is enforced here, not just a label an agent can override -
   // real compliance behavior, not cosmetic.
   if (leadId) {
-    const [leadRows] = await pool.query('SELECT status FROM leads WHERE id = ?', [leadId]);
+    const [leadRows] = await pool.query('SELECT status, deleted_at FROM leads WHERE id = ?', [leadId]);
+    if (leadRows[0] && leadRows[0].deleted_at) {
+      return res
+        .status(409)
+        .json({ error: 'this lead was deleted - its history can still be opened, but it is not called any more' });
+    }
     if (leadRows[0] && leadRows[0].status === 'do_not_call') {
       return res.status(403).json({ error: 'this lead is marked Do Not Call' });
     }

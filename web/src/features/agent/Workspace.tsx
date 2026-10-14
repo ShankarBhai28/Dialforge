@@ -141,7 +141,7 @@ function LeadDetail({
   const extra = Object.entries(lead?.custom_data ?? {}).filter(
     ([k, v]) => !formKeys.has(k) && v !== null && v !== undefined && v !== '',
   );
-  const canCall = !!lead && !!lead.phone && !isDncStatus(lead.status, dispositions) && !state.call;
+  const canCall = !!lead && !!lead.phone && !lead.deleted_at && !isDncStatus(lead.status, dispositions) && !state.call;
   return (
     <Card>
       <CardContent className="space-y-3 pt-5">
@@ -162,6 +162,12 @@ function LeadDetail({
             <X />
           </Button>
         </div>
+        {lead?.deleted_at && (
+          <p role="note" className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+            This lead was deleted (or its list was) on {formatDateTime(lead.deleted_at)}. Its details and history are
+            kept, but it is not called any more.
+          </p>
+        )}
         {lead && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             {lead.status && (
@@ -253,7 +259,11 @@ function AgentFormCard({ form, saved }: { form: AgentForm; saved: SavedAnswers |
           </div>
           <FormError message={save.error?.message} />
           <div className="flex gap-2">
-            <Button type="submit" disabled={save.isPending}>
+            <Button
+              type="submit"
+              disabled={save.isPending || !!ws.lead?.deleted_at}
+              title={ws.lead?.deleted_at ? 'This lead was deleted' : undefined}
+            >
               Save Form
             </Button>
             <Button type="button" variant="outline" onClick={() => controller.closeWorkspace()}>

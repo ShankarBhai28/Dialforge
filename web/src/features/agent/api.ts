@@ -32,6 +32,8 @@ export type Lead = {
   attempts?: number | null;
   list_name?: string | null;
   custom_data?: Record<string, unknown> | null;
+  /** Deleted (e.g. with its list): opens read-only with its history, can't be called. */
+  deleted_at?: string | null;
 };
 
 export type AgentCallback = {
