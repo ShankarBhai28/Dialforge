@@ -6,17 +6,8 @@ import { useExtensions, userKeys, type Extension } from '@/features/users/api';
 // same query and cache key are used here.
 export { useExtensions, type Extension };
 
-/** Create / new password: the only times the server returns the SIP password. */
+/** New password: the only time the server returns the SIP password. */
 export type SipPasswordReply = { id: number; name: string; sipPassword: string };
-
-export function useCreateExtension() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { name: string; label: string }) => post<SipPasswordReply>('/admin/extensions', body),
-    meta: { errorInline: true },
-    onSuccess: () => qc.invalidateQueries({ queryKey: userKeys.extensions }),
-  });
-}
 
 export function useUpdateExtension() {
   const qc = useQueryClient();

@@ -29,21 +29,11 @@ describe('Extensions', () => {
     expect(within(off).getByText('Offline')).toBeInTheDocument();
   });
 
-  it('adds an extension and shows its generated SIP password once', async () => {
-    const calls = fakeApi({
-      'GET /admin/extensions': LIST,
-      'POST /admin/extensions': { status: 201, body: { id: 3, name: '1004', sipPassword: 'GeneratedPw1234567890abc' } },
-    });
+  it('has no Add extension, even for a full admin: seats come from the provider', async () => {
+    fakeApi({ 'GET /admin/extensions': { body: [] } });
     renderPage(<ExtensionsPage />);
-    await userEvent.click(await screen.findByRole('button', { name: /add extension/i }));
-    const dialog = screen.getByRole('dialog');
-    await userEvent.type(within(dialog).getByLabelText('Extension number'), '1004');
-    await userEvent.type(within(dialog).getByLabelText('Label (optional)'), 'Desk 4');
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
-    expect(await screen.findByLabelText('SIP password')).toHaveTextContent('GeneratedPw1234567890abc');
-    expect(calls.find((c) => c.key === 'POST /admin/extensions')?.body).toEqual({ name: '1004', label: 'Desk 4' });
-    await userEvent.click(screen.getByRole('button', { name: 'Done' }));
-    await waitFor(() => expect(screen.queryByLabelText('SIP password')).not.toBeInTheDocument());
+    expect(await screen.findByText(/provider sets up your agent seats/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add extension/i })).not.toBeInTheDocument();
   });
 
   it("disables after confirming; a failed delete shows the server's reason", async () => {

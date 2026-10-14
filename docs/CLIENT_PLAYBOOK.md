@@ -144,7 +144,11 @@ shows "copied off-server".
 Log in at `https://<hostname>:3000` as the Super Admin; **change the password**.
 In this order (each needs the one before):
 
-1. **Extensions** - one per agent seat (1001, 1002, ...).
+1. **Extensions** - one per agent seat the client pays for (1001, 1002, ...),
+   added by you on the server: `npm run ext:add -- --from 1001 --count 10`.
+   The client's admin can't add them (no button, API refuses); they can assign,
+   rename, disable, re-key and delete. One extension = one agent at a time, so
+   extra users don't give extra seats. More seats = you run ext:add again.
 2. **Roles** - e.g. TL, Supervisor: tick the rights (Reports, Dialer control,
    Hang up live calls, Play recordings, Listen / Whisper / Barge, Force logout...).
 3. **Users** - agents (each with an extension), TLs / supervisors (with a role,

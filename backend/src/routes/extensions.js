@@ -4,7 +4,7 @@ const { revokeUserSessions } = require('../services/sessions');
 const pool = require('../../db');
 const ari = require('../../ari');
 const { requireAdminSide, requirePermission } = require('../middleware/auth');
-const { generateSipPassword, parseExtensionUpdate, parseNewExtension } = require('../services/extensions');
+const { generateSipPassword, parseExtensionUpdate } = require('../services/extensions');
 
 const router = express.Router();
 
@@ -35,21 +35,8 @@ router.get('/admin/extensions', requireAdminSide, async (req, res) => {
   );
 });
 
-router.post('/admin/extensions', requirePermission('extensions', 'create'), async (req, res) => {
-  const { error, extension } = parseNewExtension(req.body);
-  if (error) return res.status(400).json({ error });
-  try {
-    const [r] = await pool.query(
-      'INSERT INTO extensions (tenant_id, name, label, sip_password, enabled) VALUES (1, ?, ?, ?, 1)',
-      [extension.name, extension.label, extension.password],
-    );
-    res.status(201).json({ id: r.insertId, name: extension.name, sipPassword: extension.password });
-  } catch (err) {
-    if (err.code === 'ER_DUP_ENTRY')
-      return res.status(409).json({ error: `extension ${extension.name} already exists` });
-    throw err;
-  }
-});
+// No create here: extensions are the client's agent seats, added by the
+// provider on the server (npm run ext:add) - not by the client's admin.
 
 // Label and enabled. A disabled extension disappears from Asterisk: it
 // can't register again (a browser already connected stays until its

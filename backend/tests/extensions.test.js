@@ -1,22 +1,40 @@
-// Extension (SIP line) rules: number format, generated / given passwords, edits.
+// Extension (SIP line) rules: the provider's ext:add tool, passwords, edits.
 const assert = require('node:assert');
 const { test } = require('node:test');
-const { generateSipPassword, parseExtensionUpdate, parseNewExtension } = require('../src/services/extensions');
+const { generateSipPassword, parseExtensionUpdate } = require('../src/services/extensions');
+const { planNumbers, addExtensions } = require('../src/tools/add-extensions');
 
-test('new extension: 3-8 digit number; a strong password is generated when none is given', () => {
-  assert.match(parseNewExtension({ name: '10' }).error, /3-8 digits/);
-  assert.match(parseNewExtension({ name: '10a1' }).error, /3-8 digits/);
-  const { extension } = parseNewExtension({ name: ' 1004 ', label: ' Desk 4 ' });
-  assert.strictEqual(extension.name, '1004');
-  assert.strictEqual(extension.label, 'Desk 4');
-  assert.match(extension.password, /^[A-Za-z0-9]{24}$/);
-  assert.notStrictEqual(generateSipPassword(), generateSipPassword());
+test('ext:add: a run of 3-8 digit numbers, leading zeros kept; bad input refused', () => {
+  assert.deepStrictEqual(planNumbers('1001', '3'), ['1001', '1002', '1003']);
+  assert.deepStrictEqual(planNumbers('0098', '3'), ['0098', '0099', '0100']);
+  assert.deepStrictEqual(planNumbers('2001'), ['2001']);
+  assert.throws(() => planNumbers('10', '1'), /3-8 digits/);
+  assert.throws(() => planNumbers(undefined, '1'), /--from/);
+  assert.throws(() => planNumbers('1001', '0'), /--count/);
+  assert.throws(() => planNumbers('1001', '501'), /--count/);
+  assert.throws(() => planNumbers('99999999', '2'), /100000000 is not a valid/);
 });
 
-test('a given SIP password must be 12-64 letters and digits (nothing that breaks a SIP config)', () => {
-  assert.match(parseNewExtension({ name: '1004', password: 'short1' }).error, /12-64/);
-  assert.match(parseNewExtension({ name: '1004', password: 'has space in it 123' }).error, /12-64/);
-  assert.strictEqual(parseNewExtension({ name: '1004', password: 'Abcdefgh1234' }).extension.password, 'Abcdefgh1234');
+test('ext:add: existing numbers skipped, new ones get a strong generated password', async () => {
+  const inserted = [];
+  const pool = {
+    query: async (sql, p) => {
+      if (sql.startsWith('SELECT')) return [p[0] === '1002' ? [{ id: 2 }] : []];
+      inserted.push(p);
+      return [{ insertId: 9 }];
+    },
+  };
+  const r = await addExtensions(pool, ['1001', '1002', '1003'], '  Night shift ');
+  assert.deepStrictEqual(r, { added: ['1001', '1003'], skipped: ['1002'] });
+  assert.deepStrictEqual(
+    inserted.map((p) => [p[0], p[1]]),
+    [
+      ['1001', 'Night shift'],
+      ['1003', 'Night shift'],
+    ],
+  );
+  for (const p of inserted) assert.match(p[2], /^[A-Za-z0-9]{24}$/);
+  assert.notStrictEqual(generateSipPassword(), generateSipPassword());
 });
 
 test('edit: label and enabled; left-out fields keep their value', () => {

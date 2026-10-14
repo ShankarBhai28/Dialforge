@@ -1,10 +1,12 @@
 // Extensions: the agents' SIP lines. Asterisk reads them straight from the
-// database, so adding, disabling or re-keying one here takes effect at once
-// - no Asterisk file editing. The SIP password is shown only right after
-// create / new password (for a desk phone); the agent screen gets its own.
-import { useState, type FormEvent } from 'react';
+// database, so disabling or re-keying one here takes effect at once - no
+// Asterisk file editing. They are the client's agent seats (one extension,
+// one agent at a time), so they are added by the provider on the server
+// (npm run ext:add), not here. The SIP password is shown only right after a
+// new password (for a desk phone); the agent screen gets its own.
+import { useState } from 'react';
 import { toast } from 'sonner';
-import { Copy, Headset, KeyRound, Plus, Power, RefreshCw, Trash2 } from 'lucide-react';
+import { Copy, Headset, KeyRound, Power, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -15,15 +17,13 @@ import {
   DialogBody,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader, StatusPill } from '@/components/common';
+import { ConfirmDialog, EmptyState, SectionHeader, StatusPill } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
 import { useCan } from '@/features/auth/access';
 import {
-  useCreateExtension,
   useDeleteExtension,
   useExtensions,
   useNewSipPassword,
@@ -35,61 +35,7 @@ import { toastDeleted } from '@/lib/deleted';
 
 const NONE = <span className="text-muted-foreground">—</span>;
 
-function CreateDialog({
-  onDone,
-  onOpenChange,
-}: {
-  onDone: (r: SipPasswordReply) => void;
-  onOpenChange: (v: boolean) => void;
-}) {
-  const create = useCreateExtension();
-  const [name, setName] = useState('');
-  const [label, setLabel] = useState('');
-  function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    create.mutate({ name: name.trim(), label: label.trim() }, { onSuccess: onDone });
-  }
-  return (
-    <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent size="sm">
-        <form onSubmit={onSubmit} className="contents">
-          <DialogHeader>
-            <DialogTitle>Add extension</DialogTitle>
-            <DialogDescription>
-              A strong SIP password is generated. Give the extension to an agent in Users.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody className="grid gap-4">
-            <Field id="ext-name" label="Extension number" hint="3-8 digits, e.g. 1004.">
-              <Input
-                id="ext-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                inputMode="numeric"
-                required
-                autoFocus
-              />
-            </Field>
-            <Field id="ext-label" label="Label (optional)" hint="e.g. Desk 4, or the agent's name.">
-              <Input id="ext-label" value={label} onChange={(e) => setLabel(e.target.value)} />
-            </Field>
-            <FormError message={create.error?.message} />
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={create.isPending}>
-              Add
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/** Shows a SIP password once (after create / new password). */
+/** Shows a SIP password once (after a new password). */
 function PasswordDialog({ reply, onClose }: { reply: SipPasswordReply; onClose: () => void }) {
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
@@ -151,7 +97,6 @@ export function ExtensionsPage() {
   const update = useUpdateExtension();
   const newPassword = useNewSipPassword();
   const remove = useDeleteExtension();
-  const [creating, setCreating] = useState(false);
   const [shown, setShown] = useState<SipPasswordReply | null>(null);
   const [toggling, setToggling] = useState<Extension | null>(null);
   const [rekeying, setRekeying] = useState<Extension | null>(null);
@@ -162,17 +107,12 @@ export function ExtensionsPage() {
       <CardContent className="pt-5">
         <SectionHeader
           title="Extensions"
-          description="The agents' phone lines. Asterisk reads them from here - changes apply at once."
+          description="The agents' phone lines - one per agent seat. To get more, contact your VIZTEX provider."
           actions={
             <>
               <Button variant="outline" onClick={() => extensions.refetch()} disabled={extensions.isFetching}>
                 <RefreshCw className={extensions.isFetching ? 'animate-spin' : undefined} /> Refresh
               </Button>
-              {can('create') && (
-                <Button onClick={() => setCreating(true)}>
-                  <Plus /> Add extension
-                </Button>
-              )}
             </>
           }
         />
@@ -186,7 +126,7 @@ export function ExtensionsPage() {
           <ErrorState message={extensions.error.message} onRetry={() => extensions.refetch()} />
         ) : extensions.data.length === 0 ? (
           <EmptyState icon={Headset} title="No extensions yet">
-            Add one per agent (or per desk), then give it to the agent in Users.
+            Your VIZTEX provider sets up your agent seats. Once they are here, give each agent one in Users.
           </EmptyState>
         ) : (
           <Table>
@@ -262,16 +202,6 @@ export function ExtensionsPage() {
         )}
       </CardContent>
 
-      {creating && (
-        <CreateDialog
-          onOpenChange={setCreating}
-          onDone={(r) => {
-            setCreating(false);
-            setShown(r);
-            toast.success(`Extension ${r.name} added`);
-          }}
-        />
-      )}
       {shown && <PasswordDialog reply={shown} onClose={() => setShown(null)} />}
       <ConfirmDialog
         open={!!toggling}

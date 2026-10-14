@@ -1488,3 +1488,9 @@ Reported by the user after trying the agent panel:
 - Now `holdLeadForOutcome` (dialer-common.js): when an agent is connected to a queue / dialer call with a lead, and when an agent click-to-calls a lead, `next_call_at` is pushed to now + 30 min (never earlier) and the lead leaves the ready hopper. Saving the outcome sets the real next step; no outcome -> dialable after 30 min. A click-to-call that fails to start gives back the attempt and the old `next_call_at`.
 - Queue sync no longer logs "Unable to remove interface: Not there" / "Interface not found" (removing / pausing a non-member is the wanted state); other AMI failures still logged.
 - Settings note from the test: Pred_test had Auto answer off + 5 s max wait -> the first answered customer was dropped while the agent's phone rang; predictive should use Auto answer (or ~15 s max wait).
+
+## Extensions are seats: only the provider adds them (2026-10-14)
+- Extensions = the client's agent seats (one extension can't be used by two agents at once), so the client's admin must not create them.
+- Removed: the "Add extension" button, the POST /admin/extensions route, and the "create" right for Extensions in Roles. The client can still assign, rename, disable, give a new SIP password and delete.
+- Provider adds seats on the server: `cd ~/dialforge-backend && npm run ext:add -- --from 1001 --count 10 [--label "..."]`; `npm run ext:add -- --list` shows them. Existing numbers are skipped; passwords generated.
+- Users are not limited: a user without a free extension can't take calls, so extra users don't add capacity.

@@ -76,7 +76,10 @@ What it sets up:
 ## 4. Set up the client (in the app)
 
 1. Log in as the Super Admin, change the password.
-2. **Extensions** -> add one per agent seat. **Users** -> agents (each with an
+2. **Extensions** = the client's agent seats. Only you add them, on the server
+   (the app has no Add button, and the API refuses it):
+   `cd ~/dialforge-backend && npm run ext:add -- --from 1001 --count 10`
+   (`--list` shows what exists). **Users** -> agents (each with an
    extension), staff with roles. **Teams**, **Queues**, **Campaigns**, lists.
 3. **The SIP trunk** - when the provider has given its details:
    ```
