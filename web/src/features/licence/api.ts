@@ -6,7 +6,8 @@ export type Licence = {
   state: 'none' | 'invalid' | 'ok' | 'expiring' | 'expired';
   customer: string | null;
   seats: number | null;
-  seatsUsed: number;
+  seatsUsed: number; // agents logged in now
+  extensions: number;
   channels: number | null;
   channelsInUse: number | null;
   expires: string | null;

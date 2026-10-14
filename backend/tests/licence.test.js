@@ -8,7 +8,7 @@ const { test } = require('node:test');
 const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'viztex-lic-')), 'licence.json');
 process.env.LICENCE_FILE = file;
 const licence = require('../src/services/licence');
-const { checkSeats } = require('../src/tools/add-extensions');
+const { seatRefusal } = require('../src/services/singleLogin');
 
 function write(obj) {
   fs.writeFileSync(file, typeof obj === 'string' ? obj : JSON.stringify(obj));
@@ -79,16 +79,19 @@ test("a licence the app can't reach (e.g. its folder is root-only) is 'invalid',
   assert.match(lic.error, /EACCES/);
 });
 
-test('ext:add: never past the licensed seats (numbers that already exist are not new)', async () => {
-  const pool = (count, existing = []) => ({
-    query: async (sql) => (sql.includes('COUNT') ? [[{ n: count }]] : [existing.map((name) => ({ name }))]),
+test('seats = agents logged in at once: the next agent is refused; the same agent again is not; no seats = no limit', async () => {
+  // Logged in: an open status row (agents 1, 2) or the agent screen open (3; 2 counted once).
+  const deps = (openIds, screens) => ({
+    pool: { query: async () => [openIds.map((user_id) => ({ user_id }))] },
+    hub: { connectedUserIds: () => screens },
   });
-  await checkSeats(pool(8), ['1009', '1010'], 10);
-  await checkSeats(pool(10, ['1001']), ['1001'], 10); // 1001 already exists: not a new seat
-  await assert.rejects(
-    checkSeats(pool(10, []), ['1011'], 10),
-    /allows 10 seats; 10 extensions exist, so at most 0 more/,
-  );
-  await assert.rejects(checkSeats(pool(9), ['1010', '1011'], 10), /at most 1 more/);
-  await checkSeats(pool(500), ['1'], null); // no licence: no limit
+  const three = deps([1, 2], [2, 3]);
+  assert.strictEqual(await seatRefusal({ id: 9 }, three, 4), null);
+  const full = await seatRefusal({ id: 9 }, three, 3);
+  assert.strictEqual(full.status, 409);
+  assert.strictEqual(full.body.code, 'seats_full');
+  assert.match(full.body.error, /All 3 agent seats are in use/);
+  assert.strictEqual(await seatRefusal({ id: 3 }, three, 3), null); // agent 3 logging in again / taking over
+  assert.strictEqual(await seatRefusal({ id: 9 }, deps([], []), 1), null);
+  assert.strictEqual(await seatRefusal({ id: 9 }, three, null), null);
 });

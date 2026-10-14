@@ -5,12 +5,13 @@
 #
 #   sudo bash set-licence.sh --customer "Acme Pvt Ltd" --seats 10 --channels 15 --expires 2026-12-31
 #   sudo bash set-licence.sh --expires 2027-03-31      # renew: other values kept
-#   sudo bash set-licence.sh --seats 15                 # more seats, then: npm run ext:add ...
+#   sudo bash set-licence.sh --seats 15                 # 15 agents may be logged in at once
 #   sudo bash set-licence.sh --show
 #
 # Options (each one left out keeps its current value):
 #   --customer NAME   shown on the admin's Licence card
-#   --seats N         most extensions (= agents working at once); ext:add refuses more
+#   --seats N         most agents logged in at the same time (the next agent's login is
+#                     refused); admins / supervisors and extensions don't count
 #   --channels N      most calls on the trunk at once - dialer, manual, transfers, inbound
 #   --expires DATE    last day of service (YYYY-MM-DD), or "none". Admins are warned
 #                     14 days before; after it agents can't log in or call, the dialer

@@ -1498,7 +1498,7 @@ Reported by the user after trying the agent panel:
 ## Licence: seats, lines, end date (2026-10-14)
 - `/etc/viztex/licence.json` (root-owned; written only by `install/set-licence.sh`): customer, seats, channels, expires. Re-read within 10 s, no restart. No file = no limits (dev has none). A broken file = no limits + logged (never blocks a client by mistake).
 - **Lines (channels)** = every call on the trunk at once, counted by Asterisk (ARI endpoint channel_ids): click-to-call and transfer-to-number get "All N phone lines are in use"; inbound over the limit hangs up busy (logged `[licence] inbound ... refused`); the dialer uses min(DIALER_MAX_TRUNK_CHANNELS, licence channels). If ARI doesn't answer, calls are allowed (the provider's own limit still holds).
-- **Seats**: `npm run ext:add` refuses to go past them.
+- **Seats**: (changed 2026-10-15) = agents logged in at the same time, checked at agent login (singleLogin.seatRefusal; logged in = open status row or agent screen open, the agent themself not counted). Extensions are not limited (spare / admin monitoring lines).
 - **Expiry**: admin banner from 14 days before; after the date agents can't log in, outside calls are refused, the dialer stops ("the VIZTEX subscription has ended"). Admins still log in; no data touched.
 - Admin: Dashboard -> Licence card (seats used / licensed, lines in use / licensed, valid till). API `GET /admin/licence`.
 

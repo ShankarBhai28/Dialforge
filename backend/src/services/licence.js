@@ -4,7 +4,8 @@
 //
 //   { "customer": "Acme", "seats": 10, "channels": 15, "expires": "2026-12-31" }
 //
-// seats    - most extensions (agents working at once); enforced by ext:add
+// seats    - most agents logged in at the same time (admins / supervisors
+//            and extensions not counted); enforced at agent login
 // channels - most calls on the trunk at once, of every kind: dialer,
 //            click-to-call, transfers out, inbound
 // expires  - last day of service. Admins are warned before; after it agents

@@ -11,6 +11,8 @@
 //   ('session.ended', it disconnects its phone and goes to the login page),
 //   its sessions are deleted and the agent is taken offline (picks a queue
 //   again here).
+// - Licence seats: no more agents logged in at once than the licence allows
+//   (seatRefusal) - checked first, so a refused login changes nothing.
 // - Every agent login ends the agent's older sessions anyway, so a browser
 //   left logged in can't come back later and grab the line.
 // Two tabs of the same browser share one session: the agent screen itself
@@ -20,6 +22,39 @@ const ari = require('../../ari');
 const hub = require('../realtime/hub');
 const { openStatus, onActiveCall, takeOffline } = require('./agentLogout');
 const { endUserSessions } = require('./sessions');
+const { getLicence } = require('./licence');
+
+/**
+ * Agents logged in right now (ids): an open status row (available / break /
+ * acw) or the agent screen open - the same "logged in" as Live Agents.
+ */
+async function agentsLoggedIn(deps = { pool, hub }) {
+  const [rows] = await deps.pool.query(
+    `SELECT DISTINCT asl.user_id FROM agent_status_log asl JOIN users u ON u.id = asl.user_id
+     WHERE asl.ended_at IS NULL AND u.role = 'agent'`,
+  );
+  return new Set([...rows.map((r) => r.user_id), ...deps.hub.connectedUserIds('agent')]);
+}
+
+/**
+ * Licence seats = agents logged in at the same time (admins / supervisors
+ * don't count, nor do extensions). Null when this agent may log in, else the
+ * refusal. The agent themself never counts: logging in again or taking over
+ * their own other screen doesn't need a new seat.
+ */
+async function seatRefusal(user, deps = { pool, hub }, seats = getLicence().seats) {
+  if (!seats) return null;
+  const inUse = await agentsLoggedIn(deps);
+  inUse.delete(user.id);
+  if (inUse.size < seats) return null;
+  return {
+    status: 409,
+    body: {
+      error: `All ${seats} agent seats are in use - an agent has to log out first (or ask your admin).`,
+      code: 'seats_full',
+    },
+  };
+}
 
 /** Where this agent is working right now, or null. */
 async function activeElsewhere(user, deps = { pool, ari, hub }) {
@@ -42,6 +77,8 @@ async function activeElsewhere(user, deps = { pool, ari, hub }) {
  * the new session may have).
  */
 async function claimAgentLogin(user, takeOver, deps = { pool, ari, hub, endUserSessions, takeOffline }) {
+  const full = await seatRefusal(user, deps);
+  if (full) return { refuse: full };
   const other = await activeElsewhere(user, deps);
   if (other && other.onCall) {
     return {
@@ -71,4 +108,4 @@ async function claimAgentLogin(user, takeOver, deps = { pool, ari, hub, endUserS
   return { loginAt: Math.max(Date.now(), revokedAt + 1), tookOver: !!other };
 }
 
-module.exports = { activeElsewhere, claimAgentLogin };
+module.exports = { activeElsewhere, agentsLoggedIn, claimAgentLogin, seatRefusal };

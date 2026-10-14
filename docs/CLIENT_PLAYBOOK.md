@@ -146,19 +146,22 @@ In this order (each needs the one before):
 
 0. **Licence** - what they pay for, on the server (only you can change it):
    `sudo bash viztex/install/set-licence.sh --customer "Acme" --seats 10 --channels 15 --expires 2026-12-31`
-   - seats: most extensions (`ext:add` refuses more); channels: most calls on the
+   - seats: most **agents logged in at the same time** - the next agent's login gets
+     "All 10 agent seats are in use" (admins / supervisors and extensions don't
+     count; an agent frees the seat by logging out, closing the screen, or after
+     10 min with the line down); channels: most calls on the
      trunk at once, every kind (dialer, manual, transfer out, inbound - over it the
      agent sees "All 15 phone lines are in use", an inbound caller hears busy);
      keep it at or below what the trunk provider gives them.
    - expires: admins see a warning 14 days before; after it agents can't log in,
      calls and the dialer stop; admin login and all data stay (they can export).
    - Renew: `set-licence.sh --expires 2027-03-31` (other values kept). More seats:
-     `--seats 15`, then `ext:add`. `--show` prints it. Applies within 10 s, no restart.
-1. **Extensions** - one per agent seat the client pays for (1001, 1002, ...),
-   added by you on the server: `npm run ext:add -- --from 1001 --count 10`.
-   The client's admin can't add them (no button, API refuses); they can assign,
-   rename, disable, re-key and delete. One extension = one agent at a time, so
-   extra users don't give extra seats. More seats = you run ext:add again.
+     `--seats 15` (+ `ext:add` if they need more extensions). `--show` prints it. Applies within 10 s, no restart.
+1. **Extensions** - one per agent (1001, 1002, ...) plus any monitoring lines
+   for admins, added by you on the server: `npm run ext:add -- --from 1001 --count 10`
+   (not limited by the licence - its seats count logged-in agents). The client's
+   admin can't add them (no button, API refuses); they can assign, rename,
+   disable, re-key and delete.
 2. **Roles** - e.g. TL, Supervisor: tick the rights (Reports, Dialer control,
    Hang up live calls, Play recordings, Listen / Whisper / Barge, Force logout...).
 3. **Users** - agents (each with an extension), TLs / supervisors (with a role,

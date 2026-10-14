@@ -9,6 +9,7 @@ const LIC = {
   customer: 'Acme',
   seats: 10,
   seatsUsed: 8,
+  extensions: 11,
   channels: 15,
   channelsInUse: 3,
   expires: '2026-12-31',
@@ -21,6 +22,7 @@ describe('Licence', () => {
     renderPage(<LicenceCard />);
     expect(await screen.findByText('8 / 10')).toBeInTheDocument();
     expect(screen.getByText('3 / 15')).toBeInTheDocument();
+    expect(screen.getByText(/11 extensions/)).toBeInTheDocument();
     expect(screen.getByText('31 Dec 2026')).toBeInTheDocument();
     expect(screen.getByText('78 days left')).toBeInTheDocument();
     expect(screen.getByText(/Acme/)).toBeInTheDocument();

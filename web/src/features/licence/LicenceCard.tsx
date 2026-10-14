@@ -40,7 +40,11 @@ export function LicenceCard() {
         <CardDescription>Set by your VIZTEX provider. To change it, contact them.</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 sm:grid-cols-3">
-        <Item label="Agent seats (extensions)" value={of(l.seatsUsed, l.seats)} hint="agents working at once" />
+        <Item
+          label="Agents logged in"
+          value={of(l.seatsUsed, l.seats)}
+          hint={`agent seats · ${l.extensions} extension${l.extensions === 1 ? '' : 's'}`}
+        />
         <Item label="Phone lines in use" value={of(l.channelsInUse, l.channels)} hint="calls at once, in and out" />
         <Item
           label="Valid till"
