@@ -1,0 +1,81 @@
+// The client's licence: seats, lines (every call on the trunk), end date.
+const assert = require('node:assert');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { test } = require('node:test');
+
+const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'viztex-lic-')), 'licence.json');
+process.env.LICENCE_FILE = file;
+const licence = require('../src/services/licence');
+const { checkSeats } = require('../src/tools/add-extensions');
+
+function write(obj) {
+  fs.writeFileSync(file, typeof obj === 'string' ? obj : JSON.stringify(obj));
+  const t = new Date(Date.now() + Math.random() * 100000); // a new mtime each time
+  fs.utimesSync(file, t, t);
+  licence._reset();
+}
+const ari = (n) => ({ endpointChannelCount: async () => n });
+
+test('parse: whole numbers above 0, a YYYY-MM-DD date; anything else is refused with a reason', () => {
+  assert.deepStrictEqual(licence.parseLicence('{"customer":"Acme","seats":10,"channels":15,"expires":"2026-12-31"}'), {
+    customer: 'Acme',
+    seats: 10,
+    channels: 15,
+    expires: '2026-12-31',
+  });
+  assert.match(licence.parseLicence('{').error, /not valid JSON/);
+  assert.match(licence.parseLicence('{"seats":0}').error, /seats/);
+  assert.match(licence.parseLicence('{"channels":2.5}').error, /channels/);
+  assert.match(licence.parseLicence('{"expires":"31-12-2026"}').error, /2026-12-31/);
+});
+
+test('state: ok, expiring in the last 14 days (the last day itself still works), expired after it', () => {
+  const at = new Date(2026, 9, 14); // 14 Oct 2026
+  const lic = (expires) => licence.describe({ seats: 5, channels: 5, expires }, at);
+  assert.strictEqual(lic('2026-12-31').state, 'ok');
+  assert.strictEqual(lic('2026-10-27').state, 'expiring');
+  assert.strictEqual(lic('2026-10-27').daysLeft, 13);
+  assert.deepStrictEqual([lic('2026-10-14').state, lic('2026-10-14').daysLeft], ['expiring', 0]);
+  assert.deepStrictEqual([lic('2026-10-13').state, lic('2026-10-13').daysLeft], ['expired', -1]);
+  assert.strictEqual(lic(null).state, 'ok');
+  assert.strictEqual(licence.describe(null).state, 'none');
+});
+
+test('lines: refused only when every licensed line is busy; inbound counts itself; Asterisk silent = allowed', async () => {
+  write({ channels: 3, expires: '2099-01-01' });
+  assert.strictEqual(await licence.lineRefusal(ari(2), 'trunk'), null);
+  assert.match(await licence.lineRefusal(ari(3), 'trunk'), /All 3 phone lines are in use/);
+  assert.strictEqual(await licence.lineRefusal(ari(3), 'trunk', { extra: 1 }), null); // the 3rd line is this inbound call
+  assert.match(await licence.lineRefusal(ari(4), 'trunk', { extra: 1 }), /All 3/);
+  assert.strictEqual(await licence.lineRefusal(ari(null), 'trunk'), null);
+});
+
+test('expired: every outside call refused with the plain message; no file / broken file = no limits', async (t) => {
+  write({ channels: 3, expires: '2020-01-01' });
+  assert.strictEqual(licence.isExpired(), true);
+  assert.strictEqual(await licence.lineRefusal(ari(0), 'trunk'), licence.EXPIRED_MESSAGE);
+  fs.rmSync(file);
+  licence._reset();
+  assert.strictEqual(licence.getLicence().state, 'none');
+  assert.strictEqual(await licence.lineRefusal(ari(99), 'trunk'), null);
+  t.mock.method(console, 'error', () => {});
+  write('{broken');
+  assert.strictEqual(licence.getLicence().state, 'invalid');
+  assert.strictEqual(await licence.lineRefusal(ari(99), 'trunk'), null);
+});
+
+test('ext:add: never past the licensed seats (numbers that already exist are not new)', async () => {
+  const pool = (count, existing = []) => ({
+    query: async (sql) => (sql.includes('COUNT') ? [[{ n: count }]] : [existing.map((name) => ({ name }))]),
+  });
+  await checkSeats(pool(8), ['1009', '1010'], 10);
+  await checkSeats(pool(10, ['1001']), ['1001'], 10); // 1001 already exists: not a new seat
+  await assert.rejects(
+    checkSeats(pool(10, []), ['1011'], 10),
+    /allows 10 seats; 10 extensions exist, so at most 0 more/,
+  );
+  await assert.rejects(checkSeats(pool(9), ['1010', '1011'], 10), /at most 1 more/);
+  await checkSeats(pool(500), ['1'], null); // no licence: no limit
+});

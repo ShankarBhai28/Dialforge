@@ -31,6 +31,7 @@ const ROUTERS = [
   'audit',
   'dashboard',
   'reports',
+  'licence',
 ];
 
 /** Logins kept in MySQL (services/sessionStore.js), so a restart or deploy doesn't log anyone out. */

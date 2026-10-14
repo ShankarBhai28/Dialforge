@@ -2,11 +2,12 @@ const express = require('express');
 const pool = require('../../db');
 const ari = require('../../ari');
 const { holdLeadForOutcome, isWithinCallWindow, normalizePhone } = require('../../dialer-common');
-const { APP_NAME } = require('../config');
+const { APP_NAME, TRUNK_ENDPOINT } = require('../config');
 const { requirePermission, requireCaller } = require('../middleware/auth');
 const { currentAgentStatus, findCurrentCampaign } = require('../services/agents');
 const { logEvent } = require('../services/calls');
 const { isDnc } = require('../services/dnc');
+const { lineRefusal } = require('../services/licence');
 const { previewLockOwner } = require('../services/preview');
 const { activeCalls } = require('../state');
 
@@ -197,6 +198,12 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
     return res.status(403).json({
       error: `outside this campaign's calling hours (${campaign.call_window_start.slice(0, 5)}-${campaign.call_window_end.slice(0, 5)} ${campaign.timezone})`,
     });
+  }
+
+  // An outside call needs a free licensed line (and a licence still running).
+  if (extRows.length === 0) {
+    const refusal = await lineRefusal(ari, TRUNK_ENDPOINT);
+    if (refusal) return res.status(409).json({ error: refusal });
   }
 
   let heldFrom; // the lead's redial time before this call held it

@@ -3,12 +3,13 @@ const ari = require('../../ari');
 const ami = require('../../ami');
 const callControl = require('../../call-control');
 const { finishAttempt, holdLeadForOutcome } = require('../../dialer-common');
-const { APP_NAME } = require('../config');
+const { APP_NAME, TRUNK_ENDPOINT } = require('../config');
 const { findAgentIdByExtension, setAgentStatus } = require('../services/agents');
 const { logEvent, resolveDestination } = require('../services/calls');
 const { activeCalls, queueCallChannels } = require('../state');
 const { startRecording } = require('../services/recording');
 const { findLeadByPhone } = require('../services/leadHistory');
+const { lineRefusal } = require('../services/licence');
 
 // Q.850 cause of a failed customer leg -> calls.disposition.
 const DEST_FAILURE = {
@@ -55,6 +56,14 @@ function start() {
           // simplified single-agent picker.
           const callerNumber = event.args[1] || 'unknown';
           const dialedNumber = event.args[2] || null;
+
+          // Over the licensed lines (this call is already one of them): the caller hears busy.
+          const refusal = await lineRefusal(ari, TRUNK_ENDPOINT, { extra: 1 });
+          if (refusal) {
+            console.error(`[licence] inbound ${callerNumber} -> ${dialedNumber} refused: ${refusal}`);
+            await ari.hangup(event.channel.id, 'busy').catch(() => {});
+            return;
+          }
 
           // Which campaign owns the number that was actually dialed? This is
           // the real routing decision - falls back to "first active campaign

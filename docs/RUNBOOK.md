@@ -1494,3 +1494,10 @@ Reported by the user after trying the agent panel:
 - Removed: the "Add extension" button, the POST /admin/extensions route, and the "create" right for Extensions in Roles. The client can still assign, rename, disable, give a new SIP password and delete.
 - Provider adds seats on the server: `cd ~/dialforge-backend && npm run ext:add -- --from 1001 --count 10 [--label "..."]`; `npm run ext:add -- --list` shows them. Existing numbers are skipped; passwords generated.
 - Users are not limited: a user without a free extension can't take calls, so extra users don't add capacity.
+
+## Licence: seats, lines, end date (2026-10-14)
+- `/etc/viztex/licence.json` (root-owned; written only by `install/set-licence.sh`): customer, seats, channels, expires. Re-read within 10 s, no restart. No file = no limits (dev has none). A broken file = no limits + logged (never blocks a client by mistake).
+- **Lines (channels)** = every call on the trunk at once, counted by Asterisk (ARI endpoint channel_ids): click-to-call and transfer-to-number get "All N phone lines are in use"; inbound over the limit hangs up busy (logged `[licence] inbound ... refused`); the dialer uses min(DIALER_MAX_TRUNK_CHANNELS, licence channels). If ARI doesn't answer, calls are allowed (the provider's own limit still holds).
+- **Seats**: `npm run ext:add` refuses to go past them.
+- **Expiry**: admin banner from 14 days before; after the date agents can't log in, outside calls are refused, the dialer stops ("the VIZTEX subscription has ended"). Admins still log in; no data touched.
+- Admin: Dashboard -> Licence card (seats used / licensed, lines in use / licensed, valid till). API `GET /admin/licence`.

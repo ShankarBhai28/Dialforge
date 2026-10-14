@@ -144,6 +144,16 @@ shows "copied off-server".
 Log in at `https://<hostname>:3000` as the Super Admin; **change the password**.
 In this order (each needs the one before):
 
+0. **Licence** - what they pay for, on the server (only you can change it):
+   `sudo bash viztex/install/set-licence.sh --customer "Acme" --seats 10 --channels 15 --expires 2026-12-31`
+   - seats: most extensions (`ext:add` refuses more); channels: most calls on the
+     trunk at once, every kind (dialer, manual, transfer out, inbound - over it the
+     agent sees "All 15 phone lines are in use", an inbound caller hears busy);
+     keep it at or below what the trunk provider gives them.
+   - expires: admins see a warning 14 days before; after it agents can't log in,
+     calls and the dialer stop; admin login and all data stay (they can export).
+   - Renew: `set-licence.sh --expires 2027-03-31` (other values kept). More seats:
+     `--seats 15`, then `ext:add`. `--show` prints it. Applies within 10 s, no restart.
 1. **Extensions** - one per agent seat the client pays for (1001, 1002, ...),
    added by you on the server: `npm run ext:add -- --from 1001 --count 10`.
    The client's admin can't add them (no button, API refuses); they can assign,
@@ -172,6 +182,7 @@ In this order (each needs the one before):
 
 ## 7. Go-live checklist (do every line; tick in the client record)
 
+- [ ] Licence: Dashboard shows the Licence card with the right seats, lines and end date.
 - [ ] Agent logs in -> Start your shift -> Available; line registered.
 - [ ] Outbound: agent calls a mobile; audio both ways; outcome saved; shows in Call log.
 - [ ] Inbound: call each DID from a mobile; right campaign; agent answers.
@@ -205,6 +216,7 @@ sheet - never Git):
 | S3 bucket, IAM role | |
 | Super Admin username (password in the password manager) | |
 | Trunk provider, account, DIDs, channels | |
+| Licence: seats, channels, end date (renewal reminder in your calendar) | |
 | Installed release (`dist/viztex-<date>-<commit>`), date | |
 | Updates applied (date, commit) | |
 | Go-live date, checklist done | |

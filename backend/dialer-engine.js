@@ -18,6 +18,7 @@ require('dotenv').config();
 const pool = require('./db');
 const ari = require('./ari');
 const { normalizePhone, isWithinCallWindow, finishAttempt } = require('./dialer-common');
+const licence = require('./src/services/licence');
 
 const DIALER_APP = 'dialforge-dialer';
 const TRUNK_ENDPOINT = process.env.TRUNK_ENDPOINT || 'dialforge-nxtra1';
@@ -87,9 +88,18 @@ async function attemptCounts(campaignId) {
   return { inFlight: Number(row.in_flight || 0), active: Number(row.active || 0) };
 }
 
+// Calls on the trunk: the dialer's own, or Asterisk's count of every call on
+// it (manual, transfers, inbound too) when that is higher.
 async function trunkChannelsInUse() {
   const [[row]] = await pool.query("SELECT COUNT(*) AS n FROM dial_attempts WHERE status <> 'ended'");
-  return row.n;
+  const all = await licence.trunkCallsNow(ari, TRUNK_ENDPOINT).catch(() => null);
+  return Math.max(Number(row.n), all ?? 0);
+}
+
+// The provider's limit (DIALER_MAX_TRUNK_CHANNELS) or the client's licensed lines, whichever is lower.
+function trunkLimit() {
+  const lic = licence.getLicence();
+  return lic.channels ? Math.min(MAX_TRUNK_CHANNELS, lic.channels) : MAX_TRUNK_CHANNELS;
 }
 
 async function hopperCounts(campaignId) {
@@ -309,7 +319,7 @@ function callsToPlace(c, idle, attempts, trunkInUse, ratio) {
   const wanted = Math.floor(idle * ratio) - attempts.inFlight;
   return Math.max(
     0,
-    Math.min(wanted, c.max_channels - attempts.active, MAX_TRUNK_CHANNELS - trunkInUse, MAX_NEW_CALLS_PER_TICK),
+    Math.min(wanted, c.max_channels - attempts.active, trunkLimit() - trunkInUse, MAX_NEW_CALLS_PER_TICK),
   );
 }
 
@@ -355,7 +365,8 @@ async function processCampaign(c) {
   await cleanHopper(c);
   let note = null;
   let added = 0;
-  if (c.status !== 'active') note = 'campaign status is not active - not filling';
+  if (licence.isExpired()) note = 'the VIZTEX subscription has ended - contact your provider';
+  else if (c.status !== 'active') note = 'campaign status is not active - not filling';
   else if (c.dial_mode === 'manual') note = 'manual mode - the dialer is not used';
   else if (!c.queue_id) note = 'campaign has no queue';
   else if (c.dialer_state === 'paused') note = 'paused by admin';
@@ -490,6 +501,7 @@ async function paceTick() {
        WHERE c.dialer_state = 'running' AND c.status = 'active' AND c.queue_id IS NOT NULL AND c.deleted_at IS NULL
          AND c.dial_mode IN ('progressive', 'predictive')`,
     );
+    if (licence.isExpired()) return;
     for (const c of campaigns) {
       if (!isWithinCallWindow(c)) continue;
       const idle = await countIdleAgents(c.queue_id);

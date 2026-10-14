@@ -48,8 +48,9 @@ function answer(channelId) {
   return ariRequest('POST', `/channels/${channelId}/answer`);
 }
 
-function hangup(channelId) {
-  return ariRequest('DELETE', `/channels/${channelId}`);
+// reason e.g. 'busy' - what the far end is told (default: normal hang-up).
+function hangup(channelId, reason) {
+  return ariRequest('DELETE', `/channels/${channelId}${reason ? `?reason=${reason}` : ''}`);
 }
 
 // type 'mixing' (normal talking bridge) or 'holding' (participants hear
@@ -136,6 +137,17 @@ async function endpointState(techResource) {
   }
 }
 
+// Channels on an endpoint right now (for the trunk: every call using it,
+// in or out); null when ARI couldn't be asked.
+async function endpointChannelCount(techResource) {
+  try {
+    const endpoint = await ariRequest('GET', `/endpoints/${techResource}`);
+    return (endpoint.channel_ids || []).length;
+  } catch (err) {
+    return /404|not found/i.test(err.message) ? 0 : null;
+  }
+}
+
 // Reconnects by itself (e.g. after an Asterisk restart) - without this the
 // app silently stops receiving events until the Node process restarts.
 // onStateChange(true|false) lets callers know whether events are flowing.
@@ -177,6 +189,7 @@ module.exports = {
   isEndpointOnline,
   endpointState,
   endpointStates,
+  endpointChannelCount,
   setChannelVar,
   continueInDialplan,
   connectEvents,

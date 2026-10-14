@@ -605,7 +605,8 @@ cat <<EOF
    SSH 22 from your office IP only. Never open 3306 (MySQL) or 5038 (AMI).
 
  Next:
-   1. The client's agent seats (extensions) - only here on the server, the app can't add them:
+   1. The client's licence, then their agent seats (extensions) - only here on the server:
+        sudo bash $(dirname "$0")/set-licence.sh --customer "<name>" --seats 10 --channels 15 --expires <YYYY-MM-DD>
         cd $APP_DIR && npm run ext:add -- --from 1001 --count 10
       Then log in: Users -> add agents (each with an extension), Teams, Queues, Campaigns.
    2. The client's SIP trunk:  sudo bash $(dirname "$0")/add-trunk.sh --help

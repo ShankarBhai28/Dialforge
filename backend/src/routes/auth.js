@@ -8,6 +8,7 @@ const { accessFor } = require('../services/access');
 const { audit } = require('../services/audit');
 const { guard } = require('../services/loginGuard');
 const { claimAgentLogin } = require('../services/singleLogin');
+const { EXPIRED_MESSAGE, isExpired } = require('../services/licence');
 
 const router = express.Router();
 
@@ -49,6 +50,12 @@ router.post('/auth/login', async (req, res) => {
   }
   if (user.role === 'staff' && !(await accessFor({ role: 'staff', roleId: user.role_id, id: user.id }))) {
     return res.status(403).json({ error: 'your account has no role yet - ask your Super Admin' });
+  }
+
+  // Subscription over: agents stop; admins can still log in (and export).
+  if (user.role === 'agent' && isExpired()) {
+    void audit({ user, action: 'auth.login_refused', status: 403, summary: 'licence expired', ip: req.ip });
+    return res.status(403).json({ error: EXPIRED_MESSAGE });
   }
 
   // Agents: one login at a time (services/singleLogin.js).

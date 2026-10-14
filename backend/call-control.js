@@ -20,6 +20,9 @@
 // owner (calls.from_extension) is the agent the call belongs to - they
 // get the outcome popup and after-call work when it ends.
 
+const { lineRefusal } = require('./src/services/licence');
+const { TRUNK_ENDPOINT } = require('./src/config');
+
 const RING_TIMEOUT_SEC = 30;
 const ADOPT_TIMEOUT_MS = 6000;
 
@@ -200,6 +203,11 @@ async function resolveTarget(st, { targetType, target }, mode, me) {
     if (number.length < 3 || number.length > 15) throw httpError(400, 'enter a valid number');
     const [[camp]] = await d.pool.query('SELECT outbound_caller_id FROM campaigns WHERE id = ?', [st.campaignId || 0]);
     const { endpoint, callerId } = await d.resolveDestination(number, camp ? camp.outbound_caller_id : null);
+    if (endpoint.includes('@')) {
+      // Out through the trunk: needs a free licensed line.
+      const refusal = await lineRefusal(d.ari, TRUNK_ENDPOINT);
+      if (refusal) throw httpError(409, refusal);
+    }
     return { kind: 'number', endpoint, callerId, label: number };
   }
   throw httpError(400, 'targetType must be agent, queue or number');

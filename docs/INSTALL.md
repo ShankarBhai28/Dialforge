@@ -76,7 +76,9 @@ What it sets up:
 ## 4. Set up the client (in the app)
 
 1. Log in as the Super Admin, change the password.
-2. **Extensions** = the client's agent seats. Only you add them, on the server
+2. **Licence** first: `sudo bash viztex/install/set-licence.sh --customer "<name>" --seats 10 --channels 15 --expires 2026-12-31`
+   (details: CLIENT_PLAYBOOK section 6).
+   **Extensions** = the client's agent seats. Only you add them, on the server
    (the app has no Add button, and the API refuses it):
    `cd ~/dialforge-backend && npm run ext:add -- --from 1001 --count 10`
    (`--list` shows what exists). **Users** -> agents (each with an

@@ -10,6 +10,7 @@ import { dashboardKeys, useDashboardSummary, useLiveAgents, type LiveAgent } fro
 import { AgentStatusBadge } from './AgentStatusBadge';
 import { useAccess } from '@/features/auth/access';
 import { SystemHealthCard } from './SystemHealthCard';
+import { LicenceCard } from '@/features/licence/LicenceCard';
 
 function StatTile({
   label,
@@ -103,6 +104,7 @@ export function DashboardPage() {
         <StatTile label="Avg handle time" value={s && formatSeconds(s.avgHandleSeconds)} icon={Clock} />
       </div>
       {summary.error && <ErrorState message={summary.error.message} onRetry={() => summary.refetch()} />}
+      <LicenceCard />
       {isSuperAdmin && <SystemHealthCard />}
 
       <Card>

@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { allNavItems } from './nav';
 import { Sidebar } from './Sidebar';
 import { APP_NAME } from '@/lib/brand';
+import { LicenceBanner } from '@/features/licence/LicenceBanner';
 
 function usePageTitle() {
   const { pathname } = useLocation();
@@ -75,6 +76,7 @@ export function AdminLayout() {
           </Button>
         </header>
         <main className="flex-1 p-4 sm:p-6">
+          <LicenceBanner />
           {inNoTeam && (
             <div
               role="status"
