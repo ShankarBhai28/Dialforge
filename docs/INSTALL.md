@@ -1,5 +1,7 @@
 # Installing VIZTEX for a new client
 
+The whole client procedure (what to collect, AWS, setup, go-live, many servers) is [CLIENT_PLAYBOOK.md](CLIENT_PLAYBOOK.md); this page is the installer.
+
 One server per client: its own database, Asterisk and app. The installer does
 everything `DEPLOY.md` describes by hand; DEPLOY.md stays as the explanation
 of each piece.
