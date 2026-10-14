@@ -1476,3 +1476,9 @@ Reported by the user after trying the agent panel:
 - Guide: `docs/INSTALL.md` (server, security group, DNS, install, client setup, updates via `DEPLOY_HOST=... scripts/deploy-dev.sh`).
 - Not yet run on a fresh server (needs a test EC2 - AWS cost).
 - 2026-10-14 dev: the AMI password was shown in a terminal by a masking mistake (`secret = ...` with spaces) -> rotated: new random value in `manager.conf` [dialforge] and `.env` AMI_PASS (never printed), `manager reload`, backend restarted (no calls running); backup `~/backups/pre-ami-rotate-20261014-045431`. AMI listens on 127.0.0.1 only. Masking now also covers `key = value`.
+
+## Disaster recovery: .env in the nightly backup, install/restore.sh, guide (2026-10-14)
+- Nightly backup's config tarball now also has the app `.env`, `/etc/turnserver.conf` and `/etc/viztex` (same privacy as before: 600 locally, SSE-encrypted private bucket).
+- `install/restore.sh` (on a server install.sh just set up): newest (or `--at`) backup from `s3://<bucket>/dialforge/<host>/` or local files -> backs up the new server's data, recreates the database, loads the dump (view DEFINERs rewritten to `dialforge@localhost`), runs migrations, re-grants asterisk_rt, clears old sessions / live state, stops dialers; takes over non-secret `.env` settings (alerts, S3 bucket, time zone, trunk caller ID / channels, retention...); syncs recordings; keeps the old pjsip.conf for the trunk; starts and checks. Dump load + DEFINER rewrite + migrate rehearsed on dev with the pre-reset dump (scratch db, dropped). Full install + restore on a fresh EC2 still to do.
+- Installer writes `APP_ENV=production` (db:reset-test-data refuses there).
+- `docs/DISASTER_RECOVERY.md`: A new PC, B rebuild a server from the backup, C what to keep safe outside the PC (.pem keys, AWS / GitHub 2FA, DNS logins, trunk provider, bucket names).

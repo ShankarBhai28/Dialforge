@@ -210,6 +210,8 @@ if [ ! -f "$ENV_FILE" ]; then
   umask 077
   cat > "$ENV_FILE" <<EOF
 # Written by the VIZTEX installer $(date -u +%F). Secrets also in $SECRETS (root only).
+# A client's server: test-only tools (db:reset-test-data) refuse to run.
+APP_ENV=production
 DB_HOST=localhost
 DB_USER=dialforge
 DB_PASSWORD=$DB_PASSWORD

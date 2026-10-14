@@ -3,8 +3,9 @@
 #
 # Makes, in ~/backups/nightly/:
 #   db-<time>.sql.gz      the whole database (consistent snapshot, compressed)
-#   config-<time>.tgz     /etc/asterisk + /etc/odbc.ini (contains SIP / AMI /
-#                         ODBC passwords - keep it as private as the server)
+#   config-<time>.tgz     /etc/asterisk, /etc/odbc.ini, /etc/turnserver.conf,
+#                         /etc/viztex and the app's .env (contains SIP / AMI /
+#                         ODBC / app passwords - keep it as private as the server)
 # then, if BACKUP_S3_BUCKET is set in .env, copies both to
 #   s3://<bucket>/dialforge/<hostname>/  (server-side encrypted)
 # and syncs call recordings to s3://<bucket>/dialforge/<hostname>/recordings/.
@@ -40,9 +41,11 @@ else
   rm -f "$dbfile"
 fi
 
-# 2. Asterisk + ODBC config
+# 2. Asterisk / ODBC / TURN config and the app's .env (install/restore.sh reads them)
 cfgfile="$DEST/config-$TS.tgz"
-if sudo -n tar czf "$cfgfile" -C / etc/asterisk etc/odbc.ini 2>/dev/null && sudo -n chown "$(id -u):$(id -g)" "$cfgfile"; then
+cfgparts=(etc/asterisk etc/odbc.ini "${APP#/}/.env")
+for p in etc/turnserver.conf etc/viztex; do [ -e "/$p" ] && cfgparts+=("$p"); done
+if sudo -n tar czf "$cfgfile" -C / "${cfgparts[@]}" 2>/dev/null && sudo -n chown "$(id -u):$(id -g)" "$cfgfile"; then
   chmod 600 "$cfgfile"
   echo "config: $cfgfile ($(du -h "$cfgfile" | cut -f1))"
 else
