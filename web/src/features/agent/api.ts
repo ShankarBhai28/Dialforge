@@ -56,6 +56,16 @@ export type NumberCheck = {
   deletedLead: DeletedLeadInfo | null;
 };
 
+/** Did this number belong to a deleted lead? (only asked for calls without an active lead) */
+export function useNumberCheck(phone: string | null) {
+  return useQuery({
+    queryKey: ['agent', 'number-check', phone],
+    queryFn: () => get<NumberCheck>(`/agent/number-check?phone=${encodeURIComponent(phone!)}`),
+    enabled: !!phone,
+    staleTime: 60_000,
+  });
+}
+
 export type AgentCallback = {
   id: number;
   lead_id: number;

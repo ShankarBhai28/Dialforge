@@ -10,7 +10,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { cn } from '@/lib/utils';
 import { AgentProvider, useController, usePhone } from './AgentProvider';
 import { ConnectLine, useRememberLine } from './ConnectLine';
-import { CallWarningDialog, IncomingCallDialog, OutcomeDialog, QueuePickerDialog } from './dialogs';
+import { IncomingCallDialog, OutcomeDialog, QueuePickerDialog } from './dialogs';
 import { callTimer, InCallPanel } from './InCallPanel';
 import { LeadsPanel } from './LeadsPanel';
 import { SidePanel } from './SidePanel';
@@ -175,7 +175,6 @@ function Workbench() {
       <IncomingCallDialog />
       <QueuePickerDialog />
       <OutcomeDialog />
-      <CallWarningDialog />
     </div>
   );
 }

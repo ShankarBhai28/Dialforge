@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Field, FormError } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
-import { formatDateTime, toDateTimeLocal } from '@/lib/format';
+import { toDateTimeLocal } from '@/lib/format';
 import { useAgentDispositions, useAgentQueues, type Disposition } from './api';
 import { useController } from './AgentProvider';
 import type { OutcomeTarget } from './controller';
@@ -213,69 +213,6 @@ export function OutcomeDialog() {
               Cancel
             </Button>
           )}
-        </DialogBody>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/**
- * A typed number that only belonged to a deleted lead: who it was, when it
- * was deleted, its last outcome - call anyway (the new lead takes over its
- * details) or not. It doesn't come back once the number has an active lead.
- */
-export function CallWarningDialog() {
-  const { controller, state } = useController();
-  const w = state.callWarning;
-  const d = w?.deleted;
-  return (
-    <Dialog open={!!w} onOpenChange={(v) => !v && controller.cancelCallWarning()}>
-      <DialogContent size="sm">
-        <DialogHeader>
-          <DialogTitle>This number belonged to a deleted lead</DialogTitle>
-          <DialogDescription>
-            {w?.phone}
-            {d?.name ? ` - ${d.name}` : ''}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody className="space-y-3 pb-5 text-sm">
-          {d && (
-            <ul className="space-y-1 rounded-md bg-muted px-3 py-2">
-              <li>
-                Deleted {formatDateTime(d.deletedAt)}
-                {d.deletedBy && ` by ${d.deletedBy}`}
-                {d.withList && ` - together with its list "${d.withList}"`}.
-              </li>
-              {d.campaign && <li>Campaign: {d.campaign}</li>}
-              {d.lastOutcome && <li>Last outcome: {d.lastOutcome}</li>}
-            </ul>
-          )}
-          <p className="text-muted-foreground">
-            Deleting stops a lead from being dialed - check it wasn&apos;t meant to be left alone. If you call, the
-            outcome you give makes it an active lead again, with the old details and history.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() => controller.confirmCallWarning()}
-              className="bg-status-available hover:bg-status-available/90"
-            >
-              <Phone /> Call anyway
-            </Button>
-            <Button variant="outline" onClick={() => controller.cancelCallWarning()}>
-              Cancel
-            </Button>
-            {d?.id && (
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  controller.cancelCallWarning();
-                  void controller.openLeadById(d.id!);
-                }}
-              >
-                See its history
-              </Button>
-            )}
-          </div>
         </DialogBody>
       </DialogContent>
     </Dialog>

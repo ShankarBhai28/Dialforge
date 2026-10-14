@@ -361,4 +361,36 @@ describe('agent screen', () => {
     expect(await screen.findByLabelText('Number to dial')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Start your shift' })).not.toBeInTheDocument();
   });
+
+  it('dialing a number of a deleted lead: no question, an information line in the lead area', async () => {
+    const { calls } = await connect(
+      backend({
+        'POST /calls/click2call': { status: 202, body: { callId: 93, status: 'ringing_agent' } },
+        'GET /agent/number-check?phone=8870084698': {
+          body: {
+            phone: '8870084698',
+            dnc: false,
+            activeLead: null,
+            deletedLead: {
+              id: 13,
+              name: 'karthi',
+              deletedAt: '2026-10-13T18:47:19Z',
+              deletedBy: 'admin',
+              withList: 'Live Dial Test',
+              campaign: 'Predictive_Test',
+              lastOutcome: 'Not Interested',
+            },
+          },
+        },
+      }),
+    );
+    await userEvent.type(screen.getByLabelText('Number to dial'), '8870084698');
+    await userEvent.click(screen.getByRole('button', { name: /^call$/i }));
+    await waitFor(() => expect(calls.some((c) => c.key === 'POST /calls/click2call')).toBe(true));
+    const note = await screen.findByRole('note');
+    expect(note).toHaveTextContent('Earlier lead karthi');
+    expect(note).toHaveTextContent('with list "Live Dial Test"');
+    expect(within(note).getByRole('button', { name: 'See its history' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
 });

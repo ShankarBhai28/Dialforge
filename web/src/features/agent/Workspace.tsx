@@ -8,7 +8,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FormError } from '@/components/common';
 import { post } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { dispositionLabel, isDncStatus, useAgentDispositions, useAgentForm, type AgentForm, type Lead } from './api';
+import {
+  dispositionLabel,
+  isDncStatus,
+  useAgentDispositions,
+  useAgentForm,
+  useNumberCheck,
+  type AgentForm,
+  type Lead,
+} from './api';
 import { FieldInput, fieldValues, type FieldValues } from '@/features/forms/FieldInput';
 import { useController, usePhone } from './AgentProvider';
 import { LeadStatusChip } from './LeadsPanel';
@@ -126,6 +134,37 @@ function PreviewCard() {
   );
 }
 
+/**
+ * A call to a number with no active lead that belonged to a deleted lead:
+ * just information - the outcome makes it an active lead again with the old
+ * details, and its history carries the old calls.
+ */
+function EarlierLeadNote({ phone }: { phone: string | null }) {
+  const { controller } = useController();
+  const check = useNumberCheck(phone);
+  const d = check.data?.deletedLead;
+  if (!d) return null;
+  return (
+    <p role="note" className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+      Earlier lead{d.name ? <b className="text-foreground"> {d.name}</b> : ''} (deleted {formatDateTime(d.deletedAt)}
+      {d.withList ? `, with list "${d.withList}"` : ''}){d.lastOutcome ? ` - last outcome ${d.lastOutcome}` : ''}. The
+      outcome you give makes it an active lead again, with its old details.
+      {d.id ? (
+        <>
+          {' '}
+          <button
+            type="button"
+            className="cursor-pointer text-primary underline"
+            onClick={() => void controller.openLeadById(d.id!)}
+          >
+            See its history
+          </button>
+        </>
+      ) : null}
+    </p>
+  );
+}
+
 function LeadDetail({
   lead,
   contextText,
@@ -162,6 +201,7 @@ function LeadDetail({
             <X />
           </Button>
         </div>
+        {!lead && <EarlierLeadNote phone={state.workspace.phone} />}
         {lead?.deleted_at && (
           <p role="note" className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
             This lead was deleted (or its list was) on {formatDateTime(lead.deleted_at)}. Its details and history are

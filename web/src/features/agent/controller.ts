@@ -15,16 +15,7 @@
 // - Preview campaigns: claim the next lead whenever the agent is free.
 import { ApiError, get, post } from '@/lib/api';
 import type { QueryClient } from '@tanstack/react-query';
-import {
-  agentKeys,
-  type ActiveCall,
-  type AgentStats,
-  type CampaignInfo,
-  type DeletedLeadInfo,
-  type Lead,
-  type NumberCheck,
-  type PreviewState,
-} from './api';
+import { agentKeys, type ActiveCall, type AgentStats, type CampaignInfo, type Lead, type PreviewState } from './api';
 import type { Softphone, SoftphoneEvent } from './softphone/softphone';
 
 export type CallInfo = {
@@ -54,6 +45,8 @@ export type Workspace = {
   callId: number | null;
   /** "Saving against: …" */
   contextText: string;
+  /** The number on the call / the lead's (for the "earlier lead" line). */
+  phone: string | null;
   /** The empty workspace was opened on purpose ("Open form without a lead"). */
   blankOpen: boolean;
   /** Bumped when the form should be reset / pre-filled again. */
@@ -69,8 +62,6 @@ export type ControllerState = {
   workspace: Workspace;
   /** Call that just ended - the outcome dialog is open for it. */
   outcomeFor: OutcomeTarget | null;
-  /** A typed number that only belonged to a deleted lead: "call anyway?" */
-  callWarning: { phone: string; deleted: DeletedLeadInfo } | null;
   message: { text: string; error: boolean } | null;
   preview: PreviewState;
   previewBusy: boolean;
@@ -93,6 +84,7 @@ const emptyWorkspace = (v = 0): Workspace => ({
   lead: null,
   callId: null,
   contextText: '',
+  phone: null,
   blankOpen: false,
   formVersion: v,
 });
@@ -131,7 +123,6 @@ export class AgentController {
       call: null,
       workspace: emptyWorkspace(),
       outcomeFor: null,
-      callWarning: null,
       message: null,
       preview: { enabled: false },
       previewBusy: false,
@@ -263,43 +254,17 @@ export class AgentController {
 
   // --- Click-to-call ---
   /**
-   * Calls a lead, or a typed number (lead null). A typed number that only
-   * belonged to a deleted lead asks first (callWarning); once the number has
-   * an active lead again - re-imported, or created by the outcome of the
-   * confirmed call - it doesn't ask any more. DNC numbers are refused.
+   * Calls a lead, or a typed number (lead null) - straight away. Deleting a
+   * lead stops the dialer, it doesn't block the number (the DNC list does,
+   * and the server refuses DNC numbers). A typed number that belonged to a
+   * deleted lead only gets an information line in the lead area.
    */
-  async callLead(lead: Lead | null, phone: string, opts: { confirmed?: boolean } = {}) {
+  async callLead(lead: Lead | null, phone: string) {
     if (this.phone.getSnapshot().call) return this.say('Finish the current call first.', true);
-    if (!lead && !opts.confirmed) {
-      let check: NumberCheck | null = null;
-      try {
-        check = await get<NumberCheck>(`/agent/number-check?phone=${encodeURIComponent(phone)}`);
-      } catch {
-        // Couldn't ask - the server checks DNC again when calling.
-      }
-      if (check?.dnc) return this.say('This number is on the Do Not Call list.', true);
-      if (check?.deletedLead) {
-        this.set({ callWarning: { phone, deleted: check.deletedLead } });
-        return;
-      }
-    }
-    return this.placeCall(lead, phone);
-  }
-  confirmCallWarning() {
-    const w = this.state.callWarning;
-    if (!w) return;
-    this.set({ callWarning: null });
-    void this.callLead(null, w.phone, { confirmed: true });
-  }
-  cancelCallWarning() {
-    this.set({ callWarning: null });
-  }
-
-  private async placeCall(lead: Lead | null, phone: string) {
     this.say(`Calling ${phone}...`);
     this.expectingOwnLeg = true;
     this.outcomeTarget = { leadId: lead?.id ?? null, callId: null, name: lead?.name ?? null, phone };
-    this.openWorkspace(lead, null, describe(lead ?? {}, phone));
+    this.openWorkspace(lead, null, describe(lead ?? {}, phone), phone);
     this.pendingCall = {
       number: phone,
       name: lead?.name ?? '',
@@ -392,7 +357,7 @@ export class AgentController {
       if (!this.state.call) return;
       if (call?.call_id) {
         const lead: Lead | null = call.lead_id ? { ...call, id: call.lead_id, status: call.status ?? 'new' } : null;
-        this.openWorkspace(lead, call.call_id, describe(call, call.phone));
+        this.openWorkspace(lead, call.call_id, describe(call, call.phone), call.phone);
         const name = call.name ?? '';
         const target: OutcomeTarget = {
           leadId: call.lead_id,
@@ -447,12 +412,13 @@ export class AgentController {
   }
 
   // --- Workspace (lead details + form) ---
-  private openWorkspace(lead: Lead | null, callId: number | null, contextText: string) {
+  private openWorkspace(lead: Lead | null, callId: number | null, contextText: string, phone: string | null = null) {
     this.set({
       workspace: {
         lead,
         callId,
         contextText,
+        phone: lead ? lead.phone : phone,
         blankOpen: false,
         formVersion: this.state.workspace.formVersion + 1,
       },
