@@ -4,6 +4,7 @@ import { createBrowserRouter, RouterProvider } from 'react-router';
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster, toast } from 'sonner';
 import { ApiError } from '@/lib/api';
+import { ERROR_TOAST } from '@/lib/toast';
 import { meKey, noteSessionEnded } from '@/features/auth/auth';
 import { stopRealtime, subscribe } from '@/lib/realtime';
 import { routes } from '@/app/routes';
@@ -26,7 +27,7 @@ const queryClient: QueryClient = new QueryClient({
       // A failed change shows as a toast, unless its form shows the error
       // itself (useMutation({ meta: { errorInline: true } })).
       if (mutation.meta?.errorInline) return;
-      if (!(err instanceof ApiError && err.status === 401)) toast.error(err.message);
+      if (!(err instanceof ApiError && err.status === 401)) toast.error(err.message, ERROR_TOAST);
     },
   }),
   defaultOptions: {
@@ -51,7 +52,8 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
-      <Toaster richColors position="top-right" />
+      {/* "Saved" notices go after 2 s; errors stay longer (ERROR_TOAST) so they can be read. */}
+      <Toaster richColors position="top-right" duration={2000} />
     </QueryClientProvider>
   </StrictMode>,
 );

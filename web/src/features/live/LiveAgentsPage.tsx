@@ -17,6 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ConfirmDialog, EmptyState, SectionHeader, StatusPill } from '@/components/common';
 import { post } from '@/lib/api';
+import { ERROR_TOAST } from '@/lib/toast';
 import { useAccess } from '@/features/auth/access';
 import { ErrorState } from '@/components/ErrorState';
 import { formatTime } from '@/lib/format';
@@ -225,7 +226,7 @@ export function LiveAgentsPage() {
   // --- monitoring ---
   const monitorModes = (['listen', 'whisper', 'barge'] as const).filter((m) => can('live', m));
   const onMonitor = (a: LiveAgent, mode: MonitorMode) =>
-    startMonitor(a.id, a.username, mode).catch((err: Error) => toast.error(err.message));
+    startMonitor(a.id, a.username, mode).catch((err: Error) => toast.error(err.message, ERROR_TOAST));
 
   // --- force logout ---
   const canLogout = can('live', 'logout');
