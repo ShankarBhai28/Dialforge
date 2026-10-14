@@ -36,6 +36,26 @@ export type Lead = {
   deleted_at?: string | null;
 };
 
+/** GET /agent/number-check: before calling a typed number. */
+export type DeletedLeadInfo = {
+  /** null when it was in a campaign this agent can't see (only the warning shows). */
+  id: number | null;
+  name: string | null;
+  deletedAt: string;
+  deletedBy: string | null;
+  /** The list it was deleted with, if deleted together with its list. */
+  withList: string | null;
+  campaign: string | null;
+  lastOutcome: string | null;
+};
+export type NumberCheck = {
+  phone: string;
+  dnc: boolean;
+  activeLead: { id: number; name: string | null } | null;
+  /** Set only when the number has no active lead but belonged to a deleted one. */
+  deletedLead: DeletedLeadInfo | null;
+};
+
 export type AgentCallback = {
   id: number;
   lead_id: number;

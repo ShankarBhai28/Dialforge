@@ -3,7 +3,12 @@ import { get } from '@/lib/api';
 
 // GET /agent/leads/:id/history and /admin/leads/:id/history
 // (backend/src/services/leadHistory.js). Times are ISO (UTC).
-type Base = { at: string; agent?: string | null };
+type Base = {
+  at: string;
+  agent?: string | null;
+  /** From an earlier, deleted lead with the same number (history kept across a re-add). */
+  earlierLead?: { id: number; name: string | null } | null;
+};
 export type HistoryItem =
   | (Base & {
       type: 'call';
@@ -24,7 +29,8 @@ export type HistoryItem =
   | (Base & { type: 'form'; form: string; callId: number | null; answers: { label: string; value: string }[] })
   | (Base & { type: 'callback'; due: string; status: string; owner: string | null; note: string | null })
   | (Base & { type: 'edit'; changes: { field: string; from: unknown; to: unknown }[] })
-  | (Base & { type: 'created'; campaign: string | null; list: string | null });
+  | (Base & { type: 'created'; campaign: string | null; list: string | null })
+  | (Base & { type: 'deleted' });
 
 export type LeadHistory = {
   lead: {
@@ -39,6 +45,8 @@ export type LeadHistory = {
     campaign: string | null;
     list: string | null;
     createdAt: string;
+    /** Deleted (e.g. with its list): history only. */
+    deletedAt?: string | null;
     customData: Record<string, unknown> | null;
   };
   summary: {

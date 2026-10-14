@@ -14,6 +14,7 @@ import {
   Play,
   Plus,
   Tag,
+  Trash2,
   X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -70,6 +71,16 @@ function Answers({ answers }: { answers: { label: string; value: string }[] }) {
   );
 }
 
+/** Marks what came from an earlier, deleted lead with the same number. */
+function Earlier({ item }: { item: HistoryItem }) {
+  if (!item.earlierLead) return null;
+  return (
+    <Badge className="ml-1 bg-muted text-muted-foreground">
+      earlier lead{item.earlierLead.name ? ` ${item.earlierLead.name}` : ''} (deleted)
+    </Badge>
+  );
+}
+
 function Row({ icon, title, at, children }: { icon: ReactNode; title: ReactNode; at: string; children?: ReactNode }) {
   return (
     <li className="relative flex gap-3 pb-4 last:pb-0">
@@ -108,7 +119,7 @@ function CallRow({
       title={
         <>
           <b>{item.direction === 'inbound' ? 'Inbound' : 'Outbound'} call</b>
-          {item.agent && <> · {item.agent}</>}{' '}
+          {item.agent && <> · {item.agent}</>} <Earlier item={item} />{' '}
           <Badge
             className={cn(
               'ml-1',
@@ -183,6 +194,7 @@ function Timeline({ items }: { items: HistoryItem[] }) {
                   <>
                     Outcome <b>{item.outcome}</b>
                     {item.agent && <> · {item.agent}</>}
+                    <Earlier item={item} />
                   </>
                 }
               >
@@ -198,6 +210,7 @@ function Timeline({ items }: { items: HistoryItem[] }) {
                 title={
                   <>
                     <b>{item.form}</b> filled{item.agent && <> by {item.agent}</>}
+                    <Earlier item={item} />
                   </>
                 }
               >
@@ -239,6 +252,20 @@ function Timeline({ items }: { items: HistoryItem[] }) {
                 </ul>
               </Row>
             );
+          case 'deleted':
+            return (
+              <Row
+                key={key}
+                at={item.at}
+                icon={<Trash2 className="size-3.5" />}
+                title={
+                  <>
+                    Lead {item.earlierLead?.name ? <b>{item.earlierLead.name}</b> : ''} deleted
+                    <span className="text-muted-foreground"> - the number came back as this lead later</span>
+                  </>
+                }
+              />
+            );
           case 'created':
             return (
               <Row
@@ -249,6 +276,7 @@ function Timeline({ items }: { items: HistoryItem[] }) {
                   <>
                     Lead added{item.campaign && <> to {item.campaign}</>}
                     {item.list && <> ({item.list})</>}
+                    <Earlier item={item} />
                   </>
                 }
               />

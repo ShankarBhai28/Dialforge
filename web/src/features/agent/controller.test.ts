@@ -391,3 +391,54 @@ describe('deleted leads', () => {
     expect(t.state().message).toBeNull();
   });
 });
+
+describe('calling a number of a deleted lead', () => {
+  const DELETED = {
+    id: 17,
+    name: 'Karthi1',
+    deletedAt: '2026-10-13T18:47:19Z',
+    deletedBy: 'admin',
+    withList: 'Live Dial Test',
+    campaign: 'Predictive_Test',
+    lastOutcome: 'Not Interested',
+  };
+  const check = (body: unknown) => ({ 'GET /agent/number-check?phone=8608688838': { body } });
+
+  it('asks first; Cancel calls nothing; Call anyway calls', async () => {
+    const t = setup({
+      ...check({ phone: '8608688838', dnc: false, activeLead: null, deletedLead: DELETED }),
+      'POST /calls/click2call': { status: 202, body: { callId: 90, status: 'ringing_agent' } },
+    });
+    await t.controller.callLead(null, '8608688838');
+    expect(t.state().callWarning).toEqual({ phone: '8608688838', deleted: DELETED });
+    expect(t.calls.some((c) => c.key === 'POST /calls/click2call')).toBe(false);
+    t.controller.cancelCallWarning();
+    expect(t.state().callWarning).toBeNull();
+
+    await t.controller.callLead(null, '8608688838');
+    t.controller.confirmCallWarning();
+    await vi.waitFor(() => expect(t.calls.some((c) => c.key === 'POST /calls/click2call')).toBe(true));
+    expect(t.calls.filter((c) => c.key.startsWith('GET /agent/number-check'))).toHaveLength(2); // not asked again on confirm
+  });
+
+  it('re-added (the number has an active lead): no question; DNC: refused', async () => {
+    const t = setup({
+      ...check({ phone: '8608688838', dnc: false, activeLead: { id: 21, name: 'Karthi1' }, deletedLead: null }),
+      'POST /calls/click2call': { status: 202, body: { callId: 91, status: 'ringing_agent' } },
+    });
+    await t.controller.callLead(null, '8608688838');
+    expect(t.state().callWarning).toBeNull();
+    expect(t.calls.some((c) => c.key === 'POST /calls/click2call')).toBe(true);
+
+    const d = setup(check({ phone: '8608688838', dnc: true, activeLead: null, deletedLead: null }));
+    await d.controller.callLead(null, '8608688838');
+    expect(d.state().message).toEqual({ text: 'This number is on the Do Not Call list.', error: true });
+    expect(d.calls.some((c) => c.key === 'POST /calls/click2call')).toBe(false);
+  });
+
+  it('a lead itself (not a typed number) is called without the check', async () => {
+    const t = setup({ 'POST /calls/click2call': { status: 202, body: { callId: 92, status: 'ringing_agent' } } });
+    await t.controller.callLead({ id: 7, name: 'Ravi', phone: '9840012345', status: 'new' }, '9840012345');
+    expect(t.calls.some((c) => c.key.startsWith('GET /agent/number-check'))).toBe(false);
+  });
+});

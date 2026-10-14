@@ -6,7 +6,7 @@ const { normalizePhone } = require('../../dialer-common');
 const { requirePermission, requireCaller } = require('../middleware/auth');
 const { findCurrentCampaign } = require('../services/agents');
 const { getDispositions } = require('../services/dispositions');
-const { addDnc } = require('../services/dnc');
+const { addDnc, isDnc } = require('../services/dnc');
 const { audit } = require('../services/audit');
 const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
 const {
@@ -18,7 +18,7 @@ const {
 } = require('../services/leadImport');
 
 const { campaignInScope, can, scopeCondition } = require('../services/access');
-const { agentCanSeeLead, leadHistory } = require('../services/leadHistory');
+const { agentCanSeeLead, deletedLeadFor, leadHistory, numberCheck } = require('../services/leadHistory');
 const {
   DEFAULT_SCOPE,
   DUP_SCOPES,
@@ -137,6 +137,13 @@ async function leadForAgent(req, res) {
   return rows[0];
 }
 
+// Before calling a typed number: DNC? an active lead? only a deleted lead
+// (then the screen asks "call anyway?" - once the number has an active
+// lead again, re-imported or created by the next outcome, it doesn't ask).
+router.get('/agent/number-check', requireCaller, async (req, res) => {
+  res.json(await numberCheck(String(req.query.phone || ''), req.session.user, { isDnc, findCurrentCampaign }));
+});
+
 // The lead itself (opening it from the call log).
 router.get('/agent/leads/:id', requireCaller, async (req, res) => {
   const lead = await leadForAgent(req, res);
@@ -206,10 +213,25 @@ router.post('/agent/calls/:callId/disposition', requireCaller, async (req, res) 
   );
   let lead = existing[0];
   if (!lead) {
-    const [result] = await pool.query('INSERT INTO leads (tenant_id, phone, campaign_id) VALUES (1, ?, ?)', [
-      phone,
-      campaignId,
-    ]);
+    // The number belonged to a deleted lead (the agent confirmed "call
+    // anyway"): the new lead takes over its name and details, so the
+    // customer isn't a blank row; its history shows the earlier calls too.
+    const old = await deletedLeadFor(phone);
+    const [result] = await pool.query(
+      'INSERT INTO leads (tenant_id, phone, alt_phone, name, priority, custom_data, campaign_id) VALUES (1, ?, ?, ?, ?, ?, ?)',
+      [
+        phone,
+        old ? old.alt_phone : null,
+        old ? old.name : null,
+        old ? old.priority || 0 : 0,
+        old && old.custom_data
+          ? typeof old.custom_data === 'string'
+            ? old.custom_data
+            : JSON.stringify(old.custom_data)
+          : null,
+        campaignId,
+      ],
+    );
     lead = { id: result.insertId, phone, campaign_id: campaignId, status: 'new' };
   }
   await pool.query('UPDATE calls SET lead_id = ? WHERE id = ? AND lead_id IS NULL', [lead.id, call.id]);

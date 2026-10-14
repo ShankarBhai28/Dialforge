@@ -71,8 +71,24 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
     .filter(Boolean)
     .flatMap((n) => [n, `91${n}`, `0${n}`, `+91${n}`]);
 
+  // Earlier, deleted leads with the same number (e.g. its list was deleted
+  // and the number came back as a new lead): their calls, outcomes, forms
+  // and callbacks are this customer's story too.
+  const plain = [lead.phone, lead.alt_phone].map(normalizePhone).filter(Boolean);
+  const [earlier] = plain.length
+    ? await db.query(
+        `SELECT id, name, created_at, deleted_at FROM leads
+         WHERE id <> ? AND deleted_at IS NOT NULL AND (phone IN (?) OR alt_phone IN (?))
+         ORDER BY id DESC LIMIT 10`,
+        [leadId, plain, plain],
+      )
+    : [[]];
+  const leadIds = [leadId, ...earlier.map((e) => e.id)];
+  const earlierById = new Map(earlier.map((e) => [e.id, { id: e.id, name: e.name }]));
+  const earlierOf = (id) => earlierById.get(Number(id)) || null;
+
   const [calls] = await db.query(
-    `SELECT ca.id, ca.direction, ca.start_time, ca.end_time, ca.agent_connect_time, ca.disposition, ca.outcome,
+    `SELECT ca.id, ca.lead_id, ca.direction, ca.start_time, ca.end_time, ca.agent_connect_time, ca.disposition, ca.outcome,
             ca.campaign_id, ca.from_extension, ca.did, ca.recording_path IS NOT NULL AS recorded,
             u.username AS agent, cd.label AS outcome_label,
             IF(ca.agent_connect_time IS NULL, NULL,
@@ -82,18 +98,18 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
      FROM calls ca
      LEFT JOIN users u ON u.id = ca.agent_user_id
      LEFT JOIN campaign_dispositions cd ON cd.campaign_id = ca.campaign_id AND cd.code = ca.outcome
-     WHERE ca.lead_id = ? OR (ca.lead_id IS NULL AND ca.to_number IN (?))
+     WHERE ca.lead_id IN (?) OR (ca.lead_id IS NULL AND ca.to_number IN (?))
      ORDER BY ca.id DESC LIMIT ?`,
-    [leadId, numbers.length ? numbers : [''], MAX_ITEMS],
+    [leadIds, numbers.length ? numbers : [''], MAX_ITEMS],
   );
 
   // The agent's outcomes (audit log): note / callback time, and outcomes
   // given without a call. "<code> (call <id>)" ties one to its call.
   const [outcomes] = await db.query(
-    `SELECT a.at, a.username, a.summary, a.request_json FROM audit_log a
-     WHERE a.action = 'leads.outcome' AND a.entity = 'leads' AND a.entity_id = ? AND (a.status IS NULL OR a.status = 200)
+    `SELECT a.at, a.username, a.summary, a.request_json, a.entity_id FROM audit_log a
+     WHERE a.action = 'leads.outcome' AND a.entity = 'leads' AND a.entity_id IN (?) AND (a.status IS NULL OR a.status = 200)
      ORDER BY a.id DESC LIMIT ?`,
-    [leadId, MAX_ITEMS],
+    [leadIds, MAX_ITEMS],
   );
   const [edits] = await db.query(
     `SELECT a.at, a.username, a.action, a.before_json, a.after_json FROM audit_log a
@@ -102,10 +118,10 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
     [leadId],
   );
   const [forms] = await db.query(
-    `SELECT r.id, r.form_id, r.call_id, r.created_at, r.data, f.name AS form, u.username AS agent
+    `SELECT r.id, r.lead_id, r.form_id, r.call_id, r.created_at, r.data, f.name AS form, u.username AS agent
      FROM form_responses r JOIN forms f ON f.id = r.form_id LEFT JOIN users u ON u.id = r.user_id
-     WHERE r.lead_id = ? ORDER BY r.id DESC LIMIT 50`,
-    [leadId],
+     WHERE r.lead_id IN (?) ORDER BY r.id DESC LIMIT 50`,
+    [leadIds],
   );
   const formIds = [...new Set(forms.map((f) => f.form_id))];
   const [fields] = formIds.length
@@ -114,10 +130,10 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
       ])
     : [[]];
   const [callbacks] = await db.query(
-    `SELECT cb.id, cb.callback_at, cb.status, cb.note, cb.created_at, cu.username AS created_by, ou.username AS owner
+    `SELECT cb.id, cb.lead_id, cb.callback_at, cb.status, cb.note, cb.created_at, cu.username AS created_by, ou.username AS owner
      FROM callbacks cb LEFT JOIN users cu ON cu.id = cb.created_by LEFT JOIN users ou ON ou.id = cb.user_id
-     WHERE cb.lead_id = ? ORDER BY cb.id DESC LIMIT 50`,
-    [leadId],
+     WHERE cb.lead_id IN (?) ORDER BY cb.id DESC LIMIT 50`,
+    [leadIds],
   );
 
   // Calls from before the agent was recorded on the call show the extension.
@@ -135,7 +151,14 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
     if (m && callIds.has(Number(m[1]))) {
       if (!outcomeByCall.has(Number(m[1]))) outcomeByCall.set(Number(m[1]), detail);
     } else {
-      timeline.push({ type: 'outcome', at: o.at, agent: o.username, outcome: outcomeLabel(code, null), ...detail });
+      timeline.push({
+        type: 'outcome',
+        at: o.at,
+        agent: o.username,
+        outcome: outcomeLabel(code, null),
+        ...detail,
+        earlierLead: earlierOf(o.entity_id),
+      });
     }
   }
   for (const c of calls) {
@@ -154,6 +177,7 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
       callbackAt: o ? o.callbackAt : null,
       transferred: !!Number(c.transferred),
       recorded: !!Number(c.recorded),
+      earlierLead: earlierOf(c.lead_id),
       ...(recordingUrl && Number(c.recorded) ? { recordingUrl: recordingUrl(c.id) } : {}),
     });
   }
@@ -166,6 +190,7 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
     form: f.form,
     callId: f.call_id,
     answers: formAnswers(f.data, fieldsByForm[f.form_id] || []),
+    earlierLead: earlierOf(f.lead_id),
   }));
   timeline.push(...answered);
   for (const cb of callbacks) {
@@ -177,6 +202,7 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
       status: cb.status,
       owner: cb.owner || null,
       note: cb.note,
+      earlierLead: earlierOf(cb.lead_id),
     });
   }
   for (const e of edits) {
@@ -188,6 +214,10 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
     if (changes.length) timeline.push({ type: 'edit', at: e.at, agent: e.username, changes });
   }
   timeline.push({ type: 'created', at: lead.created_at, campaign: lead.campaign, list: lead.list });
+  for (const e of earlier) {
+    timeline.push({ type: 'created', at: e.created_at, campaign: null, list: null, earlierLead: earlierOf(e.id) });
+    timeline.push({ type: 'deleted', at: e.deleted_at, earlierLead: earlierOf(e.id) });
+  }
   timeline.sort((a, b) => new Date(b.at) - new Date(a.at));
 
   // --- summary ---
@@ -254,4 +284,71 @@ async function agentCanSeeLead(user, lead, findCurrentCampaign, deps = { pool })
   return mine.length > 0;
 }
 
-module.exports = { findLeadByPhone, leadHistory, formAnswers, agentCanSeeLead };
+/**
+ * The most recent deleted lead with this number (phone or alt phone):
+ * who it was, when and by whom it was deleted, whether its list went with
+ * it, its last outcome. Null when none.
+ */
+async function deletedLeadFor(phone, deps = { pool }) {
+  const p = normalizePhone(phone);
+  if (!p) return null;
+  const [rows] = await deps.pool.query(
+    `SELECT l.id, l.name, l.campaign_id, l.status, l.alt_phone, l.custom_data, l.priority, l.deleted_at,
+            u.username AS deleted_by, ls.name AS list, ls.deleted_at AS list_deleted_at, c.name AS campaign
+     FROM leads l
+     LEFT JOIN users u ON u.id = l.deleted_by
+     LEFT JOIN lists ls ON ls.id = l.list_id
+     LEFT JOIN campaigns c ON c.id = l.campaign_id
+     WHERE l.deleted_at IS NOT NULL AND (l.phone = ? OR l.alt_phone = ?)
+     ORDER BY l.deleted_at DESC, l.id DESC LIMIT 1`,
+    [p, p],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Before an agent calls a typed number: is it on the DNC list, has it an
+ * active lead, or did it only belong to a deleted lead (then the screen
+ * asks "call anyway?"). Details of the deleted lead only if the agent may
+ * see it (agentCanSeeLead); the warning itself always.
+ */
+async function numberCheck(phone, user, { isDnc, findCurrentCampaign }, deps = { pool }) {
+  const p = normalizePhone(phone);
+  if (!p) return { phone: p, dnc: false, activeLead: null, deletedLead: null };
+  if (await isDnc(p)) return { phone: p, dnc: true, activeLead: null, deletedLead: null };
+  const [active] = await deps.pool.query(
+    'SELECT id, name FROM leads WHERE deleted_at IS NULL AND (phone = ? OR alt_phone = ?) ORDER BY id DESC LIMIT 1',
+    [p, p],
+  );
+  if (active[0]) return { phone: p, dnc: false, activeLead: active[0], deletedLead: null };
+  const d = await deletedLeadFor(p, deps);
+  if (!d) return { phone: p, dnc: false, activeLead: null, deletedLead: null };
+  const visible = await agentCanSeeLead(user, d, findCurrentCampaign, deps);
+  return {
+    phone: p,
+    dnc: false,
+    activeLead: null,
+    deletedLead: visible
+      ? {
+          id: d.id,
+          name: d.name,
+          deletedAt: d.deleted_at,
+          deletedBy: d.deleted_by || null,
+          // The list was deleted at the same moment = deleted with its list.
+          withList: !!d.list_deleted_at && +new Date(d.list_deleted_at) === +new Date(d.deleted_at) ? d.list : null,
+          campaign: d.campaign,
+          lastOutcome: d.status && d.status !== 'new' ? outcomeLabel(d.status, null) : null,
+        }
+      : {
+          id: null,
+          name: null,
+          deletedAt: d.deleted_at,
+          deletedBy: null,
+          withList: null,
+          campaign: null,
+          lastOutcome: null,
+        },
+  };
+}
+
+module.exports = { findLeadByPhone, leadHistory, formAnswers, agentCanSeeLead, deletedLeadFor, numberCheck };

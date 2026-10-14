@@ -10,7 +10,7 @@ function fake(rel, exports) {
 }
 fake('db.js', { query: async () => [[]] });
 
-const { leadHistory, findLeadByPhone, formAnswers } = require('../src/services/leadHistory');
+const { leadHistory, findLeadByPhone, formAnswers, numberCheck } = require('../src/services/leadHistory');
 
 const T = (s) => new Date(`2026-10-${s}Z`);
 function db(tables) {
@@ -229,4 +229,134 @@ test('form answers: field labels in order, unknown keys kept, empties dropped', 
       { label: 'z', value: 'extra' },
     ],
   );
+});
+
+// --- calling a typed number that only belonged to a deleted lead ---
+const DELETED = {
+  id: 17,
+  name: 'Karthi1',
+  campaign_id: 1,
+  status: 'not_interested',
+  deleted_at: new Date('2026-10-13T18:47:19Z'),
+  deleted_by: 'admin',
+  list: 'Live Dial Test',
+  list_deleted_at: new Date('2026-10-13T18:47:19Z'),
+  campaign: 'Predictive_Test',
+};
+function numberDb({ active = null, deleted = DELETED } = {}) {
+  return {
+    async query(sql) {
+      if (sql.includes('WHERE deleted_at IS NULL AND (phone = ?')) return [active ? [active] : []];
+      if (sql.includes('WHERE l.deleted_at IS NOT NULL')) return [deleted ? [deleted] : []];
+      if (sql.includes('SELECT 1 FROM calls WHERE lead_id')) return [[]];
+      return [[]];
+    },
+  };
+}
+const agent = { id: 2, role: 'agent', extensionName: '1001' };
+const sameCampaign = async () => ({ id: 1 });
+const otherCampaign = async () => ({ id: 9 });
+const noDnc = { isDnc: async () => false };
+
+test('number check: only a deleted lead -> warning with who / when / with its list / last outcome', async () => {
+  const r = await numberCheck(
+    '+91 86086 88838',
+    agent,
+    { ...noDnc, findCurrentCampaign: sameCampaign },
+    { pool: numberDb() },
+  );
+  assert.strictEqual(r.phone, '8608688838');
+  assert.strictEqual(r.activeLead, null);
+  assert.deepStrictEqual(
+    { ...r.deletedLead, deletedAt: r.deletedLead.deletedAt.toISOString() },
+    {
+      id: 17,
+      name: 'Karthi1',
+      deletedAt: '2026-10-13T18:47:19.000Z',
+      deletedBy: 'admin',
+      withList: 'Live Dial Test',
+      campaign: 'Predictive_Test',
+      lastOutcome: 'Not Interested',
+    },
+  );
+});
+
+test('number check: re-added (an active lead has the number) -> no warning; DNC -> refused; unknown -> nothing', async () => {
+  const re = await numberCheck(
+    '8608688838',
+    agent,
+    { ...noDnc, findCurrentCampaign: sameCampaign },
+    { pool: numberDb({ active: { id: 21, name: 'Karthi1' } }) },
+  );
+  assert.deepStrictEqual([re.activeLead, re.deletedLead], [{ id: 21, name: 'Karthi1' }, null]);
+  const dnc = await numberCheck(
+    '8608688838',
+    agent,
+    { isDnc: async () => true, findCurrentCampaign: sameCampaign },
+    { pool: numberDb() },
+  );
+  assert.strictEqual(dnc.dnc, true);
+  const none = await numberCheck(
+    '9000000009',
+    agent,
+    { ...noDnc, findCurrentCampaign: sameCampaign },
+    { pool: numberDb({ deleted: null }) },
+  );
+  assert.deepStrictEqual([none.activeLead, none.deletedLead], [null, null]);
+});
+
+test("number check: a deleted lead of a campaign the agent can't see -> warning without its details", async () => {
+  const r = await numberCheck(
+    '8608688838',
+    agent,
+    { ...noDnc, findCurrentCampaign: otherCampaign },
+    { pool: numberDb() },
+  );
+  assert.strictEqual(r.deletedLead.name, null);
+  assert.strictEqual(r.deletedLead.id, null);
+  assert.ok(r.deletedLead.deletedAt);
+});
+
+test("history of a re-added number includes the deleted lead's calls, marked as earlier", async () => {
+  const d = db([
+    ['FROM leads l', [{ ...LEAD, id: 21, name: 'Karthi1', phone: '8608688838' }]],
+    [
+      'deleted_at IS NOT NULL AND (phone IN',
+      [{ id: 17, name: 'Karthi1', created_at: T('01T09:00:00'), deleted_at: T('13T18:47:19') }],
+    ],
+    [
+      'FROM calls ca',
+      [
+        {
+          id: 85,
+          lead_id: 21,
+          start_time: T('14T05:15:03'),
+          agent_connect_time: T('14T05:15:10'),
+          recorded: 0,
+          talk_seconds: 20,
+        },
+        {
+          id: 34,
+          lead_id: 17,
+          start_time: T('08T11:17:58'),
+          agent_connect_time: T('08T11:18:00'),
+          recorded: 0,
+          talk_seconds: 40,
+        },
+      ],
+    ],
+  ]);
+  const h = await leadHistory(21, {}, { pool: d });
+  const calls = h.timeline.filter((t) => t.type === 'call');
+  assert.deepStrictEqual(
+    calls.map((c) => [c.callId, c.earlierLead]),
+    [
+      [85, null],
+      [34, { id: 17, name: 'Karthi1' }],
+    ],
+  );
+  assert.ok(h.timeline.some((t) => t.type === 'deleted' && t.earlierLead.id === 17));
+  assert.strictEqual(h.summary.calls, 2);
+  const [, params] = d.seen.find(([s]) => s.includes('FROM calls ca'));
+  assert.deepStrictEqual(params[0], [21, 17]);
 });

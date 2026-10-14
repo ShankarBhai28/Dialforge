@@ -15,7 +15,16 @@
 // - Preview campaigns: claim the next lead whenever the agent is free.
 import { ApiError, get, post } from '@/lib/api';
 import type { QueryClient } from '@tanstack/react-query';
-import { agentKeys, type ActiveCall, type AgentStats, type CampaignInfo, type Lead, type PreviewState } from './api';
+import {
+  agentKeys,
+  type ActiveCall,
+  type AgentStats,
+  type CampaignInfo,
+  type DeletedLeadInfo,
+  type Lead,
+  type NumberCheck,
+  type PreviewState,
+} from './api';
 import type { Softphone, SoftphoneEvent } from './softphone/softphone';
 
 export type CallInfo = {
@@ -60,6 +69,8 @@ export type ControllerState = {
   workspace: Workspace;
   /** Call that just ended - the outcome dialog is open for it. */
   outcomeFor: OutcomeTarget | null;
+  /** A typed number that only belonged to a deleted lead: "call anyway?" */
+  callWarning: { phone: string; deleted: DeletedLeadInfo } | null;
   message: { text: string; error: boolean } | null;
   preview: PreviewState;
   previewBusy: boolean;
@@ -120,6 +131,7 @@ export class AgentController {
       call: null,
       workspace: emptyWorkspace(),
       outcomeFor: null,
+      callWarning: null,
       message: null,
       preview: { enabled: false },
       previewBusy: false,
@@ -250,8 +262,40 @@ export class AgentController {
   }
 
   // --- Click-to-call ---
-  async callLead(lead: Lead | null, phone: string) {
+  /**
+   * Calls a lead, or a typed number (lead null). A typed number that only
+   * belonged to a deleted lead asks first (callWarning); once the number has
+   * an active lead again - re-imported, or created by the outcome of the
+   * confirmed call - it doesn't ask any more. DNC numbers are refused.
+   */
+  async callLead(lead: Lead | null, phone: string, opts: { confirmed?: boolean } = {}) {
     if (this.phone.getSnapshot().call) return this.say('Finish the current call first.', true);
+    if (!lead && !opts.confirmed) {
+      let check: NumberCheck | null = null;
+      try {
+        check = await get<NumberCheck>(`/agent/number-check?phone=${encodeURIComponent(phone)}`);
+      } catch {
+        // Couldn't ask - the server checks DNC again when calling.
+      }
+      if (check?.dnc) return this.say('This number is on the Do Not Call list.', true);
+      if (check?.deletedLead) {
+        this.set({ callWarning: { phone, deleted: check.deletedLead } });
+        return;
+      }
+    }
+    return this.placeCall(lead, phone);
+  }
+  confirmCallWarning() {
+    const w = this.state.callWarning;
+    if (!w) return;
+    this.set({ callWarning: null });
+    void this.callLead(null, w.phone, { confirmed: true });
+  }
+  cancelCallWarning() {
+    this.set({ callWarning: null });
+  }
+
+  private async placeCall(lead: Lead | null, phone: string) {
     this.say(`Calling ${phone}...`);
     this.expectingOwnLeg = true;
     this.outcomeTarget = { leadId: lead?.id ?? null, callId: null, name: lead?.name ?? null, phone };
