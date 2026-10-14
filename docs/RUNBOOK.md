@@ -1475,3 +1475,4 @@ Reported by the user after trying the agent panel:
 - `install/add-trunk.sh`: IP-allowlisted or username/password (`--register`) trunk as endpoint `trunk` -> `[from-trunk]`; sets TRUNK_ENDPOINT / TRUNK_CALLER_ID / DIALER_MAX_TRUNK_CHANNELS; backup + undo line.
 - Guide: `docs/INSTALL.md` (server, security group, DNS, install, client setup, updates via `DEPLOY_HOST=... scripts/deploy-dev.sh`).
 - Not yet run on a fresh server (needs a test EC2 - AWS cost).
+- 2026-10-14 dev: the AMI password was shown in a terminal by a masking mistake (`secret = ...` with spaces) -> rotated: new random value in `manager.conf` [dialforge] and `.env` AMI_PASS (never printed), `manager reload`, backend restarted (no calls running); backup `~/backups/pre-ami-rotate-20261014-045431`. AMI listens on 127.0.0.1 only. Masking now also covers `key = value`.
