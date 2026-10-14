@@ -1501,3 +1501,14 @@ Reported by the user after trying the agent panel:
 - **Seats**: `npm run ext:add` refuses to go past them.
 - **Expiry**: admin banner from 14 days before; after the date agents can't log in, outside calls are refused, the dialer stops ("the VIZTEX subscription has ended"). Admins still log in; no data touched.
 - Admin: Dashboard -> Licence card (seats used / licensed, lines in use / licensed, valid till). API `GET /admin/licence`.
+
+## Install + restore rehearsal on a fresh server (2026-10-15)
+- Test EC2 `viztex-rehearsal` (c7i-flex.large, Ubuntu 24.04, Mumbai, role DialForgeS3BackupRole), dialforgetest.ddnsfree.com, Let's Encrypt. Package `viztex-20261014-81d7779` -> install ~25 min (Asterisk compile included), then `restore.sh --s3 dialforgedev --from-host ip-172-31-10-157` from a fresh dev backup.
+- Worked: all services, real certificate, admin login over HTTPS, realtime extension seen by Asterisk; restore = same users / leads / calls / campaigns / extensions as dev, settings + licence + recordings carried over, dialers stopped.
+- Found and fixed (efc1aca, re-run of the installer on the same server: all 12 checks OK, data kept):
+  1. **Licence ignored on installer-built servers**: /etc/viztex was 700, the app (ubuntu) couldn't read licence.json -> no limits. Now 755 (secrets.env itself 600, selfsigned/ 700); set-licence.sh and restore.sh also fix the folder; new install check "Licence readable by the app"; an unreadable licence shows as 'invalid' (log + admin card), not 'none'.
+  2. ODBC install check looked for "connected: yes" - Asterisk 22 prints "active connections: N"; check fixed (ODBC was fine).
+  3. `restore.sh --list` printed a stray line for loose files in the bucket; now folders only.
+  4. "unit file changed on disk" warning during restore (snap aws-cli reloads systemd) - restore now runs daemon-reload first.
+- Recordings: S3 keeps files deleted on dev (reset), so a restore brings back more files than dev has - expected.
+- After a restore the new server has BACKUP_S3_BUCKET from the old one: its own nightly backups go to s3://<bucket>/dialforge/<its hostname>/ - delete that folder when a test server is removed.
