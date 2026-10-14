@@ -9,6 +9,7 @@
     "test": "node --test --test-force-exit \"tests/*.test.js\"",
     "check:syntax": "node -e \"for (const f of require('fs').readdirSync('.').filter((f) => f.endsWith('.js'))) require('child_process').execFileSync(process.execPath, ['--check', f], { stdio: 'inherit' })\"",
     "db:check": "node src/tools/db-check.js",
+    "db:reset-test-data": "node src/tools/reset-test-data.js",
     "db:migrate": "node src/tools/migrate.js",
     "create-admin": "node src/tools/create-admin.js"
   },
