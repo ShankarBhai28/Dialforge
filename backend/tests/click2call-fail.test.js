@@ -83,7 +83,14 @@ test("agent's line not reachable: plain message, call closed, lead attempt given
       ([s, p]) => /UPDATE calls SET end_time = NOW\(\), disposition = 'agent_unanswered'/.test(s) && p[0] === 68,
     ),
   );
-  assert.ok(sql.some(([s, p]) => /UPDATE leads SET attempts = GREATEST\(attempts - 1, 0\)/.test(s) && p[0] === 9));
+  // The lead was held for the call's outcome (dialer leaves it alone) ...
+  assert.ok(sql.some(([s, p]) => /UPDATE leads SET next_call_at = GREATEST/.test(s) && p[0] === 30 && p[1] === 9));
+  // ... and, the call never starting, gets its attempt and its old redial time back.
+  assert.ok(
+    sql.some(
+      ([s, p]) => /UPDATE leads SET attempts = GREATEST\(attempts - 1, 0\), next_call_at = \?/.test(s) && p[1] === 9,
+    ),
+  );
 });
 
 test('any other failure: closed too, with the reason', async () => {

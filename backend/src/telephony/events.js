@@ -2,7 +2,7 @@ const pool = require('../../db');
 const ari = require('../../ari');
 const ami = require('../../ami');
 const callControl = require('../../call-control');
-const { finishAttempt } = require('../../dialer-common');
+const { finishAttempt, holdLeadForOutcome } = require('../../dialer-common');
 const { APP_NAME } = require('../config');
 const { findAgentIdByExtension, setAgentStatus } = require('../services/agents');
 const { logEvent, resolveDestination } = require('../services/calls');
@@ -320,6 +320,9 @@ function start() {
         [extensionName, fields.DestChannel || null, agentUserId, callId],
       );
       await logEvent(callId, 'agent_answered', { extensionName, interface: fields.Interface });
+      // Talking to this customer now: no other agent gets them dialed until the outcome is saved.
+      const [[leadRow]] = await pool.query('SELECT lead_id FROM calls WHERE id = ?', [callId]);
+      if (leadRow && leadRow.lead_id) await holdLeadForOutcome(pool, leadRow.lead_id);
       // Inbound / dialer call: record the caller from the moment an agent takes it.
       void startRecording({ callId, channelName: fields.Channel });
       if (attemptId) {

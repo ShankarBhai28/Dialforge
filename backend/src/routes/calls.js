@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../../db');
 const ari = require('../../ari');
-const { isWithinCallWindow, normalizePhone } = require('../../dialer-common');
+const { holdLeadForOutcome, isWithinCallWindow, normalizePhone } = require('../../dialer-common');
 const { APP_NAME } = require('../config');
 const { requirePermission, requireCaller } = require('../middleware/auth');
 const { currentAgentStatus, findCurrentCampaign } = require('../services/agents');
@@ -199,13 +199,18 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
     });
   }
 
+  let heldFrom; // the lead's redial time before this call held it
   if (leadId) {
     const [inHopper] = await pool.query('SELECT locked_by FROM dial_hopper WHERE lead_id = ?', [leadId]);
     if (inHopper[0] && inHopper[0].locked_by && inHopper[0].locked_by !== previewLockOwner(req.session.user.id)) {
       return res.status(409).json({ error: 'another agent is previewing this lead right now' });
     }
-    await pool.query('DELETE FROM dial_hopper WHERE lead_id = ?', [leadId]);
+    await pool.query('DELETE FROM dial_hopper WHERE lead_id = ?', [leadId]); // incl. this agent's preview lock
     await pool.query('UPDATE leads SET attempts = attempts + 1, last_attempt_at = NOW() WHERE id = ?', [leadId]);
+    // The agent is calling this lead by hand: the dialer leaves it alone until the outcome.
+    const [[before]] = await pool.query('SELECT next_call_at FROM leads WHERE id = ?', [leadId]);
+    heldFrom = before ? before.next_call_at : null;
+    await holdLeadForOutcome(pool, leadId);
   }
 
   // A number typed on the dialpad that is a known lead: the call goes into that lead's history.
@@ -238,7 +243,12 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
     // and give the lead its attempt back.
     await logEvent(callId, 'error', { message: err.message });
     await pool.query("UPDATE calls SET end_time = NOW(), disposition = 'agent_unanswered' WHERE id = ?", [callId]);
-    if (leadId) await pool.query('UPDATE leads SET attempts = GREATEST(attempts - 1, 0) WHERE id = ?', [leadId]);
+    if (leadId) {
+      await pool.query('UPDATE leads SET attempts = GREATEST(attempts - 1, 0), next_call_at = ? WHERE id = ?', [
+        heldFrom ?? null,
+        leadId,
+      ]);
+    }
     // "Allocation failed" = Asterisk couldn't reach the agent's line (browser
     // not registered right now, e.g. reconnecting).
     const lineDown = /allocation failed/i.test(err.message);

@@ -62,6 +62,9 @@ async function syncQueueMembership(userId, extensionName, newStatus, explicitQue
       await ami.queueRemove(asteriskName, iface);
     }
   } catch (err) {
+    // Removing / pausing an agent who isn't in that queue (already left, never
+    // went Available) is the state we want anyway - not worth a log line.
+    if (/not there|interface not found/i.test(err.message)) return;
     console.error('[AMI queue sync failed]', err.message);
   }
 }

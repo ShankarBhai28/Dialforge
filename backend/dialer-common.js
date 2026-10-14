@@ -124,7 +124,26 @@ async function finishAttempt(pool, attemptId, result, hangupCause) {
   return true;
 }
 
+// A lead an agent is talking to (or just talked to) must not be dialed again
+// before the agent saves the outcome - with several agents, a free one would
+// otherwise get the same customer called seconds after hanging up. The call
+// ending doesn't count: the outcome comes after it (wrap-up). So the lead is
+// held; saving the outcome sets its real next step (final / retry / callback),
+// and a lead whose outcome is never given is dialed again after the hold.
+const OUTCOME_HOLD_MIN = 30;
+async function holdLeadForOutcome(pool, leadId) {
+  if (!leadId) return;
+  await pool.query(
+    `UPDATE leads SET next_call_at = GREATEST(COALESCE(next_call_at, NOW()), NOW() + INTERVAL ? MINUTE)
+     WHERE id = ? AND is_final = 0`,
+    [OUTCOME_HOLD_MIN, leadId],
+  );
+  await pool.query("DELETE FROM dial_hopper WHERE lead_id = ? AND status = 'ready'", [leadId]);
+}
+
 module.exports = {
+  OUTCOME_HOLD_MIN,
+  holdLeadForOutcome,
   normalizePhone,
   localTimeIn,
   isWithinCallWindow,
