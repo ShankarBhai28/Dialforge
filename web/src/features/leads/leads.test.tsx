@@ -156,6 +156,54 @@ describe('Leads & Lists - lists', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('list not found');
   });
+
+  it('Deleted lists: Restore says what comes back, then restores', async () => {
+    const calls = fakeApi({
+      ...base,
+      'GET /admin/lists/deleted': {
+        body: [
+          {
+            id: 3,
+            name: 'Live Dial Test',
+            campaignId: 1,
+            campaign: 'Predictive_Test',
+            campaignDeleted: false,
+            deletedAt: '2026-10-13T18:47:19Z',
+            deletedBy: 'admin',
+            leads: 5,
+            clashes: 3,
+          },
+          {
+            id: 2,
+            name: 'Old campaign list',
+            campaignId: 9,
+            campaign: 'Old',
+            campaignDeleted: true,
+            deletedAt: '2026-10-01T10:00:00Z',
+            deletedBy: 'admin',
+            leads: 10,
+            clashes: 0,
+          },
+        ],
+      },
+      'POST /admin/lists/3/restore': {
+        body: { status: 'ok', restored: 2, skipped: 3, notes: ['2 leads restored'] },
+      },
+    });
+    renderPage(<LeadsPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Deleted lists' }));
+    const table = await screen.findByRole('table', { name: 'Deleted lists table' });
+    expect(within(table).getByText(/3 active again elsewhere/)).toBeInTheDocument();
+    expect(within(table).getByText('campaign deleted')).toBeInTheDocument(); // no Restore for that one
+    expect(within(table).queryByRole('button', { name: 'Restore Old campaign list' })).not.toBeInTheDocument();
+
+    await userEvent.click(within(table).getByRole('button', { name: 'Restore Live Dial Test' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('2 leads come back with their history. 3 stay deleted');
+    expect(dialog).toHaveTextContent('comes back inactive');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Restore' }));
+    await waitFor(() => expect(calls.some((c) => c.key === 'POST /admin/lists/3/restore')).toBe(true));
+  });
 });
 
 describe('Leads & Lists - recycle', () => {

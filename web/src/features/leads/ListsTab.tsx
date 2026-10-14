@@ -23,6 +23,7 @@ import { formatDateTime } from '@/lib/format';
 import { useCampaigns } from '@/features/campaigns/api';
 import { useDeleteList, useLists, useSaveList, type LeadList } from './api';
 import { RecycleDialog } from './RecycleDialog';
+import { DeletedLists } from './DeletedLists';
 import { useCan } from '@/features/auth/access';
 import { toastDeleted } from '@/lib/deleted';
 
@@ -224,6 +225,7 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
           onOpenChange={(v) => !v && setEditing(null)}
         />
       )}
+      <DeletedLists />
       {recycling && (
         <RecycleDialog key={recycling.id} list={recycling} onOpenChange={(v) => !v && setRecycling(null)} />
       )}
@@ -236,7 +238,7 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
           }
         }}
         title={`Delete list "${deleting?.name}"?`}
-        description="Its leads go with it (pending callbacks are cancelled). Past calls keep them."
+        description="Its leads go with it (pending callbacks are cancelled). Past calls keep them. You can restore it later from Deleted lists, below."
         confirmLabel="Delete"
         destructive
         pending={remove.isPending}

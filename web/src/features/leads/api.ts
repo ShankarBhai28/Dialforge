@@ -130,6 +130,43 @@ export function useDeleteList() {
   });
 }
 
+// --- Deleted lists + Restore (backend/src/services/restore.js) ---
+export type DeletedList = {
+  id: number;
+  name: string;
+  campaignId: number;
+  campaign: string | null;
+  /** The campaign is deleted too: can't be restored. */
+  campaignDeleted: boolean;
+  deletedAt: string;
+  deletedBy: string | null;
+  /** Leads deleted together with the list. */
+  leads: number;
+  /** Of those, numbers that are an active lead in the campaign again (they stay deleted). */
+  clashes: number;
+};
+
+export function useDeletedLists(enabled: boolean) {
+  return useQuery({
+    queryKey: [...leadKeys.lists, 'deleted'],
+    queryFn: () => get<DeletedList[]>('/admin/lists/deleted'),
+    enabled,
+  });
+}
+
+export function useRestoreList() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      post<{ status: string; restored: number; skipped: number; notes: string[] }>(`/admin/lists/${id}/restore`),
+    meta: { errorInline: true },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: leadKeys.lists }); // the lists and the deleted ones
+      void qc.invalidateQueries({ queryKey: leadKeys.leads });
+    },
+  });
+}
+
 // --- Leads ---
 
 /** Query string in a fixed key order, empty values left out (so the same filters always give the same URL). */

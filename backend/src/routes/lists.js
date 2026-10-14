@@ -1,5 +1,6 @@
 const express = require('express');
 const { deleteList } = require('../services/softDelete');
+const { deletedLists, restoreList, RestoreError } = require('../services/restore');
 const pool = require('../../db');
 const { requirePermission, requireAdminSide } = require('../middleware/auth');
 
@@ -92,6 +93,25 @@ router.delete('/admin/lists/:id', requirePermission('leads', 'delete'), async (r
   const notes = await deleteList(Number(req.params.id), req.session.user.id);
   if (notes === null) return res.status(404).json({ error: 'list not found' });
   res.json({ status: 'ok', notes });
+});
+
+// --- Deleted lists + Restore (services/restore.js) ---
+router.get('/admin/lists/deleted', requirePermission('leads', 'view'), async (req, res) => {
+  res.json(await deletedLists((id) => campaignInScope(req.access.scope, id)));
+});
+
+router.post('/admin/lists/:id/restore', requirePermission('leads', 'delete'), async (req, res) => {
+  try {
+    const r = await restoreList(Number(req.params.id), { inScope: (id) => campaignInScope(req.access.scope, id) });
+    const notes = [`${r.restored} lead${r.restored === 1 ? '' : 's'} restored`];
+    if (r.skipped) notes.push(`${r.skipped} kept deleted - the number is an active lead in the campaign again`);
+    notes.push('the list is inactive - switch it on when it should be dialed');
+    res.json({ status: 'ok', ...r, notes });
+  } catch (err) {
+    if (err instanceof RestoreError) return res.status(err.status).json({ error: err.message });
+    console.error('[list restore]', err);
+    res.status(500).json({ error: 'could not restore the list' });
+  }
 });
 
 module.exports = router;
