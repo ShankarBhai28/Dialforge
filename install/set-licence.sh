@@ -54,6 +54,7 @@ show() {
 if [ "$SHOW" = 1 ] || [ "$GIVEN" = 0 ]; then show; exit 0; fi
 
 mkdir -p /etc/viztex
+chmod 755 /etc/viztex # the app (not root) reads the licence; secrets.env stays root-only itself
 [ -f "$FILE" ] && cp -p "$FILE" "$FILE.$(date +%Y%m%d-%H%M%S)"
 # Merge with what's there, check with the app's own rules, then write.
 NEW=$(CUR="$([ -f "$FILE" ] && cat "$FILE" || echo '{}')" CUSTOMER="$CUSTOMER" SEATS="$SEATS" \

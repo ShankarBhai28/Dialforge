@@ -60,9 +60,13 @@ function readFile() {
   let stat;
   try {
     stat = fs.statSync(FILE);
-  } catch {
+  } catch (err) {
     cache.mtime = null;
-    return null;
+    if (err.code === 'ENOENT') return null;
+    // e.g. EACCES: a licence is set but the app can't reach it - say so (no limits meanwhile).
+    const data = { error: `can't read the licence file (${err.code || err.message})` };
+    console.error(`[licence] ${FILE}: ${data.error} - no limits applied`);
+    return data;
   }
   if (cache.mtime === stat.mtimeMs) return cache.data;
   let data;

@@ -15,7 +15,20 @@ function Item({ label, value, hint }: { label: string; value: string; hint?: str
 
 export function LicenceCard() {
   const { data: l } = useLicence();
-  if (!l || l.state === 'none' || l.state === 'invalid') return null;
+  if (!l || l.state === 'none') return null;
+  if (l.state === 'invalid')
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BadgeCheck className="size-5 text-muted-foreground" /> Licence
+          </CardTitle>
+          <CardDescription>
+            The licence could not be read on the server - contact your VIZTEX provider to fix it.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
   const of = (used: number | null, max: number | null) =>
     max ? `${used ?? '–'} / ${max}` : `${used ?? '–'} (no limit)`;
   return (

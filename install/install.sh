@@ -76,7 +76,8 @@ APP_USER="${SUDO_USER:-ubuntu}"
 APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
 APP_DIR="$APP_HOME/dialforge-backend"   # internal name, same as every VIZTEX server
 mkdir -p "$STATE" /etc/viztex
-chmod 700 /etc/viztex
+# The app (not root) reads licence.json here; each secret file is root-only itself.
+chmod 755 /etc/viztex
 : >> "$LOG"; chmod 600 "$LOG"
 
 [ -n "$DOMAIN" ] || die "--domain is required (the hostname agents will open)"
@@ -131,6 +132,7 @@ TURN_SECRET=$(rand 40)
 EOF
   umask 022
 fi
+chmod 600 "$SECRETS"
 . "$SECRETS"
 
 # ---------------------------------------------------------------- 1. packages
@@ -479,7 +481,7 @@ ln -sf /usr/local/bin/viztex-cert-copy /etc/letsencrypt/renewal-hooks/deploy/viz
 if [ "$SELF_SIGNED" = 1 ]; then
   SS=/etc/viztex/selfsigned
   if [ ! -f "$SS/privkey.pem" ]; then
-    mkdir -p "$SS"
+    mkdir -p "$SS" && chmod 700 "$SS"
     openssl req -x509 -newkey rsa:2048 -nodes -days 825 -subj "/CN=$DOMAIN" \
       -addext "subjectAltName=DNS:$DOMAIN,IP:$PUBLIC_IP" \
       -keyout "$SS/privkey.pem" -out "$SS/fullchain.pem" >> "$LOG" 2>&1
@@ -573,7 +575,8 @@ ast() { /usr/sbin/asterisk -rx "$1" 2>/dev/null; }
 sleep 4
 check "Asterisk running" systemctl is-active --quiet asterisk
 check "Asterisk HTTPS / WebSocket on 8089" bash -c "/usr/sbin/asterisk -rx 'http show status' | grep -q 'HTTPS Server Enabled'"
-check "Asterisk reads MySQL (ODBC)" bash -c "/usr/sbin/asterisk -rx 'odbc show dialforge' | grep -qi 'connected: yes'"
+check "Licence readable by the app (if one is set)" bash -c "[ ! -f /etc/viztex/licence.json ] || sudo -u $APP_USER cat /etc/viztex/licence.json >/dev/null"
+check "Asterisk reads MySQL (ODBC)" bash -c "/usr/sbin/asterisk -rx 'odbc show dialforge' | grep -qiE 'active connections: [1-9]|connected: yes'"
 check "Asterisk modules: AMD, MixMonitor, realtime" bash -c "for m in app_amd app_mixmonitor res_config_odbc; do /usr/sbin/asterisk -rx \"module show like \$m\" | grep -q Running || exit 1; done"
 check "TURN server" systemctl is-active --quiet coturn
 check "MySQL" systemctl is-active --quiet mysql

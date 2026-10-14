@@ -43,6 +43,12 @@ describe('Licence', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/ended on 31 Dec 2026.*can't log in/);
   });
 
+  it("licence set but unreadable on the server: the card says so (it isn't hidden)", async () => {
+    fakeApi({ 'GET /admin/licence': { body: { ...LIC, state: 'invalid', seats: null, channels: null } } });
+    renderPage(<LicenceCard />);
+    expect(await screen.findByText(/could not be read on the server/)).toBeInTheDocument();
+  });
+
   it('no licence set (a dev server): nothing shown', async () => {
     fakeApi({ 'GET /admin/licence': { body: { ...LIC, state: 'none', seats: null, channels: null, expires: null } } });
     const { container } = renderPage(<LicenceCard />);

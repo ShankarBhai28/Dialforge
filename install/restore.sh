@@ -68,7 +68,7 @@ if [ -n "$S3" ]; then
     die "can't read s3://$S3 - give this server an IAM role that may read the bucket (docs/DISASTER_RECOVERY.md)"
   if [ "$LIST" = 1 ] || [ -z "$FROM_HOST" ]; then
     echo "Server folders in s3://$S3/dialforge/ (use one with --from-host):"
-    "$AWS" s3 ls "s3://$S3/dialforge/" | awk '{print "  " $2}' | tr -d /
+    "$AWS" s3 ls "s3://$S3/dialforge/" | awk '$1 == "PRE" {print "  " $2}' | tr -d /
     [ "$LIST" = 1 ] && exit 0
     die "--from-host is required"
   fi
@@ -99,6 +99,7 @@ if [ "$YES" != 1 ]; then
 fi
 
 say "1/5 Stop the app, back up what's here now"
+systemctl daemon-reload # installing the AWS CLI (snap) can leave systemd asking for one
 systemctl stop dialforge-backend dialforge-dialer
 mkdir -p /root/viztex-backups && chmod 700 /root/viztex-backups
 NOW=$(date +%Y%m%d-%H%M%S)
@@ -142,7 +143,7 @@ if [ -n "$CFG_FILE" ]; then
     done
   fi
   if [ -f "$WORK/cfg/etc/viztex/licence.json" ]; then
-    mkdir -p /etc/viztex
+    mkdir -p /etc/viztex && chmod 755 /etc/viztex # the app reads it
     install -o root -g root -m 644 "$WORK/cfg/etc/viztex/licence.json" /etc/viztex/licence.json
     info "licence (seats, lines, end date) taken over"
   fi
@@ -171,6 +172,10 @@ systemctl start dialforge-backend dialforge-dialer
 for i in $(seq 1 20); do curl -sk https://localhost:3000/health | grep -q '"connected"' && break; sleep 1; done
 curl -sk https://localhost:3000/health && echo
 sudo -u "$APP_USER" npm run -s db:check | tail -3 || true
+if [ -f /etc/viztex/licence.json ]; then
+  if sudo -u "$APP_USER" cat /etc/viztex/licence.json >/dev/null 2>&1; then info "licence readable by the app"
+  else info "!! licence NOT readable by the app - run: sudo chmod 755 /etc/viztex"; fi
+fi
 cat <<EOF
 
 ==========================================================================

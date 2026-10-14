@@ -66,6 +66,19 @@ test('expired: every outside call refused with the plain message; no file / brok
   assert.strictEqual(await licence.lineRefusal(ari(99), 'trunk'), null);
 });
 
+test("a licence the app can't reach (e.g. its folder is root-only) is 'invalid', not 'none'", (t) => {
+  write({ seats: 5 });
+  const err = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+  t.mock.method(fs, 'statSync', () => {
+    throw err;
+  });
+  t.mock.method(console, 'error', () => {});
+  licence._reset();
+  const lic = licence.getLicence();
+  assert.strictEqual(lic.state, 'invalid');
+  assert.match(lic.error, /EACCES/);
+});
+
 test('ext:add: never past the licensed seats (numbers that already exist are not new)', async () => {
   const pool = (count, existing = []) => ({
     query: async (sql) => (sql.includes('COUNT') ? [[{ n: count }]] : [existing.map((name) => ({ name }))]),
