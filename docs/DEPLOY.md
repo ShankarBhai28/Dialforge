@@ -1,5 +1,7 @@
 # DialForge — Deployment Guide
 
+> **New client server? Use the installer: [`docs/INSTALL.md`](INSTALL.md)** (`install/install.sh` does every step below).
+
 This is the procedural "how to actually run this" checklist, written so you
 can follow it start to finish on a **brand new AWS server** without needing
 help. For the narrative *why* behind these decisions, see `RUNBOOK.md`. For

@@ -6,3 +6,6 @@ Credentials-Dialforge/
 
 # React app build output (served by the backend at /app)
 backend/web-dist/
+
+# Release packages (scripts/make-release.sh)
+dist/
