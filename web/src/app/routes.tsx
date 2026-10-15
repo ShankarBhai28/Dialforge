@@ -62,7 +62,19 @@ export const routes: RouteObject[] = [
         <AdminLayout />
       </RequireRole>
     ),
-    children: [...adminChildren, { path: '*', element: <NotFoundPage /> }],
+    children: [
+      ...adminChildren,
+      // One lead in full (Leads -> click a lead).
+      {
+        path: 'leads/:id',
+        element: (
+          <RequireScreen screen="leads">
+            {page(() => import('@/features/leads/LeadDetailPage'), 'LeadDetailPage')}
+          </RequireScreen>
+        ),
+      },
+      { path: '*', element: <NotFoundPage /> },
+    ],
   },
   {
     path: '/agent',

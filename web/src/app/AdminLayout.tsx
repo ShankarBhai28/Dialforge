@@ -12,7 +12,10 @@ import { LicenceBanner } from '@/features/licence/LicenceBanner';
 
 function usePageTitle() {
   const { pathname } = useLocation();
-  const item = allNavItems().find((i) => i.to === pathname);
+  // A screen's own sub-pages (e.g. /admin/leads/12) keep the screen's title.
+  const item =
+    allNavItems().find((i) => i.to === pathname) ??
+    allNavItems().find((i) => i.to !== '/admin' && pathname.startsWith(i.to + '/'));
   return item?.label ?? APP_NAME;
 }
 

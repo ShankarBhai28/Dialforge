@@ -228,6 +228,12 @@ const CHECKS = [
     sql: `SELECT u.id, u.username FROM users u WHERE u.role = 'agent' AND u.status = 'active' AND NOT EXISTS (SELECT 1 FROM team_members tm WHERE tm.user_id = u.id)`,
   },
   {
+    // Given to an agent who can't work any more: nobody sees or dials them. Leads -> filter "Given to" -> Give to agent.
+    title: 'Leads given to an inactive agent (nobody calls them)',
+    sql: `SELECT u.id, u.username, COUNT(*) AS leads FROM leads l JOIN users u ON u.id = l.assigned_user_id
+          WHERE l.deleted_at IS NULL AND u.status <> 'active' GROUP BY u.id, u.username`,
+  },
+  {
     title: 'DID pointing at a missing / deleted campaign',
     sql: `SELECT d.id, d.number FROM dids d LEFT JOIN campaigns c ON c.id = d.campaign_id WHERE d.campaign_id IS NOT NULL AND (c.id IS NULL OR c.deleted_at IS NOT NULL)`,
   },

@@ -390,6 +390,7 @@ describe('Leads & Lists - leads', () => {
       campaignId: 4,
       listId: 8,
       status: 'sale',
+      assignedUserId: null,
     });
     // the leads table reloads after the edit
     await waitFor(() => expect(calls.filter((c) => c.key === FIRST)).toHaveLength(2));

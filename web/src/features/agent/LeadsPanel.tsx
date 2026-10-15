@@ -133,6 +133,7 @@ function LeadsList() {
                     <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                       <span className="tabular-nums">{lead.phone}</span>
                       <LeadStatusChip status={lead.status} />
+                      {lead.mine && <StatusPill tone="blue">Mine</StatusPill>}
                     </div>
                   </div>
                   {!isDncStatus(lead.status, dispositions) && (

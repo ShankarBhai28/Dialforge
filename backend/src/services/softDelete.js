@@ -114,6 +114,20 @@ function deleteLead(id, userId, deps) {
   }, deps);
 }
 
+/** Many leads at once (Leads -> bulk Delete): same as deleteLead for each. */
+function deleteLeads(ids, userId, deps) {
+  return inTransaction(async (conn) => {
+    let leads = 0;
+    let cancelled = 0;
+    for (let i = 0; i < ids.length; i += 1000) {
+      const r = await retireLeads(conn, 'id IN (?)', [ids.slice(i, i + 1000)], userId);
+      leads += r.leads;
+      cancelled += r.cancelled;
+    }
+    return { leads, cancelled };
+  }, deps);
+}
+
 function deleteForm(id, userId, deps) {
   return inTransaction(async (conn) => {
     const [rows] = await conn.query('SELECT id FROM forms WHERE id = ? AND deleted_at IS NULL FOR UPDATE', [id]);
@@ -163,4 +177,13 @@ function deleteRole(id, deps) {
   }, deps);
 }
 
-module.exports = { deleteCampaign, deleteQueue, deleteList, deleteLead, deleteForm, deleteExtension, deleteRole };
+module.exports = {
+  deleteCampaign,
+  deleteQueue,
+  deleteList,
+  deleteLead,
+  deleteLeads,
+  deleteForm,
+  deleteExtension,
+  deleteRole,
+};

@@ -34,6 +34,8 @@ export type Lead = {
   custom_data?: Record<string, unknown> | null;
   /** Deleted (e.g. with its list): opens read-only with its history, can't be called. */
   deleted_at?: string | null;
+  /** Given to this agent by an admin (only they see it; the dialer leaves it to them). */
+  mine?: boolean;
 };
 
 /** GET /agent/number-check: before calling a typed number. */

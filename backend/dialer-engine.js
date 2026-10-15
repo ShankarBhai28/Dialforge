@@ -132,6 +132,7 @@ async function cleanHopper(c) {
      LEFT JOIN lists ls ON ls.id = l.list_id
      WHERE h.campaign_id = ? AND h.status = 'ready' AND (
        l.is_final = 1 OR l.deleted_at IS NOT NULL OR l.campaign_id IS NULL OR l.campaign_id <> h.campaign_id
+       OR l.assigned_user_id IS NOT NULL
        OR (l.next_call_at IS NOT NULL AND l.next_call_at > NOW())
        OR l.attempts >= ? OR (ls.id IS NOT NULL AND ls.is_active = 0)
        OR ${LEAD_HAS_OPEN_ATTEMPT}
@@ -166,6 +167,7 @@ async function fillHopper(c, idleAgents, counts) {
        AND (l.next_call_at IS NULL OR l.next_call_at <= NOW())
        AND (ls.id IS NULL OR ls.is_active = 1)
        AND l.status <> 'do_not_call'
+       AND l.assigned_user_id IS NULL -- given to one agent: theirs to call, not the dialer's
        AND h.id IS NULL
        AND NOT ${LEAD_HAS_OPEN_ATTEMPT}
      ORDER BY (cb.id IS NOT NULL) DESC, list_priority DESC, l.priority DESC, l.attempts ASC, l.id ASC

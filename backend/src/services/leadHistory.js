@@ -274,8 +274,10 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
  */
 async function agentCanSeeLead(user, lead, findCurrentCampaign, deps = { pool }) {
   if (user.role !== 'agent') return true;
+  // Given to an agent: theirs; another agent sees it only if they talked to the customer (below).
+  if (lead.assigned_user_id && lead.assigned_user_id === user.id) return true;
   const campaign = await findCurrentCampaign(user.id);
-  if (!lead.campaign_id || (campaign && campaign.id === lead.campaign_id)) return true;
+  if (!lead.assigned_user_id && (!lead.campaign_id || (campaign && campaign.id === lead.campaign_id))) return true;
   const ext = user.extensionName || '';
   const [mine] = await deps.pool.query(
     'SELECT 1 FROM calls WHERE lead_id = ? AND (agent_user_id = ? OR from_extension = ? OR transfer_ext = ?) LIMIT 1',

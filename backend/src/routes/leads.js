@@ -8,7 +8,10 @@ const { findCurrentCampaign } = require('../services/agents');
 const { getDispositions } = require('../services/dispositions');
 const { addDnc, isDnc } = require('../services/dnc');
 const { audit } = require('../services/audit');
-const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
+const { pageResult, parsePaging, whereClause } = require('../services/paging');
+const { leadWhere } = require('../services/leadFilters');
+const { runBulk } = require('../services/leadBulk');
+const { exportLeads } = require('../services/leadExport');
 const {
   LEAD_BASE_COLUMNS,
   applyCustomEdits,
@@ -46,40 +49,32 @@ router.get('/leads', requireCaller, async (req, res) => {
     `);
     return res.json(rows);
   }
-  const campaign = await findCurrentCampaign(req.session.user.id);
-  if (!campaign) return res.json([]);
+  // Agents: their campaign's shared leads, plus every lead given to them
+  // (any campaign) first. Leads given to another agent are theirs alone.
+  const me = req.session.user.id;
+  const campaign = await findCurrentCampaign(me);
   const [rows] = await pool.query(
-    'SELECT * FROM leads WHERE campaign_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 100',
-    [campaign.id],
+    `SELECT l.*, (l.assigned_user_id <=> ?) AS mine FROM leads l
+     WHERE l.deleted_at IS NULL
+       AND (l.assigned_user_id = ? OR (l.campaign_id = ? AND l.assigned_user_id IS NULL))
+     ORDER BY mine DESC, l.id DESC LIMIT 100`,
+    [me, me, campaign ? campaign.id : -1],
   );
-  res.json(rows);
+  res.json(rows.map((r) => ({ ...r, mine: !!Number(r.mine) })));
 });
 
 // --- Admin: every lead, searched and paged on the server ---
-// ?q= (name or phone) &campaignId= (or 'none') &listId= &status= &page= &pageSize=
+// Filters: services/leadFilters.js (&page= &pageSize= here).
 router.get('/admin/leads', requirePermission('leads', 'view'), async (req, res) => {
   const paging = parsePaging(req.query);
-  const { q, campaignId, listId, status } = req.query;
-  const digits = normalizePhone(q || '');
-  const where = whereClause([
-    ['l.deleted_at IS NULL', []],
-    [
-      q ? `(l.name LIKE ?${digits ? ' OR l.phone LIKE ?' : ''})` : '',
-      q ? [likeTerm(q.trim()), ...(digits ? [likeTerm(digits)] : [])] : [],
-    ],
-    [
-      campaignId === 'none' ? 'l.campaign_id IS NULL' : campaignId ? 'l.campaign_id = ?' : '',
-      campaignId && campaignId !== 'none' ? [campaignId] : [],
-    ],
-    [listId ? 'l.list_id = ?' : '', [listId]],
-    [status ? 'l.status = ?' : '', [status]],
-    scopeCondition(req.access.scope, 'campaigns', 'l.campaign_id'),
-  ]);
+  const { campaignId } = req.query;
+  const where = leadWhere(req.query, req.access.scope);
   const [rows] = await pool.query(
-    `SELECT l.*, c.name AS campaign_name, ls.name AS list_name
+    `SELECT l.*, c.name AS campaign_name, ls.name AS list_name, au.username AS assigned_to
      FROM leads l
      LEFT JOIN campaigns c ON c.id = l.campaign_id
      LEFT JOIN lists ls ON ls.id = l.list_id
+     LEFT JOIN users au ON au.id = l.assigned_user_id
      ${where.sql}
      ORDER BY l.id DESC LIMIT ? OFFSET ?`,
     [...where.params, paging.pageSize, paging.offset],
@@ -369,7 +364,7 @@ router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, r
       return res.status(400).json({ error: `status must be new or one of: ${codes.join(', ')}` });
   }
   const [rows] = await pool.query(
-    'SELECT id, alt_phone, priority, custom_data, campaign_id FROM leads WHERE id = ? AND deleted_at IS NULL',
+    'SELECT id, alt_phone, priority, custom_data, campaign_id, assigned_user_id FROM leads WHERE id = ? AND deleted_at IS NULL',
     [req.params.id],
   );
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id))
@@ -388,6 +383,19 @@ router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, r
     if (l[0].campaign_id !== campaignId)
       return res.status(400).json({ error: `list "${l[0].name}" belongs to a different campaign` });
   }
+  // assignedUserId left out = unchanged; null / '' = shared with the campaign again.
+  let assigned;
+  if (req.body.assignedUserId !== undefined) {
+    assigned = req.body.assignedUserId ? Number(req.body.assignedUserId) : null;
+    if (assigned) {
+      const [u] = await pool.query("SELECT id FROM users WHERE id = ? AND role = 'agent' AND status = 'active'", [
+        assigned,
+      ]);
+      if (!u[0]) return res.status(400).json({ error: 'agent not found (only active agents can be given leads)' });
+      if (req.access.scope && !req.access.scope.agentIds.includes(assigned))
+        return res.status(400).json({ error: "that agent isn't in your teams" });
+    }
+  }
   // customData left out = unchanged; otherwise checked against the form of
   // the campaign the lead ends up in.
   let customData = rows[0].custom_data;
@@ -399,7 +407,7 @@ router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, r
   }
 
   await pool.query(
-    'UPDATE leads SET name = ?, phone = ?, alt_phone = ?, priority = ?, custom_data = ?, campaign_id = ?, list_id = ?, status = COALESCE(?, status), updated_by = ? WHERE id = ?',
+    'UPDATE leads SET name = ?, phone = ?, alt_phone = ?, priority = ?, custom_data = ?, campaign_id = ?, list_id = ?, status = COALESCE(?, status), assigned_user_id = ?, updated_by = ? WHERE id = ?',
     [
       name || null,
       phone,
@@ -409,10 +417,13 @@ router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, r
       campaignId,
       listId,
       status || null,
+      assigned === undefined ? rows[0].assigned_user_id : assigned,
       req.session.user.id,
       req.params.id,
     ],
   );
+  // Given to one agent: the dialer leaves it to them (a ready hopper row goes).
+  if (assigned) await pool.query("DELETE FROM dial_hopper WHERE lead_id = ? AND status = 'ready'", [req.params.id]);
   res.json({ status: 'ok' });
 });
 
@@ -612,5 +623,86 @@ router.get('/admin/leads/template', requirePermission('leads', 'view'), async (r
 router.get('/admin/leads/csv-template', requirePermission('leads', 'view'), (req, res) =>
   res.redirect('/admin/leads/template?format=csv'),
 );
+
+// --- Bulk actions (services/leadBulk.js): ticked leads or all matching the filters.
+router.post('/admin/leads/bulk', requirePermission('leads', 'view'), async (req, res) => {
+  const body = req.body || {};
+  try {
+    const r = await runBulk(body, req.access, req.session.user.id);
+    void audit({
+      user: req.session.user,
+      action: 'leads.bulk',
+      entity: 'leads',
+      status: 200,
+      summary: `${r.action}: ${r.changed} lead(s)${r.notes.length ? ' - ' + r.notes.join('; ') : ''}`.slice(0, 250),
+      request: { ...body, ids: Array.isArray(body.ids) ? `${body.ids.length} ids` : undefined },
+      ip: req.ip,
+    });
+    res.json(r);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    throw err;
+  }
+});
+
+// --- Export: the leads matching the filters, as Excel (services/leadExport.js). Audited.
+router.get('/admin/leads/export', requirePermission('leads', 'export'), async (req, res) => {
+  const n = await exportLeads(req.query, req.access.scope, res);
+  void audit({
+    user: req.session.user,
+    action: 'leads.export',
+    entity: 'leads',
+    status: 200,
+    summary: `${n} lead(s)`,
+    request: req.query,
+    ip: req.ip,
+  });
+});
+
+// Agents for Leads (own teams' for a team role): active agents - the ones
+// leads can be given to - plus inactive ones who still hold leads, so those
+// can be found and handed to someone else (active: false).
+router.get('/admin/leads/agents', requirePermission('leads', 'view'), async (req, res) => {
+  const where = whereClause([
+    [
+      `role = 'agent' AND (status = 'active' OR id IN
+        (SELECT assigned_user_id FROM leads WHERE deleted_at IS NULL AND assigned_user_id IS NOT NULL))`,
+      [],
+    ],
+    scopeCondition(req.access.scope, 'agents', 'id'),
+  ]);
+  const [rows] = await pool.query(
+    `SELECT id, username, status = 'active' AS active FROM users ${where.sql} ORDER BY username`,
+    where.params,
+  );
+  res.json(rows.map((r) => ({ ...r, active: !!Number(r.active) })));
+});
+
+// --- One lead in full (Leads -> open a lead). A deleted lead still opens, read-only.
+router.get('/admin/leads/:id', requirePermission('leads', 'view'), async (req, res) => {
+  const [rows] = await pool.query(
+    `SELECT l.*, c.name AS campaign_name, ls.name AS list_name, ls.is_active AS list_active,
+            au.username AS assigned_to, ub.username AS updated_by_name, dl.username AS deleted_by_name,
+            (SELECT cb.callback_at FROM callbacks cb WHERE cb.lead_id = l.id AND cb.status = 'pending'
+             ORDER BY cb.callback_at LIMIT 1) AS callback_at
+     FROM leads l
+     LEFT JOIN campaigns c ON c.id = l.campaign_id
+     LEFT JOIN lists ls ON ls.id = l.list_id
+     LEFT JOIN users au ON au.id = l.assigned_user_id
+     LEFT JOIN users ub ON ub.id = l.updated_by
+     LEFT JOIN users dl ON dl.id = l.deleted_by
+     WHERE l.id = ?`,
+    [Number(req.params.id)],
+  );
+  const lead = rows[0];
+  if (!lead || !campaignInScope(req.access.scope, lead.campaign_id))
+    return res.status(404).json({ error: 'lead not found' });
+  const fields = lead.campaign_id ? await getCampaignFormFields(lead.campaign_id) : [];
+  res.json({
+    ...lead,
+    on_dnc: await isDnc(lead.phone),
+    form_fields: fields.map((x) => ({ key: x.field_key, label: x.label })),
+  });
+});
 
 module.exports = router;

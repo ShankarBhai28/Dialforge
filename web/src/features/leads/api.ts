@@ -31,15 +31,55 @@ export type Lead = {
   /** The campaign form's values known before the call (import or edit). */
   custom_data: Record<string, unknown> | null;
   created_at: string;
+  /** Given to one agent: only they see it, the dialer leaves it to them. */
+  assigned_user_id: number | null;
+  assigned_to: string | null;
 };
+
+/** GET /admin/leads/:id - one lead in full (a deleted one too, read-only). */
+export type LeadDetail = Lead & {
+  is_final: 0 | 1;
+  next_call_at: string | null;
+  last_attempt_at: string | null;
+  callback_at: string | null;
+  list_active: 0 | 1 | null;
+  updated_by_name: string | null;
+  deleted_at: string | null;
+  deleted_by_name: string | null;
+  on_dnc: boolean;
+  /** The campaign form's fields, for labels of custom_data. */
+  form_fields: { key: string; label: string }[];
+};
+
+/** active false = deactivated but still holding leads (filter only, not offered to give leads to). */
+export type LeadAgent = { id: number; username: string; active: boolean };
+
+export type BulkAction = 'status' | 'move' | 'assign' | 'reset' | 'dnc' | 'delete';
+/** Ticked leads (ids), or every lead matching the filters (all). */
+export type BulkTarget = { ids: number[] } | { all: true; filters: LeadFilters };
+export type BulkInput = BulkTarget & {
+  action: BulkAction;
+  status?: string;
+  listId?: number;
+  userId?: number | null;
+  resetAttempts?: boolean;
+};
+export type BulkResult = { action: BulkAction; changed: number; skipped: number; notes: string[] };
 
 /** GET /admin/leads: one page, plus the statuses present (within the chosen campaign) for the status filter. */
 export type LeadPage = Paged<Lead> & { statuses: string[] };
 
 /** Server-side filters; '' = no filter. `campaignId: 'none'` = leads without a campaign. `q` = name or phone. */
-export type LeadFilters = { q: string; campaignId: string; listId: string; status: string };
+export type LeadFilters = {
+  q: string;
+  campaignId: string;
+  listId: string;
+  status: string;
+  /** An agent's id, or 'none' = not given to anyone. */
+  assignedTo: string;
+};
 
-export const NO_LEAD_FILTERS: LeadFilters = { q: '', campaignId: '', listId: '', status: '' };
+export const NO_LEAD_FILTERS: LeadFilters = { q: '', campaignId: '', listId: '', status: '', assignedTo: '' };
 
 export const LEAD_PAGE_SIZE = 50;
 
@@ -99,6 +139,8 @@ export const leadKeys = {
   lists: ['admin', 'lists'] as const,
   leads: ['admin', 'leads'] as const,
   leadPage: (f: LeadFilters, page: number) => ['admin', 'leads', f, page] as const,
+  detail: (id: number) => ['admin', 'leads', 'one', id] as const,
+  agents: ['admin', 'leads', 'agents'] as const,
   recycle: (listId: number) => ['admin', 'lists', listId, 'recycle'] as const,
   dispositions: (campaignId: number) => ['admin', 'campaigns', campaignId, 'dispositions'] as const,
 };
@@ -176,16 +218,19 @@ function query(params: [string, string | number][]) {
   return s.toString();
 }
 
+const filterParams = (f: LeadFilters): [string, string][] => [
+  ['q', f.q],
+  ['campaignId', f.campaignId],
+  ['listId', f.listId],
+  ['status', f.status],
+  ['assignedTo', f.assignedTo],
+];
+
 export const leadsPath = (f: LeadFilters, page: number) =>
-  '/admin/leads?' +
-  query([
-    ['q', f.q],
-    ['campaignId', f.campaignId],
-    ['listId', f.listId],
-    ['status', f.status],
-    ['page', page],
-    ['pageSize', LEAD_PAGE_SIZE],
-  ]);
+  '/admin/leads?' + query([...filterParams(f), ['page', page], ['pageSize', LEAD_PAGE_SIZE]]);
+
+/** Leads -> Export: a plain link, the server sends the Excel file (same filters as the table). */
+export const leadsExportUrl = (f: LeadFilters) => '/admin/leads/export?' + query(filterParams(f));
 
 /** Mutations invalidate `leadKeys.leads`, the prefix of every page and filter combination. */
 export function useLeads(f: LeadFilters, page: number) {
@@ -209,6 +254,8 @@ export type LeadInput = {
   campaignId: number | null;
   listId: number | null;
   status: string;
+  /** Left out = unchanged; null = shared with the campaign again. */
+  assignedUserId?: number | null;
 };
 
 export function useSaveLead() {
@@ -228,6 +275,27 @@ export function useDeleteLead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => del(`/admin/leads/${id}`),
+    meta: { errorInline: true },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: leadKeys.leads });
+      qc.invalidateQueries({ queryKey: leadKeys.lists });
+    },
+  });
+}
+
+export function useLeadDetail(id: number) {
+  return useQuery({ queryKey: leadKeys.detail(id), queryFn: () => get<LeadDetail>(`/admin/leads/${id}`) });
+}
+
+/** Agents for Leads: active ones, plus inactive ones still holding leads (own teams' for a team role). */
+export function useLeadAgents(enabled = true) {
+  return useQuery({ queryKey: leadKeys.agents, queryFn: () => get<LeadAgent[]>('/admin/leads/agents'), enabled });
+}
+
+export function useBulkLeads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: BulkInput) => post<BulkResult>('/admin/leads/bulk', body),
     meta: { errorInline: true },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: leadKeys.leads });
