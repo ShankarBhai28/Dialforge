@@ -147,6 +147,12 @@ export function OutcomeDialog() {
     meta: { errorInline: true },
   });
 
+  // A fresh list each time the popup opens: never offer one an admin just removed.
+  useEffect(() => {
+    if (target) void dispositions.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when a new popup opens
+  }, [target]);
+
   // Auto disposition: not for a disposition given later from the call log.
   const info = useCampaignInfo(!!target && !target.late);
   const auto = target && !target.late ? (info.data?.autoDispo ?? null) : null;

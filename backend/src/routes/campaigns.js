@@ -151,11 +151,27 @@ router.get('/admin/campaigns/:id/dispositions', requireAdminSide, async (req, re
 // Replaces the whole set. Leads keep whatever code they already have -
 // a removed code just shows as its raw code in lists.
 router.put('/admin/campaigns/:id/dispositions', requirePermission('campaigns', 'edit'), async (req, res) => {
-  const [rows] = await pool.query('SELECT id FROM campaigns WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
+  const [rows] = await pool.query(
+    'SELECT id, auto_dispo_sec, auto_dispo_code FROM campaigns WHERE id = ? AND deleted_at IS NULL',
+    [req.params.id],
+  );
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].id))
     return res.status(404).json({ error: 'campaign not found' });
   const { error, dispositions } = validateDispositions(req.body.dispositions);
   if (error) return res.status(400).json({ error });
+  // The campaign's auto disposition must stay (and stay a non-callback one):
+  // otherwise every automatic save - and agents choosing it - would be refused.
+  if (rows[0].auto_dispo_sec > 0 && rows[0].auto_dispo_code) {
+    const auto = dispositions.find((d) => d.code === rows[0].auto_dispo_code);
+    if (!auto)
+      return res.status(400).json({
+        error: `"${rows[0].auto_dispo_code}" is this campaign's auto disposition - choose another one (or turn auto disposition off) in the campaign's dialer settings first`,
+      });
+    if (auto.is_callback)
+      return res
+        .status(400)
+        .json({ error: `"${auto.label}" is the auto disposition, so it can't be a callback (that needs a time)` });
+  }
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
