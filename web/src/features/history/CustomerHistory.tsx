@@ -71,13 +71,30 @@ function Answers({ answers }: { answers: { label: string; value: string }[] }) {
   );
 }
 
-/** Marks what came from an earlier, deleted lead with the same number. */
+/** Marks what came from another lead with the same number (deleted, or in another campaign). */
 function Earlier({ item }: { item: HistoryItem }) {
-  if (!item.earlierLead) return null;
+  const o = item.earlierLead;
+  if (!o) return null;
+  const text =
+    // deleted unknown = an older reply, which only had deleted leads
+    (o.deleted ?? true)
+      ? `earlier lead${o.name ? ` ${o.name}` : ''} (deleted)`
+      : o.campaign
+        ? `other lead · ${o.campaign}`
+        : 'other lead';
+  return <Badge className="ml-1 bg-muted text-muted-foreground">{text}</Badge>;
+}
+
+/** "Field: from → to" lines. */
+function Changes({ changes }: { changes: { field: string; from: unknown; to: unknown }[] }) {
   return (
-    <Badge className="ml-1 bg-muted text-muted-foreground">
-      earlier lead{item.earlierLead.name ? ` ${item.earlierLead.name}` : ''} (deleted)
-    </Badge>
+    <ul className="mt-1 text-sm text-muted-foreground">
+      {changes.map((c) => (
+        <li key={c.field}>
+          {c.field}: {show(c.from)} → <span className="text-foreground">{show(c.to)}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -209,12 +226,21 @@ function Timeline({ items }: { items: HistoryItem[] }) {
                 icon={<FileText className="size-3.5" />}
                 title={
                   <>
-                    <b>{item.form}</b> filled{item.agent && <> by {item.agent}</>}
+                    <b>{item.form}</b> saved{item.agent && <> by {item.agent}</>}
                     <Earlier item={item} />
                   </>
                 }
               >
-                <Answers answers={item.answers} />
+                {/* What changed; saves from before that was kept show their answers. */}
+                {item.changes ? (
+                  item.changes.length ? (
+                    <Changes changes={item.changes} />
+                  ) : (
+                    <p className="mt-1 text-sm text-muted-foreground">No changes.</p>
+                  )
+                ) : (
+                  <Answers answers={item.answers} />
+                )}
               </Row>
             );
           case 'callback':
@@ -241,15 +267,14 @@ function Timeline({ items }: { items: HistoryItem[] }) {
                 key={key}
                 at={item.at}
                 icon={<Pencil className="size-3.5" />}
-                title={<>Details changed{item.agent && <> by {item.agent}</>}</>}
+                title={
+                  <>
+                    Details changed{item.agent && <> by {item.agent}</>}
+                    {item.source && <span className="text-muted-foreground"> · {item.source}</span>}
+                  </>
+                }
               >
-                <ul className="mt-1 text-sm text-muted-foreground">
-                  {item.changes.map((c) => (
-                    <li key={c.field}>
-                      {c.field}: {show(c.from)} → <span className="text-foreground">{show(c.to)}</span>
-                    </li>
-                  ))}
-                </ul>
+                <Changes changes={item.changes} />
               </Row>
             );
           case 'deleted':

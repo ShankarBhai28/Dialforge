@@ -45,35 +45,43 @@ async function loadFormsWithFields(whereSql = '', params = []) {
 
 // Values are re-checked against the form definition here - the browser's
 // "required" attribute is a convenience, not a guarantee.
-function validateFormData(fields, data) {
+// `changedKeys` (optional): fields the person changed. A field they didn't
+// change keeps a saved value that no longer fits the form (e.g. a dropdown
+// option since removed) instead of blocking the save; required still applies.
+function validateFormData(fields, data, changedKeys = null) {
   const clean = {};
   for (const f of fields) {
-    let v = data[f.field_key];
-    const options = f.options || [];
-    if (f.field_type === 'checkbox') {
-      v = Array.isArray(v) ? v.map(String) : [];
-      if (v.some((x) => !options.includes(x))) return { error: `"${f.label}" has an invalid choice` };
-      if (f.is_required && v.length === 0) return { error: `"${f.label}" is required` };
-      clean[f.field_key] = v;
-      continue;
-    }
-    v = v == null ? '' : String(v).trim();
-    if (v === '') {
-      if (f.is_required) return { error: `"${f.label}" is required` };
-      clean[f.field_key] = null;
-      continue;
-    }
-    if (f.field_type === 'number' && !Number.isFinite(Number(v))) return { error: `"${f.label}" must be a number` };
-    if (f.field_type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))
-      return { error: `"${f.label}" must be an email` };
-    if (f.field_type === 'phone' && !/^\+?[0-9]{6,15}$/.test(v))
-      return { error: `"${f.label}" must be a phone number` };
-    if (f.field_type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return { error: `"${f.label}" must be a date` };
-    if (['dropdown', 'radio'].includes(f.field_type) && !options.includes(v))
-      return { error: `"${f.label}" has an invalid choice` };
-    clean[f.field_key] = f.field_type === 'number' ? Number(v) : v;
+    const strict = !changedKeys || changedKeys.includes(f.field_key);
+    const r = validateField(f, data[f.field_key]);
+    if (r.error && (strict || r.required)) return { error: r.error };
+    clean[f.field_key] = r.error ? data[f.field_key] : r.value;
   }
   return { data: clean };
+}
+
+/** One field: { value } or { error, required } (required = the error is that it's empty). */
+function validateField(f, input) {
+  let v = input;
+  const options = f.options || [];
+  if (f.field_type === 'checkbox') {
+    v = Array.isArray(v) ? v.map(String) : [];
+    if (f.is_required && v.length === 0) return { error: `"${f.label}" is required`, required: true };
+    if (v.some((x) => !options.includes(x))) return { error: `"${f.label}" has an invalid choice` };
+    return { value: v };
+  }
+  v = v == null ? '' : String(v).trim();
+  if (v === '') {
+    if (f.is_required) return { error: `"${f.label}" is required`, required: true };
+    return { value: null };
+  }
+  if (f.field_type === 'number' && !Number.isFinite(Number(v))) return { error: `"${f.label}" must be a number` };
+  if (f.field_type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))
+    return { error: `"${f.label}" must be an email` };
+  if (f.field_type === 'phone' && !/^\+?[0-9]{6,15}$/.test(v)) return { error: `"${f.label}" must be a phone number` };
+  if (f.field_type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return { error: `"${f.label}" must be a date` };
+  if (['dropdown', 'radio'].includes(f.field_type) && !options.includes(v))
+    return { error: `"${f.label}" has an invalid choice` };
+  return { value: f.field_type === 'number' ? Number(v) : v };
 }
 
 module.exports = { loadFormsWithFields, validateFormData, validateFormFields };

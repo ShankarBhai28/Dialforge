@@ -94,6 +94,15 @@ export type ImportResult = {
   imported: number;
   /** Rows that pass every check (= imported, or would be on a check). */
   wouldImport?: number;
+  /** "Update existing leads": leads changed (0 on a check). */
+  updated?: number;
+  /** Rows that match a lead of this campaign (would be updated on a check). */
+  wouldUpdate?: number;
+  /** Matched rows that had nothing new. */
+  unchanged?: number;
+  /** New leads whose number is already a lead of this campaign (a looser check allowed it). */
+  copies?: number;
+  onDuplicate?: 'skip' | 'update';
   /** inFile + existing */
   duplicates: number;
   /** Repeated inside the file. */
@@ -323,11 +332,17 @@ export function useImportLeads() {
       file,
       duplicateCheck = 'campaign',
       dryRun = false,
+      onDuplicate = 'skip',
+      moveToList = false,
     }: {
       listId: number;
       file: File;
       duplicateCheck?: DuplicateCheck;
       dryRun?: boolean;
+      /** 'update': a number already a lead of this campaign updates that lead (filled cells only). */
+      onDuplicate?: 'skip' | 'update';
+      /** With 'update': also move those leads into this list. */
+      moveToList?: boolean;
     }) => {
       // Field names come from the route: multer's single('file') + req.body.
       const form = new FormData();
@@ -335,6 +350,8 @@ export function useImportLeads() {
       form.append('listId', String(listId));
       form.append('duplicateCheck', duplicateCheck);
       if (dryRun) form.append('dryRun', '1');
+      form.append('onDuplicate', onDuplicate);
+      if (moveToList) form.append('moveToList', '1');
       return post<ImportResult>('/admin/leads/import', form);
     },
     meta: { errorInline: true },

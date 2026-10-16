@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { Download, FileSearch, FileSpreadsheet, LoaderCircle, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/form-controls';
+import { Checkbox, Select } from '@/components/ui/form-controls';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Field, FormError, SectionHeader } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
@@ -77,8 +77,12 @@ export function ImportSummary({ result }: { result: ImportResult }) {
         )}
       >
         {result.dryRun
-          ? `Checked only - nothing saved. ${ok} of ${result.total} row(s) would be imported.`
-          : `Imported ${result.imported} of ${result.total}.`}
+          ? `Checked only - nothing saved. ${ok} of ${result.total} row(s) would be imported${
+              result.onDuplicate === 'update' ? `, ${result.wouldUpdate ?? 0} would update an existing lead` : ''
+            }.`
+          : `Imported ${result.imported} of ${result.total}${
+              result.onDuplicate === 'update' ? `, updated ${result.updated ?? 0} existing lead(s)` : ''
+            }.`}
         {checkLabel && <span className="font-normal"> Duplicate check: {checkLabel}.</span>}
       </p>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
@@ -89,9 +93,31 @@ export function ImportSummary({ result }: { result: ImportResult }) {
           label="Already exist"
           tone="warn"
         />
+        {result.onDuplicate === 'update' && (
+          <Count
+            n={result.dryRun ? (result.wouldUpdate ?? 0) : (result.updated ?? 0)}
+            label={result.dryRun ? 'Would update' : 'Updated'}
+            tone="good"
+          />
+        )}
         <Count n={result.dnc} label="On DNC list" tone="muted" />
         <Count n={result.invalid} label="Invalid" tone="bad" />
       </div>
+      {!!result.unchanged && (
+        <p className="text-sm text-muted-foreground">
+          {result.unchanged} matching lead(s) already had these details - nothing to change.
+        </p>
+      )}
+      {!!result.copies && (
+        <p role="alert" className="rounded-md bg-status-break/12 px-3 py-2 text-sm text-status-break">
+          <b>
+            {result.copies} {result.dryRun ? 'would be' : 'were'} added as a second lead
+          </b>{' '}
+          with a number that is already a lead in this campaign (the duplicate check allowed it). Each copy can be
+          dialled separately. To keep one lead per customer, use <b>Within this campaign</b> or{' '}
+          <b>Update existing leads</b>.
+        </p>
+      )}
       {result.reportId && (
         <Button variant="outline" className="w-fit" asChild>
           <a href={importReportUrl(result.reportId)} download>
@@ -123,6 +149,9 @@ export function ImportTab({ listId, onListChange }: { listId: number | null; onL
   const upload = useImportLeads();
   const [file, setFile] = useState<File | null>(null);
   const [check, setCheck] = useState<DuplicateCheck>(rememberedCheck);
+  // A number already a lead of this campaign: skip it (default) or update that lead with the file's details.
+  const [onDuplicate, setOnDuplicate] = useState<'skip' | 'update'>('skip');
+  const [moveToList, setMoveToList] = useState(false);
   // Bumped after a successful import to clear the file input.
   const [fileKey, setFileKey] = useState(0);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -146,11 +175,13 @@ export function ImportTab({ listId, onListChange }: { listId: number | null; onL
     if (!file) return setLocalError('Choose an .xlsx or .csv file first.');
     setLocalError(null);
     upload.mutate(
-      { listId: effectiveList, file, duplicateCheck: check, dryRun },
+      { listId: effectiveList, file, duplicateCheck: check, dryRun, onDuplicate, moveToList },
       {
         onSuccess: (r) => {
           if (r.dryRun) return;
-          toast.success(`Imported ${r.imported} lead(s)`);
+          toast.success(
+            `Imported ${r.imported} lead(s)${r.onDuplicate === 'update' ? `, updated ${r.updated ?? 0}` : ''}`,
+          );
           setFile(null);
           setFileKey((k) => k + 1);
         },
@@ -221,6 +252,39 @@ export function ImportTab({ listId, onListChange }: { listId: number | null; onL
               ))}
             </Select>
           </Field>
+          <Field
+            id="import-existing"
+            label="If a number is already a lead in this campaign"
+            hint={
+              onDuplicate === 'update'
+                ? "Its details (name, alt phone, priority, form fields) are updated from the file - empty cells keep what the lead has. Every change goes into the lead's history."
+                : 'The row is skipped, so the lead stays as it is.'
+            }
+          >
+            <Select
+              id="import-existing"
+              value={onDuplicate}
+              onChange={(e) => {
+                upload.reset();
+                setOnDuplicate(e.target.value as 'skip' | 'update');
+              }}
+            >
+              <option value="skip">Skip it (keep the lead as it is)</option>
+              <option value="update">Update existing leads with the file's details</option>
+            </Select>
+          </Field>
+          {onDuplicate === 'update' && (
+            <label className="-mt-2 flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={moveToList}
+                onChange={(e) => {
+                  upload.reset();
+                  setMoveToList(e.target.checked);
+                }}
+              />{' '}
+              Also move the updated leads into this list
+            </label>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" disabled={upload.isPending} onClick={() => send(true)}>
               {upload.isPending && upload.variables?.dryRun ? (

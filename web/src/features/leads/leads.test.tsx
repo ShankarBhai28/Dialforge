@@ -546,6 +546,78 @@ describe('Leads & Lists - import', () => {
     expect(uploads[0].get('dryRun')).toBeNull();
   });
 
+  it('"Update existing leads": sends the choice, reports updated leads and warns about second copies', async () => {
+    const { uploads } = fakeApiWithUploads({
+      ...base,
+      'POST /admin/leads/import': {
+        body: {
+          total: 4,
+          imported: 1,
+          wouldImport: 1,
+          wouldUpdate: 2,
+          updated: 2,
+          unchanged: 1,
+          copies: 0,
+          onDuplicate: 'update',
+          duplicates: 0,
+          inFile: 0,
+          existing: 0,
+          dnc: 0,
+          invalid: 0,
+          scope: 'campaign',
+          dryRun: false,
+          reportId: null,
+          errors: [],
+        },
+      },
+    });
+    renderPage(<LeadsPage />);
+    await userEvent.click(await screen.findByRole('tab', { name: 'Import' }));
+    await userEvent.upload(screen.getByLabelText('File'), new File(['phone,name'], 'l.csv', { type: 'text/csv' }));
+    expect(screen.getByText(/The row is skipped, so the lead stays as it is/)).toBeInTheDocument();
+    await userEvent.selectOptions(
+      screen.getByLabelText('If a number is already a lead in this campaign'),
+      "Update existing leads with the file's details",
+    );
+    expect(screen.getByText(/empty cells keep what the lead has/)).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText('Also move the updated leads into this list'));
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Imported 1 of 4, updated 2 existing lead(s).');
+    expect(screen.getByText('Updated')).toBeInTheDocument();
+    expect(screen.getByText(/1 matching lead\(s\) already had these details/)).toBeInTheDocument();
+    expect(uploads[0].get('onDuplicate')).toBe('update');
+    expect(uploads[0].get('moveToList')).toBe('1');
+  });
+
+  it('a looser check that adds a second lead with the same number says so', async () => {
+    fakeApiWithUploads({
+      ...base,
+      'POST /admin/leads/import': {
+        body: {
+          total: 2,
+          imported: 0,
+          wouldImport: 2,
+          copies: 1,
+          onDuplicate: 'skip',
+          duplicates: 0,
+          inFile: 0,
+          existing: 0,
+          dnc: 0,
+          invalid: 0,
+          scope: 'list',
+          dryRun: true,
+          reportId: null,
+          errors: [],
+        },
+      },
+    });
+    renderPage(<LeadsPage />);
+    await userEvent.click(await screen.findByRole('tab', { name: 'Import' }));
+    await userEvent.upload(screen.getByLabelText('File'), new File(['phone,name'], 'l.csv', { type: 'text/csv' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Check file' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/1 would be added as a second lead/);
+  });
+
   it('"Check file" with the chosen duplicate check saves nothing and says what would happen', async () => {
     const { uploads } = fakeApiWithUploads({
       ...base,

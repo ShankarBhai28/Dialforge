@@ -6,8 +6,12 @@ import { get } from '@/lib/api';
 type Base = {
   at: string;
   agent?: string | null;
-  /** From an earlier, deleted lead with the same number (history kept across a re-add). */
-  earlierLead?: { id: number; name: string | null } | null;
+  /**
+   * From another lead with the same number: a deleted one (history kept across
+   * a re-add) or an active one in another campaign. campaign null + name null =
+   * one the viewer can't see (only their own call is shown).
+   */
+  earlierLead?: { id: number; name: string | null; campaign?: string | null; deleted?: boolean } | null;
 };
 export type HistoryItem =
   | (Base & {
@@ -26,9 +30,21 @@ export type HistoryItem =
       recordingUrl?: string;
     })
   | (Base & { type: 'outcome'; outcome: string; note: string | null; callbackAt: string | null })
-  | (Base & { type: 'form'; form: string; callId: number | null; answers: { label: string; value: string }[] })
+  | (Base & {
+      type: 'form';
+      form: string;
+      callId: number | null;
+      answers: { label: string; value: string }[];
+      /** What this save changed (null for saves from before changes were kept). */
+      changes?: { field: string; from: string | null; to: string | null }[] | null;
+    })
   | (Base & { type: 'callback'; due: string; status: string; owner: string | null; note: string | null })
-  | (Base & { type: 'edit'; changes: { field: string; from: unknown; to: unknown }[] })
+  | (Base & {
+      type: 'edit';
+      changes: { field: string; from: unknown; to: unknown }[];
+      /** e.g. "upload october.xlsx" when an upload changed it. */
+      source?: string | null;
+    })
   | (Base & { type: 'created'; campaign: string | null; list: string | null })
   | (Base & { type: 'deleted' });
 

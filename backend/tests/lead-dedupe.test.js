@@ -33,7 +33,16 @@ test('campaign (default): file repeats and existing leads skipped, with the reas
     p.toInsert.map((r) => r.phone),
     ['9840012345', '9222222222'],
   );
-  assert.deepStrictEqual(p.summary, { total: 6, imported: 2, inFile: 1, existing: 1, dnc: 1, invalid: 1 });
+  assert.deepStrictEqual(p.summary, {
+    total: 6,
+    imported: 2,
+    inFile: 1,
+    existing: 1,
+    dnc: 1,
+    invalid: 1,
+    updated: 0,
+    copies: 0,
+  });
   const reasons = Object.fromEntries(p.skipped.map((s) => [s.rowNum, s.reason]));
   assert.strictEqual(reasons[3], 'Duplicate: same number as row 2 in this file');
   assert.strictEqual(reasons[4], 'Already in campaign Sales - list Oct (lead #345)');
@@ -43,12 +52,30 @@ test('campaign (default): file repeats and existing leads skipped, with the reas
 
 test('file only: repeats inside the sheet skipped, existing leads allowed', () => {
   const p = plan('file', new Map());
-  assert.deepStrictEqual(p.summary, { total: 6, imported: 3, inFile: 1, existing: 0, dnc: 1, invalid: 1 });
+  assert.deepStrictEqual(p.summary, {
+    total: 6,
+    imported: 3,
+    inFile: 1,
+    existing: 0,
+    dnc: 1,
+    invalid: 1,
+    updated: 0,
+    copies: 0,
+  });
 });
 
 test('none: every valid row goes in, even repeats; DNC and invalid still skipped', () => {
   const p = plan('none');
-  assert.deepStrictEqual(p.summary, { total: 6, imported: 4, inFile: 0, existing: 0, dnc: 1, invalid: 1 });
+  assert.deepStrictEqual(p.summary, {
+    total: 6,
+    imported: 4,
+    inFile: 0,
+    existing: 0,
+    dnc: 1,
+    invalid: 1,
+    updated: 0,
+    copies: 0,
+  });
 });
 
 test('a lead in a campaign the uploader may not see is "another campaign"', () => {
@@ -126,4 +153,56 @@ test('report: only for the uploader, expires; Excel has the reason and the origi
   assert.strictEqual(items['Duplicate check'], 'In this campaign');
   assert.strictEqual(items['Checked only (nothing saved)'], 'Yes');
   assert.strictEqual(items['Would be imported'], 2);
+});
+
+// --- "Update existing leads": one customer stays one lead ---
+const UPD_ROWS = [
+  row(2, '9000000001', { name: 'Ravi Kumar', city: '' }), // a lead of this campaign: update it
+  row(3, '9000000002', { name: '' }), // two leads in this campaign have this number: never guess
+  row(4, '9000000003', { name: 'New' }), // not a lead yet: added
+  row(5, '9000000001', { name: 'Again' }), // same number twice in the file: once only
+];
+const MATCHES = new Map([
+  ['9000000001', [{ id: 345, list: 'Oct' }]],
+  [
+    '9000000002',
+    [
+      { id: 346, list: 'Oct' },
+      { id: 347, list: null },
+    ],
+  ],
+]);
+const CITY = [{ field_key: 'city', label: 'City', field_type: 'text', options: null }];
+
+test('update existing: filled cells update the one matching lead; empty cells and several matches are left alone', () => {
+  const p = planImport({
+    rows: UPD_ROWS,
+    fields: CITY,
+    scope: 'campaign',
+    existing: new Map(),
+    dnc: new Set(),
+    onDuplicate: 'update',
+    campaignMatches: MATCHES,
+  });
+  assert.deepStrictEqual(p.toUpdate, [{ leadId: 345, name: 'Ravi Kumar', altPhone: null, priority: null, custom: {} }]);
+  assert.deepStrictEqual(
+    p.toInsert.map((r) => r.phone),
+    ['9000000003'],
+  );
+  assert.match(p.skipped.find((s) => s.rowNum === 3).reason, /Matches 2 leads in this campaign \(#346, #347\)/);
+  assert.match(p.skipped.find((s) => s.rowNum === 5).reason, /same number as row 2/);
+  assert.strictEqual(p.summary.updated, 1);
+});
+
+test('skip mode with a looser check: a second lead with the same number in this campaign is counted as a warning', () => {
+  const p = planImport({
+    rows: [row(2, '9000000001')],
+    fields: [],
+    scope: 'list',
+    existing: new Map(),
+    dnc: new Set(),
+    campaignMatches: MATCHES,
+  });
+  assert.strictEqual(p.toInsert.length, 1);
+  assert.strictEqual(p.summary.copies, 1);
 });

@@ -154,6 +154,8 @@ describe('agent screen', () => {
         leadId: 9,
         callId: 55,
         data: { amount: '5000', plan: 'Gold' },
+        // only what the agent changed updates the lead's current details
+        changed: ['plan'],
       }),
     );
 
@@ -269,7 +271,8 @@ describe('agent screen', () => {
         },
         'GET /agent/leads/7/history': {
           body: {
-            lead: { id: 7 },
+            // The lead's current details (the agent's last save made them so).
+            lead: { id: 7, customData: { amount: 4500, plan: 'Gold' } },
             summary: {
               calls: 1,
               answered: 1,
@@ -297,7 +300,7 @@ describe('agent screen', () => {
     expect(within(log).getByLabelText('Recording of call 61')).toHaveAttribute('src', '/agent/calls/61/recording');
     expect(within(log).queryByRole('button', { name: 'Play recording of 9000000001' })).not.toBeInTheDocument();
 
-    // Clicking the customer opens them, the form filled with the last saved answers.
+    // Clicking the customer opens them, the form filled with the lead's current details.
     expect(within(log).getByText('talked 55s')).toBeInTheDocument();
     // An answered call without an outcome: flagged, and the outcome can be given now.
     expect(within(log).getByText('Needs outcome')).toBeInTheDocument();
@@ -309,7 +312,7 @@ describe('agent screen', () => {
     await userEvent.click(within(log).getByRole('button', { name: 'Open Ravi' }));
     expect(await screen.findByLabelText('Amount *')).toHaveValue(4500);
     expect(screen.getByLabelText('Plan')).toHaveValue('Gold');
-    expect(screen.getByText(/Filled with the answers saved by agent04/)).toBeInTheDocument();
+    expect(screen.getByText(/The lead's current details/)).toBeInTheDocument();
     await userEvent.selectOptions(within(log).getByLabelText('Show'), 'Not answered (1)');
     expect(within(log).queryByText('Interested')).not.toBeInTheDocument();
     expect(within(log).getByText('Busy')).toBeInTheDocument();

@@ -6,6 +6,9 @@
 //
 // A call belongs to the lead by calls.lead_id; calls made before a number
 // was linked (dialpad, old inbound) are found by the lead's numbers.
+const { diffCustom } = require('./leadData');
+/** A value as the history shows it (lists joined). */
+const shown = (v) => (v == null ? null : Array.isArray(v) ? v.join(', ') : String(v));
 const pool = require('../../db');
 const { normalizePhone } = require('../../dialer-common');
 const { RESULT_LABELS, outcomeLabel } = require('./reports/common');
@@ -52,10 +55,18 @@ const json = (v) => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : 
 const EDIT_FIELDS = { name: 'Name', phone: 'Phone', alt_phone: 'Alt phone', priority: 'Priority', status: 'Status' };
 
 /**
- * The full history of one lead. `recordingUrl(callId)`: where the player
- * fetches a call's recording (admin or agent route); omitted = no player.
+ * The full history of one customer: this lead plus every other lead with
+ * the same number (active or deleted) the viewer may see. `recordingUrl(callId)`:
+ * where the player fetches a call's recording (admin or agent route); omitted
+ * = no player. `canSee(campaignId)`: which other leads the viewer may see
+ * (default all). `ownCallsBy`: an agent's id - their own calls with this
+ * customer show even from a lead they can't see.
  */
-async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }) {
+async function leadHistory(
+  leadId,
+  { recordingUrl = null, canSee = () => true, ownCallsBy = null } = {},
+  deps = { pool },
+) {
   const db = deps.pool;
   const [[lead]] = await db.query(
     `SELECT l.id, l.name, l.phone, l.alt_phone, l.status, l.attempts, l.is_final, l.next_call_at, l.created_at, l.deleted_at,
@@ -71,21 +82,30 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
     .filter(Boolean)
     .flatMap((n) => [n, `91${n}`, `0${n}`, `+91${n}`]);
 
-  // Earlier, deleted leads with the same number (e.g. its list was deleted
-  // and the number came back as a new lead): their calls, outcomes, forms
-  // and callbacks are this customer's story too.
+  // Other leads with the same number - deleted ones (its list was deleted,
+  // the number came back) and active ones (e.g. in another campaign): their
+  // calls, outcomes, forms and callbacks are this customer's story too, as
+  // far as the viewer may see them.
   const plain = [lead.phone, lead.alt_phone].map(normalizePhone).filter(Boolean);
-  const [earlier] = plain.length
+  const [others] = plain.length
     ? await db.query(
-        `SELECT id, name, created_at, deleted_at FROM leads
-         WHERE id <> ? AND deleted_at IS NOT NULL AND (phone IN (?) OR alt_phone IN (?))
-         ORDER BY id DESC LIMIT 10`,
+        `SELECT l.id, l.name, l.created_at, l.deleted_at, l.campaign_id, c.name AS campaign
+         FROM leads l LEFT JOIN campaigns c ON c.id = l.campaign_id
+         WHERE l.id <> ? AND (l.phone IN (?) OR l.alt_phone IN (?))
+         ORDER BY l.id DESC LIMIT 20`,
         [leadId, plain, plain],
       )
     : [[]];
+  const earlier = others.filter((o) => canSee(o.campaign_id));
+  const hidden = others.filter((o) => !canSee(o.campaign_id)).map((o) => o.id);
   const leadIds = [leadId, ...earlier.map((e) => e.id)];
-  const earlierById = new Map(earlier.map((e) => [e.id, { id: e.id, name: e.name }]));
+  const earlierById = new Map(
+    earlier.map((e) => [e.id, { id: e.id, name: e.name, campaign: e.campaign || null, deleted: !!e.deleted_at }]),
+  );
+  // An agent's own call from a lead they can't see: shown, without that lead's details.
+  for (const id of hidden) earlierById.set(id, { id, name: null, campaign: null, deleted: false });
   const earlierOf = (id) => earlierById.get(Number(id)) || null;
+  const ownHidden = ownCallsBy && hidden.length ? hidden : null;
 
   const [calls] = await db.query(
     `SELECT ca.id, ca.lead_id, ca.direction, ca.start_time, ca.end_time, ca.agent_connect_time, ca.disposition, ca.outcome,
@@ -99,8 +119,9 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
      LEFT JOIN users u ON u.id = ca.agent_user_id
      LEFT JOIN campaign_dispositions cd ON cd.campaign_id = ca.campaign_id AND cd.code = ca.outcome
      WHERE ca.lead_id IN (?) OR (ca.lead_id IS NULL AND ca.to_number IN (?))
+        ${ownHidden ? 'OR (ca.lead_id IN (?) AND ca.agent_user_id = ?)' : ''}
      ORDER BY ca.id DESC LIMIT ?`,
-    [leadIds, numbers.length ? numbers : [''], MAX_ITEMS],
+    [leadIds, numbers.length ? numbers : [''], ...(ownHidden ? [ownHidden, ownCallsBy] : []), MAX_ITEMS],
   );
 
   // The agent's outcomes (audit log): note / callback time, and outcomes
@@ -112,13 +133,13 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
     [leadIds, MAX_ITEMS],
   );
   const [edits] = await db.query(
-    `SELECT a.at, a.username, a.action, a.before_json, a.after_json FROM audit_log a
+    `SELECT a.at, a.username, a.action, a.summary, a.before_json, a.after_json FROM audit_log a
      WHERE a.entity = 'leads' AND a.entity_id = ? AND a.action IN ('leads.edit', 'leads.update') AND a.status = 200
      ORDER BY a.id DESC LIMIT 50`,
     [leadId],
   );
   const [forms] = await db.query(
-    `SELECT r.id, r.lead_id, r.form_id, r.call_id, r.created_at, r.data, f.name AS form, u.username AS agent
+    `SELECT r.id, r.lead_id, r.form_id, r.call_id, r.created_at, r.data, r.changes, f.name AS form, u.username AS agent
      FROM form_responses r JOIN forms f ON f.id = r.form_id LEFT JOIN users u ON u.id = r.user_id
      WHERE r.lead_id IN (?) ORDER BY r.id DESC LIMIT 50`,
     [leadIds],
@@ -129,6 +150,16 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
         formIds,
       ])
     : [[]];
+  // Labels of the lead's campaign form, for "what changed" in the history.
+  const [labelRows] = lead.campaign_id
+    ? await db.query(
+        'SELECT ff.field_key, ff.label FROM campaigns c JOIN form_fields ff ON ff.form_id = c.form_id WHERE c.id = ?',
+        [lead.campaign_id],
+      )
+    : [[]];
+  const labelOf = new Map(labelRows.map((r) => [r.field_key, r.label]));
+  const changeList = (list, labels = labelOf) =>
+    list.map((c) => ({ field: labels.get(c.key) || c.key, from: shown(c.from), to: shown(c.to) }));
   const [callbacks] = await db.query(
     `SELECT cb.id, cb.lead_id, cb.callback_at, cb.status, cb.note, cb.created_at, cu.username AS created_by, ou.username AS owner
      FROM callbacks cb LEFT JOIN users cu ON cu.id = cb.created_by LEFT JOIN users ou ON ou.id = cb.user_id
@@ -190,6 +221,10 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
     form: f.form,
     callId: f.call_id,
     answers: formAnswers(f.data, fieldsByForm[f.form_id] || []),
+    // What this save changed (saves from before 0012 have only the answers).
+    changes: f.changes
+      ? changeList(json(f.changes) || [], new Map((fieldsByForm[f.form_id] || []).map((x) => [x.field_key, x.label])))
+      : null,
     earlierLead: earlierOf(f.lead_id),
   }));
   timeline.push(...answered);
@@ -211,12 +246,22 @@ async function leadHistory(leadId, { recordingUrl = null } = {}, deps = { pool }
     const changes = Object.entries(EDIT_FIELDS)
       .filter(([k]) => k in after && String(before[k] ?? '') !== String(after[k] ?? ''))
       .map(([k, label]) => ({ field: label, from: before[k] ?? null, to: after[k] ?? null }));
-    if (changes.length) timeline.push({ type: 'edit', at: e.at, agent: e.username, changes });
+    // The form fields too (the lead's current values).
+    if ('custom_data' in after) changes.push(...changeList(diffCustom(before.custom_data, after.custom_data)));
+    // An upload that updated the lead says which file.
+    const source = e.action === 'leads.update' && /^upload /.test(e.summary || '') ? e.summary : null;
+    if (changes.length) timeline.push({ type: 'edit', at: e.at, agent: e.username, changes, source });
   }
   timeline.push({ type: 'created', at: lead.created_at, campaign: lead.campaign, list: lead.list });
   for (const e of earlier) {
-    timeline.push({ type: 'created', at: e.created_at, campaign: null, list: null, earlierLead: earlierOf(e.id) });
-    timeline.push({ type: 'deleted', at: e.deleted_at, earlierLead: earlierOf(e.id) });
+    timeline.push({
+      type: 'created',
+      at: e.created_at,
+      campaign: e.campaign || null,
+      list: null,
+      earlierLead: earlierOf(e.id),
+    });
+    if (e.deleted_at) timeline.push({ type: 'deleted', at: e.deleted_at, earlierLead: earlierOf(e.id) });
   }
   timeline.sort((a, b) => new Date(b.at) - new Date(a.at));
 

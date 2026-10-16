@@ -46,6 +46,33 @@ async function findExisting(numbers, scope, { listId, campaignId }, deps = { poo
   return found;
 }
 
+/**
+ * Every active lead of the upload's campaign with these numbers (phone or
+ * alt phone): Map number -> [{ id, list }]. For "Update existing leads" and
+ * the "a second lead with the same number" warning.
+ */
+async function findCampaignMatches(numbers, campaignId, deps = { pool }) {
+  const found = new Map();
+  const unique = [...new Set(numbers)];
+  for (let i = 0; i < unique.length; i += 1000) {
+    const chunk = unique.slice(i, i + 1000);
+    const [rows] = await deps.pool.query(
+      `SELECT l.id, l.phone, l.alt_phone, ls.name AS list FROM leads l LEFT JOIN lists ls ON ls.id = l.list_id
+       WHERE l.deleted_at IS NULL AND l.campaign_id = ? AND (l.phone IN (?) OR l.alt_phone IN (?)) ORDER BY l.id`,
+      [campaignId, chunk, chunk],
+    );
+    for (const r of rows) {
+      for (const n of new Set([r.phone, r.alt_phone].map(normalizePhone))) {
+        if (!n) continue;
+        const list = found.get(n) || [];
+        if (!list.some((x) => x.id === r.id)) list.push({ id: r.id, list: r.list });
+        found.set(n, list);
+      }
+    }
+  }
+  return found;
+}
+
 const validNumber = (n) => n.length >= 7 && n.length <= 15;
 
 /**
@@ -53,10 +80,31 @@ const validNumber = (n) => n.length >= 7 && n.length <= 15;
  * numbers. `campaignInScope(id)`: may the uploader see that campaign's name.
  * Returns { toInsert: [{ phone, altPhone, name, priority, custom }], skipped, summary }.
  */
-function planImport({ rows, fields, scope, existing, dnc, campaignInScope = () => true }) {
-  const summary = { total: rows.length, imported: 0, inFile: 0, existing: 0, dnc: 0, invalid: 0 };
+function planImport({
+  rows,
+  fields,
+  scope,
+  existing,
+  dnc,
+  campaignInScope = () => true,
+  // 'update': a number already a lead of this campaign updates that lead
+  // (filled cells only) instead of being skipped or added again.
+  onDuplicate = 'skip',
+  campaignMatches = new Map(),
+}) {
+  const summary = {
+    total: rows.length,
+    imported: 0,
+    inFile: 0,
+    existing: 0,
+    dnc: 0,
+    invalid: 0,
+    updated: 0,
+    copies: 0,
+  };
   const skipped = [];
   const toInsert = [];
+  const toUpdate = [];
   const seenInFile = new Map(); // number -> row number of its first appearance
   const skip = (row, kind, reason) => {
     summary[kind]++;
@@ -106,6 +154,31 @@ function planImport({ rows, fields, scope, existing, dnc, campaignInScope = () =
       skip(row, 'dnc', 'On the Do Not Call list');
       continue;
     }
+    const inCampaign = campaignMatches.get(phone) || [];
+    if (onDuplicate === 'update' && inCampaign.length) {
+      if (seenInFile.has(phone)) {
+        skip(row, 'inFile', `Duplicate: same number as row ${seenInFile.get(phone)} in this file`);
+        continue;
+      }
+      seenInFile.set(phone, row.rowNum);
+      if (inCampaign.length > 1) {
+        // Never guess which customer is meant.
+        skip(
+          row,
+          'existing',
+          `Matches ${inCampaign.length} leads in this campaign (${inCampaign.map((x) => '#' + x.id).join(', ')}) - update them by hand`,
+        );
+        continue;
+      }
+      toUpdate.push({
+        leadId: inCampaign[0].id,
+        name: values.name || null,
+        altPhone,
+        priority: values.priority ? priority : null,
+        custom,
+      });
+      continue;
+    }
     if (scope !== 'none') {
       if (seenInFile.has(phone)) {
         skip(row, 'inFile', `Duplicate: same number as row ${seenInFile.get(phone)} in this file`);
@@ -124,10 +197,13 @@ function planImport({ rows, fields, scope, existing, dnc, campaignInScope = () =
       }
       seenInFile.set(phone, row.rowNum);
     }
+    // Allowed by the chosen check, but the campaign already has this number: say so.
+    if (inCampaign.length) summary.copies++;
     toInsert.push({ phone, altPhone, name: values.name || null, priority, custom });
   }
   summary.imported = toInsert.length;
-  return { toInsert, skipped, summary };
+  summary.updated = toUpdate.length;
+  return { toInsert, toUpdate, skipped, summary };
 }
 
 // --- the skipped-rows report: kept 1 hour, only for the uploader ---
@@ -201,6 +277,7 @@ async function reportWorkbook(report) {
 }
 
 module.exports = {
+  findCampaignMatches,
   DUP_SCOPES,
   DEFAULT_SCOPE,
   SCOPE_LABEL,

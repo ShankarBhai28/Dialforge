@@ -43,6 +43,7 @@ const LEAD = {
 
 test('history: calls carry agent, talk, outcome + note; forms, callbacks, edits; newest first', async () => {
   const d = db([
+    ['WHERE l.id <> ?', []], // no other lead with this number
     ['FROM leads l', [LEAD]],
     [
       'FROM calls ca',
@@ -319,11 +320,20 @@ test("number check: a deleted lead of a campaign the agent can't see -> warning 
 
 test("history of a re-added number includes the deleted lead's calls, marked as earlier", async () => {
   const d = db([
-    ['FROM leads l', [{ ...LEAD, id: 21, name: 'Karthi1', phone: '8608688838' }]],
     [
-      'deleted_at IS NOT NULL AND (phone IN',
-      [{ id: 17, name: 'Karthi1', created_at: T('01T09:00:00'), deleted_at: T('13T18:47:19') }],
+      'WHERE l.id <> ? AND (l.phone IN',
+      [
+        {
+          id: 17,
+          name: 'Karthi1',
+          created_at: T('01T09:00:00'),
+          deleted_at: T('13T18:47:19'),
+          campaign_id: 2,
+          campaign: 'Sales',
+        },
+      ],
     ],
+    ['FROM leads l', [{ ...LEAD, id: 21, name: 'Karthi1', phone: '8608688838' }]],
     [
       'FROM calls ca',
       [
@@ -352,7 +362,7 @@ test("history of a re-added number includes the deleted lead's calls, marked as 
     calls.map((c) => [c.callId, c.earlierLead]),
     [
       [85, null],
-      [34, { id: 17, name: 'Karthi1' }],
+      [34, { id: 17, name: 'Karthi1', campaign: 'Sales', deleted: true }],
     ],
   );
   assert.ok(h.timeline.some((t) => t.type === 'deleted' && t.earlierLead.id === 17));

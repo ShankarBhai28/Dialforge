@@ -75,10 +75,8 @@ export function LeadDialog({ lead, onOpenChange }: { lead: Lead; onOpenChange: (
         phone: phone.trim(),
         altPhone: altPhone.trim(),
         priority: Number(priority),
-        // Only when the form is on screen; otherwise the saved values stay as they are.
-        customData: fields.length
-          ? Object.fromEntries(fields.map((f) => [f.field_key, customValue(f.field_key)]))
-          : undefined,
+        // Only the fields changed here: a change someone else made meanwhile stays.
+        customData: fields.length && Object.keys(customEdits).length ? customEdits : undefined,
         campaignId: campaignId ? Number(campaignId) : null,
         listId: listId ? Number(listId) : null,
         status,

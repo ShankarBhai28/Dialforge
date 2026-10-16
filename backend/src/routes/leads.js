@@ -13,6 +13,7 @@ const { leadWhere } = require('../services/leadFilters');
 const { runBulk } = require('../services/leadBulk');
 const { exportLeads } = require('../services/leadExport');
 const { applyStatus, statusEffect } = require('../services/leadStatus');
+const { adoptCallForms, mergeChanged, parseCustom } = require('../services/leadData');
 const {
   LEAD_BASE_COLUMNS,
   applyCustomEdits,
@@ -26,6 +27,7 @@ const { agentCanSeeLead, deletedLeadFor, leadHistory, numberCheck } = require('.
 const {
   DEFAULT_SCOPE,
   DUP_SCOPES,
+  findCampaignMatches,
   findExisting,
   getReport,
   planImport,
@@ -148,7 +150,16 @@ router.get('/agent/leads/:id', requireCaller, async (req, res) => {
 
 router.get('/agent/leads/:id/history', requireCaller, async (req, res) => {
   const lead = await leadForAgent(req, res);
-  if (lead) res.json(await leadHistory(lead.id, { recordingUrl: (id) => `/agent/calls/${id}/recording` }));
+  if (!lead) return;
+  // Other leads with this number: the agent's current campaign (or none) only; their own calls always.
+  const campaign = await findCurrentCampaign(req.session.user.id);
+  res.json(
+    await leadHistory(lead.id, {
+      recordingUrl: (id) => `/agent/calls/${id}/recording`,
+      canSee: (cid) => cid == null || (campaign && cid === campaign.id) || req.session.user.role !== 'agent',
+      ownCallsBy: req.session.user.id,
+    }),
+  );
 });
 
 // Admin side (Leads -> History): with recordings to play for roles that may.
@@ -158,7 +169,12 @@ router.get('/admin/leads/:id/history', requirePermission('leads', 'view'), async
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id))
     return res.status(404).json({ error: 'lead not found' });
   const canPlay = can(req.access, 'calls', 'recordings');
-  res.json(await leadHistory(id, { recordingUrl: canPlay ? (callId) => `/admin/calls/${callId}/recording` : null }));
+  res.json(
+    await leadHistory(id, {
+      recordingUrl: canPlay ? (callId) => `/admin/calls/${callId}/recording` : null,
+      canSee: (cid) => campaignInScope(req.access.scope, cid),
+    }),
+  );
 });
 
 router.post('/leads/:id/disposition', requireCaller, async (req, res) => {
@@ -231,6 +247,8 @@ router.post('/agent/calls/:callId/disposition', requireCaller, async (req, res) 
     lead = { id: result.insertId, phone, campaign_id: campaignId, status: 'new' };
   }
   await pool.query('UPDATE calls SET lead_id = ? WHERE id = ? AND lead_id IS NULL', [lead.id, call.id]);
+  // Answers saved during this call, before the lead existed, are the lead's now.
+  await adoptCallForms(pool, lead.id, call.id);
   return saveDisposition(req, res, lead);
 });
 
@@ -472,18 +490,26 @@ router.post('/admin/leads/import', requirePermission('leads', 'import'), receive
   const dryRun = req.body.dryRun === '1' || req.body.dryRun === 'true';
   const numbers = rows.map((r) => normalizePhone(r.values.phone)).filter(Boolean);
   const existing = await findExisting(numbers, scope, { listId: list.id, campaignId });
+  const campaignMatches = await findCampaignMatches(numbers, campaignId);
   const [dncRows] = await pool.query('SELECT phone FROM dnc_numbers WHERE tenant_id = 1');
   const dnc = new Set(dncRows.map((r) => r.phone));
-  const { toInsert, skipped, summary } = planImport({
+  // 'update' = a number already a lead of this campaign updates that lead (filled cells only).
+  const onDuplicate = req.body.onDuplicate === 'update' ? 'update' : 'skip';
+  const moveToList = req.body.moveToList === '1' || req.body.moveToList === 'true';
+  const { toInsert, toUpdate, skipped, summary } = planImport({
     rows,
     fields,
     scope,
     existing,
     dnc,
     campaignInScope: (id) => campaignInScope(req.access.scope, id),
+    onDuplicate,
+    campaignMatches,
   });
+  const updateAudits = [];
+  let unchanged = 0;
 
-  if (!dryRun && toInsert.length) {
+  if (!dryRun && (toInsert.length || toUpdate.length)) {
     // One transaction, multi-row INSERTs in chunks - all or nothing, and
     // far fewer round-trips than one INSERT per lead.
     const conn = await pool.getConnection();
@@ -505,6 +531,51 @@ router.post('/admin/leads/import', requirePermission('leads', 'import'), receive
           [values.slice(i, i + 500)],
         );
       }
+      // Updates: filled cells change the lead's current values; empty cells keep them.
+      for (let i = 0; i < toUpdate.length; i += 500) {
+        const part = toUpdate.slice(i, i + 500);
+        const [cur] = await conn.query(
+          'SELECT id, name, alt_phone, priority, custom_data, list_id FROM leads WHERE id IN (?) FOR UPDATE',
+          [part.map((u) => u.leadId)],
+        );
+        const byId = new Map(cur.map((r) => [r.id, r]));
+        for (const u of part) {
+          const c = byId.get(u.leadId);
+          if (!c) continue;
+          const custom = mergeChanged(c.custom_data, u.custom, Object.keys(u.custom));
+          const before = {
+            name: c.name,
+            alt_phone: c.alt_phone,
+            priority: c.priority,
+            list_id: c.list_id,
+            custom_data: parseCustom(c.custom_data),
+          };
+          const after = {
+            name: u.name ?? c.name,
+            alt_phone: u.altPhone ?? c.alt_phone,
+            priority: u.priority ?? c.priority,
+            list_id: moveToList ? list.id : c.list_id,
+            custom_data: custom,
+          };
+          if (JSON.stringify(before) === JSON.stringify(after)) {
+            unchanged++;
+            continue;
+          }
+          await conn.query(
+            'UPDATE leads SET name = ?, alt_phone = ?, priority = ?, list_id = ?, custom_data = ?, updated_by = ? WHERE id = ?',
+            [
+              after.name,
+              after.alt_phone,
+              after.priority,
+              after.list_id,
+              Object.keys(custom).length ? JSON.stringify(custom) : null,
+              req.session.user.id,
+              u.leadId,
+            ],
+          );
+          updateAudits.push({ id: u.leadId, before, after });
+        }
+      }
       await conn.commit();
     } catch (err) {
       await conn.rollback();
@@ -514,7 +585,23 @@ router.post('/admin/leads/import', requirePermission('leads', 'import'), receive
       conn.release();
     }
   }
+  // Each updated lead's history says what the upload changed, and from which file.
+  const fileName = String((req.file && req.file.originalname) || 'file').slice(0, 120);
+  for (const a of updateAudits) {
+    await audit({
+      user: req.session.user,
+      action: 'leads.update',
+      entity: 'leads',
+      entityId: a.id,
+      status: 200,
+      summary: `upload ${fileName}`,
+      before: a.before,
+      after: a.after,
+      ip: req.ip,
+    });
+  }
   if (dryRun) summary.imported = 0;
+  if (!dryRun) summary.updated = updateAudits.length;
   const reportId = skipped.length
     ? saveReport(req.session.user.id, {
         headers,
@@ -528,6 +615,9 @@ router.post('/admin/leads/import', requirePermission('leads', 'import'), receive
   res.json({
     ...summary,
     wouldImport: toInsert.length,
+    wouldUpdate: toUpdate.length,
+    unchanged,
+    onDuplicate,
     duplicates: summary.inFile + summary.existing,
     scope,
     dryRun,

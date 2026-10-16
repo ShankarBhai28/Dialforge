@@ -240,26 +240,44 @@ function LeadDetail({
   );
 }
 
-type SavedAnswers = { data: Record<string, unknown>; at: string; agent: string | null };
-
-/** The form, filled with the lead's last saved answers (else its uploaded data) - not empty. */
+/**
+ * The form, filled with the lead's CURRENT details (whoever changed them last:
+ * an agent, an admin or an upload). Waits for fresh data, so it never starts
+ * from values someone has since changed.
+ */
 function LeadForm({ form }: { form: AgentForm }) {
   const { state } = useController();
   const leadId = state.workspace.lead?.id ?? null;
+  const version = state.workspace.formVersion;
   const history = useLeadHistory('agent', leadId);
-  if (leadId && history.isPending) return <Skeleton className="h-40" />;
-  const saved = history.data?.formData?.[String(form.id)] ?? null;
-  return <AgentFormCard key={state.workspace.formVersion} form={form} saved={saved} />;
+  const settled = !leadId || (!history.isPending && !history.isFetching);
+  const [readyFor, setReadyFor] = useState<number | null>(null);
+  // Ready for this opening once fresh data is in (set during render: no extra effect).
+  if (settled && readyFor !== version) setReadyFor(version);
+  if (readyFor !== version) return <Skeleton className="h-40" />;
+  const current = leadId ? (history.data?.lead.customData ?? null) : null;
+  return <AgentFormCard key={version} form={form} current={current} />;
 }
 
-function AgentFormCard({ form, saved }: { form: AgentForm; saved: SavedAnswers | null }) {
+/** Only the fields that differ from what the form opened with. */
+function changedKeys(fields: AgentForm['fields'], from: FieldValues, to: FieldValues) {
+  return fields.map((f) => f.field_key).filter((k) => JSON.stringify(from[k] ?? '') !== JSON.stringify(to[k] ?? ''));
+}
+
+function AgentFormCard({ form, current }: { form: AgentForm; current: Record<string, unknown> | null }) {
   const { controller, state } = useController();
   const ws = state.workspace;
-  const [values, setValues] = useState<FieldValues>(() =>
-    fieldValues(form.fields, { ...(ws.lead?.custom_data ?? {}), ...(saved?.data ?? {}) }),
-  );
+  const [opened] = useState<FieldValues>(() => fieldValues(form.fields, current ?? ws.lead?.custom_data ?? {}));
+  const [values, setValues] = useState<FieldValues>(opened);
+  // Only what this agent changed is sent: someone else's change made meanwhile stays.
   const save = useMutation({
-    mutationFn: () => post('/agent/form-responses', { leadId: ws.lead?.id ?? null, callId: ws.callId, data: values }),
+    mutationFn: () =>
+      post('/agent/form-responses', {
+        leadId: ws.lead?.id ?? null,
+        callId: ws.callId,
+        data: values,
+        changed: changedKeys(form.fields, opened, values),
+      }),
     meta: { errorInline: true },
     onSuccess: () => controller.formSaved(),
   });
@@ -278,10 +296,9 @@ function AgentFormCard({ form, saved }: { form: AgentForm; saved: SavedAnswers |
             ? `Saving against: ${ws.contextText}`
             : 'Not linked to a lead - answers will be saved without one.'}
         </p>
-        {saved && (
+        {ws.lead && (
           <p className="text-xs text-muted-foreground">
-            Filled with the answers saved {saved.agent ? `by ${saved.agent} ` : ''}on {formatDateTime(saved.at)} -
-            change what's new and save.
+            The lead's current details - change what's new and save. Every change is kept in the history.
           </p>
         )}
       </CardHeader>

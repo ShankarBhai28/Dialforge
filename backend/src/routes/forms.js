@@ -6,8 +6,10 @@ const { findCurrentCampaign } = require('../services/agents');
 const { loadFormsWithFields, validateFormData, validateFormFields } = require('../services/forms');
 
 const { scopeCondition } = require('../services/access');
+const { diffCustom, mergeChanged, parseCustom } = require('../services/leadData');
 
 const router = express.Router();
+const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
 
 router.get('/admin/forms', requireAdminSide, async (req, res) => {
   const forms = await loadFormsWithFields('WHERE deleted_at IS NULL');
@@ -152,13 +154,64 @@ router.post('/agent/form-responses', requireCaller, async (req, res) => {
     if (!calls[0]) return res.status(400).json({ error: 'that call is not yours' });
   }
 
-  const { error, data } = validateFormData(form.fields, req.body.data || {});
-  if (error) return res.status(400).json({ error });
-  const [result] = await pool.query(
-    'INSERT INTO form_responses (tenant_id, form_id, campaign_id, lead_id, call_id, user_id, data) VALUES (1, ?, ?, ?, ?, ?, ?)',
-    [form.id, campaign.id, leadId || null, callId || null, req.session.user.id, JSON.stringify(data)],
-  );
-  res.status(201).json({ id: result.insertId });
+  // The fields this agent changed on their screen (older screens send none:
+  // then every field counts). Only those change the lead's current values,
+  // so a screen opened before someone else's edit can't undo it.
+  const keys = form.fields.map((f) => f.field_key);
+  const submitted = req.body.data && typeof req.body.data === 'object' ? req.body.data : {};
+  const changed = Array.isArray(req.body.changed) ? keys.filter((k) => req.body.changed.includes(k)) : keys;
+
+  if (!leadId) {
+    // A first call (no lead yet): kept with the call; the lead created at the
+    // outcome takes these answers (leadData.adoptCallForms).
+    const { error, data } = validateFormData(form.fields, submitted);
+    if (error) return res.status(400).json({ error });
+    const [result] = await pool.query(
+      'INSERT INTO form_responses (tenant_id, form_id, campaign_id, lead_id, call_id, user_id, data) VALUES (1, ?, ?, NULL, ?, ?, ?)',
+      [form.id, campaign.id, callId || null, req.session.user.id, JSON.stringify(data)],
+    );
+    return res.status(201).json({ id: result.insertId, changes: [] });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    // Locked: two saves at once can't lose each other's fields.
+    const [[lead]] = await conn.query('SELECT custom_data FROM leads WHERE id = ? FOR UPDATE', [leadId]);
+    const current = parseCustom(lead && lead.custom_data);
+    const { error, data } = validateFormData(form.fields, { ...current, ...pick(submitted, changed) }, changed);
+    if (error) {
+      await conn.rollback();
+      return res.status(400).json({ error });
+    }
+    const next = mergeChanged(current, data, changed);
+    const changes = diffCustom(current, next, changed);
+    await conn.query('UPDATE leads SET custom_data = ?, updated_by = ? WHERE id = ?', [
+      Object.keys(next).length ? JSON.stringify(next) : null,
+      req.session.user.id,
+      leadId,
+    ]);
+    // The save itself, with its full answers (Forms -> Responses) and what it changed (history).
+    const [result] = await conn.query(
+      'INSERT INTO form_responses (tenant_id, form_id, campaign_id, lead_id, call_id, user_id, data, changes) VALUES (1, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        form.id,
+        campaign.id,
+        leadId,
+        callId || null,
+        req.session.user.id,
+        JSON.stringify(data),
+        JSON.stringify(changes),
+      ],
+    );
+    await conn.commit();
+    res.status(201).json({ id: result.insertId, changes });
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
 });
 
 module.exports = router;
