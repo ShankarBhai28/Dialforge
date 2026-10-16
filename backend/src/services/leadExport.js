@@ -7,6 +7,7 @@ const pool = require('../../db');
 const { leadWhere } = require('./leadFilters');
 const { getCampaignFormFields } = require('./leadImport');
 const { RESULT_LABELS } = require('./reports/common');
+const { NAME_KEY } = require('./leadData');
 
 const MAX_ROWS = 200000;
 const BATCH = 5000;
@@ -41,6 +42,51 @@ function resultOf(c) {
   if (c.agent_connect_time) return 'Answered';
   if (c.disposition) return RESULT_LABELS[c.disposition] || c.disposition;
   return c.end_time ? 'Not answered' : 'In progress';
+}
+
+/**
+ * The form columns: [header, key], with the form's LABELS (not its internal
+ * keys) in the form's order, every field included even when empty. The form
+ * of the campaign being exported (campaign filter, or the list's campaign);
+ * otherwise the forms of the campaigns the leads are in, then any saved key
+ * no form has. The form's "name" field is the lead's Name column (one name
+ * per customer), so it isn't repeated. A label equal to a fixed column gets
+ * "(form)" so no two headers are the same.
+ */
+async function formColumns(db, query, where, deps) {
+  let campaignId = query.campaignId && query.campaignId !== 'none' ? Number(query.campaignId) : null;
+  if (!campaignId && query.listId) {
+    const [[list]] = await db.query('SELECT campaign_id FROM lists WHERE id = ?', [Number(query.listId)]);
+    campaignId = list ? list.campaign_id : null;
+  }
+  let fields = [];
+  if (campaignId) {
+    fields = (await deps.getCampaignFormFields(campaignId)).map((x) => [x.label, x.field_key]);
+  } else {
+    const [rows] = await db.query(
+      `SELECT ff.field_key, ff.label FROM form_fields ff JOIN campaigns c ON c.form_id = ff.form_id
+       WHERE c.id IN (SELECT DISTINCT l.campaign_id FROM leads l ${where.sql}) ORDER BY c.id, ff.sort_order, ff.id`,
+      where.params,
+    );
+    fields = rows.map((r) => [r.label, r.field_key]);
+  }
+  const known = new Set(fields.map(([, k]) => k));
+  const [keys] = await db.query(
+    `SELECT DISTINCT jt.k FROM leads l, JSON_TABLE(JSON_KEYS(COALESCE(l.custom_data, JSON_OBJECT())), '$[*]' COLUMNS (k VARCHAR(64) PATH '$')) jt
+     ${where.sql} LIMIT 200`,
+    where.params,
+  );
+  for (const { k } of keys) if (!known.has(k)) fields.push([k, k]); // saved, but on no current form
+  const fixed = new Set(BASE.map(([h]) => h.toLowerCase()));
+  const seen = new Set();
+  const out = [];
+  for (const [label, key] of fields) {
+    if (key === NAME_KEY || seen.has(key)) continue;
+    seen.add(key);
+    const header = fixed.has(String(label).toLowerCase()) ? `${label} (form)` : label;
+    out.push([header, key]);
+  }
+  return out;
 }
 
 /** For one batch of leads: { leadId: { last_agent, last_result, calls, connected, talk_seconds, last_note, callback_due } }. */
@@ -106,19 +152,7 @@ async function exportLeads(query, scope, res, deps = { pool, getCampaignFormFiel
   const db = deps.pool;
   const where = leadWhere(query, scope);
 
-  // Form columns: the filtered campaign's form, else the keys the leads carry.
-  let formCols = [];
-  if (query.campaignId && query.campaignId !== 'none') {
-    formCols = (await deps.getCampaignFormFields(Number(query.campaignId))).map((f) => [f.label, f.field_key]);
-  }
-  if (!formCols.length) {
-    const [keys] = await db.query(
-      `SELECT DISTINCT jt.k FROM leads l, JSON_TABLE(JSON_KEYS(COALESCE(l.custom_data, JSON_OBJECT())), '$[*]' COLUMNS (k VARCHAR(64) PATH '$')) jt
-       ${where.sql} LIMIT 100`,
-      where.params,
-    );
-    formCols = keys.map((r) => [r.k, r.k]);
-  }
+  const formCols = await formColumns(db, query, where, deps);
 
   const stamp = new Date().toISOString().slice(0, 10);
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

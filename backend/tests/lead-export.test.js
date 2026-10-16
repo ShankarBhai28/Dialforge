@@ -79,3 +79,33 @@ test('each lead row says who last handled it, how its calls went, the last note 
   assert.strictEqual(row.Status, 'Call Back');
   assert.strictEqual(row.city, 'Chennai');
 });
+
+test("list download: the list's form LABELS in form order, every field even when empty, no second Name", async () => {
+  const out = new PassThrough();
+  out.setHeader = () => {};
+  const chunks = [];
+  out.on('data', (c) => chunks.push(c));
+  const done = new Promise((r) => out.on('end', r));
+  const base = db();
+  const pool = {
+    async query(sql, p) {
+      if (sql.startsWith('SELECT campaign_id FROM lists')) return [[{ campaign_id: 4 }]];
+      return base.query(sql, p);
+    },
+  };
+  const form = [
+    { field_key: 'name', label: 'First Name' },
+    { field_key: 'amount', label: 'Email Address' },
+    { field_key: 'date_of_birth', label: 'Date of Birth' },
+    { field_key: 'phone2', label: 'Phone' }, // same as a fixed column
+  ];
+  await exportLeads({ listId: '2' }, null, out, { pool, getCampaignFormFields: async (id) => (id === 4 ? form : []) });
+  await done;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.concat(chunks));
+  const headers = wb.getWorksheet('Leads').getRow(1).values.slice(1);
+  const formHeaders = headers.slice(headers.indexOf('Callback due') + 1);
+  // labels, in form order; empty Date of Birth still there; "First Name" is the Name column; city is on no form (last)
+  assert.deepStrictEqual(formHeaders, ['Email Address', 'Date of Birth', 'Phone (form)', 'city']);
+  assert.strictEqual(headers.filter((h) => /name/i.test(h)).length, 1);
+});
