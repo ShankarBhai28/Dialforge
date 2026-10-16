@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Clock, Coffee, Headset, LogOut, PhoneOff, Timer, Users2, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useNow } from '@/lib/hooks';
 import { useLogout, useMe } from '@/features/auth/auth';
 import type { AgentStats } from './api';
 import { useController, usePhone } from './AgentProvider';
@@ -16,7 +17,8 @@ export const hms = (total: number) =>
     .map((n) => String(n).padStart(2, '0'))
     .join(':');
 
-function pillFor(stats: AgentStats | undefined) {
+/** autoAvailableAt: when wrap-up ends by itself (null = wrap-up off: the agent chooses Available). */
+function pillFor(stats: AgentStats | undefined, autoAvailableAt: number | null, now: number) {
   switch (stats?.currentStatus) {
     case 'available':
       return {
@@ -27,17 +29,26 @@ function pillFor(stats: AgentStats | undefined) {
     case 'break':
       return { text: stats.currentReason || 'Break', cls: 'bg-status-break', pulse: false };
     case 'acw':
-      return { text: 'ACW - Wrapping Up', cls: 'bg-status-acw', pulse: false };
+      return {
+        text: autoAvailableAt
+          ? `Wrap-up · ${Math.max(0, Math.ceil((autoAvailableAt - now) / 1000))}s → Available`
+          : 'Wrap-up - choose Available',
+        cls: 'bg-status-acw',
+        pulse: false,
+      };
     default:
       return { text: 'Offline', cls: 'bg-status-offline', pulse: false };
   }
 }
 
 function StatusMenu({ stats }: { stats: AgentStats | undefined }) {
-  const { controller } = useController();
+  const { controller, state } = useController();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const pill = pillFor(stats);
+  const now = useNow(500);
+  const pill = pillFor(stats, state.autoAvailableAt, now);
+  // In wrap-up with no call or disposition pending: one click to take the next call.
+  const canBeReady = stats?.currentStatus === 'acw' && !state.outcomeFor && !state.call;
 
   useEffect(() => {
     if (!open) return;
@@ -52,7 +63,12 @@ function StatusMenu({ stats }: { stats: AgentStats | undefined }) {
   };
   const item = 'flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-left text-sm hover:bg-muted';
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative flex items-center gap-2" ref={ref}>
+      {canBeReady && (
+        <Button size="sm" variant="secondary" onClick={() => void controller.setStatus('available')}>
+          Ready
+        </Button>
+      )}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -131,7 +147,7 @@ const TILES: { key: keyof AgentStats; label: string; icon: LucideIcon; cls: stri
   { key: 'talkSeconds', label: 'Talk Time', icon: Headset, cls: 'bg-status-talk/12 text-status-talk' },
   { key: 'breakSeconds', label: 'Break Time', icon: Coffee, cls: 'bg-status-break/12 text-status-break' },
   { key: 'handleSeconds', label: 'Handle Time', icon: Users2, cls: 'bg-status-available/12 text-status-available' },
-  { key: 'acwSeconds', label: 'ACW Time', icon: Timer, cls: 'bg-status-acw/12 text-status-acw' },
+  { key: 'acwSeconds', label: 'Wrap-up Time', icon: Timer, cls: 'bg-status-acw/12 text-status-acw' },
 ];
 
 export function Tiles({ stats }: { stats: AgentStats | undefined }) {

@@ -147,9 +147,12 @@ export function OutcomeDialog() {
     meta: { errorInline: true },
   });
 
-  // A fresh list each time the popup opens: never offer one an admin just removed.
+  // Each new popup: a fresh list (never offer one an admin just removed) and a
+  // clean save state - the previous call's save must not stop this one's auto disposition.
   useEffect(() => {
-    if (target) void dispositions.refetch();
+    if (!target) return;
+    save.reset();
+    void dispositions.refetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when a new popup opens
   }, [target]);
 
@@ -197,11 +200,21 @@ export function OutcomeDialog() {
             Choose the disposition for the call with {target?.name || target?.phone}.
           </DialogDescription>
           {auto && left !== null && (
-            <p role="timer" className="text-sm font-medium text-status-break">
-              {callbackFor
-                ? 'Auto disposition paused while you set the callback.'
-                : `Auto disposition in ${left}s: ${auto.label}`}
-            </p>
+            <div className="space-y-1">
+              <p role="timer" className="text-sm font-medium text-status-break">
+                {callbackFor
+                  ? 'Auto disposition paused while you set the callback.'
+                  : `Auto disposition in ${left}s: ${auto.label}`}
+              </p>
+              {!callbackFor && (
+                <div className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+                  <div
+                    className="h-full rounded-full bg-status-break transition-[width] duration-1000 ease-linear"
+                    style={{ width: `${(left / auto.seconds) * 100}%` }}
+                  />
+                </div>
+              )}
+            </div>
           )}
         </DialogHeader>
         <DialogBody className="space-y-2 pb-5">
@@ -221,6 +234,9 @@ export function OutcomeDialog() {
                 aria-pressed={callbackFor?.code === d.code}
               >
                 {d.label}
+                {auto && auto.code === d.code && (
+                  <span className="text-xs font-normal text-status-break">saved automatically</span>
+                )}
               </button>
             ))
           )}

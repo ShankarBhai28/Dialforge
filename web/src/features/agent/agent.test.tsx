@@ -173,6 +173,19 @@ describe('agent screen', () => {
   it("auto disposition: no disposition given in time -> the campaign's choice is saved by itself", async () => {
     const { calls, ua } = await connect(
       backend({
+        'GET /agent/dispositions': {
+          body: [
+            ...DISPOSITIONS,
+            {
+              code: 'no_dispo',
+              label: 'No Disposition',
+              is_final: 0,
+              retry_after_min: 60,
+              marks_dnc: 0,
+              is_callback: 0,
+            },
+          ],
+        },
         'GET /agent/call-policy': { body: { autoAnswer: false } },
         'GET /agent/active-call': { body: ACTIVE },
         'POST /leads/9/disposition': { body: { status: 'ok' } },
@@ -201,6 +214,21 @@ describe('agent screen', () => {
     expect(calls.find((c) => c.key === 'POST /leads/9/disposition')?.body).toMatchObject({
       status: 'no_dispo',
       note: 'Auto disposition (none given in time)',
+    });
+
+    // The next call: auto disposition works again (it only worked once before).
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^disposition$/i })).not.toBeInTheDocument());
+    const s2 = new FakeSession('9876543210', 'Meena');
+    act(() => void ua.ring(s2));
+    const ringing2 = await screen.findByRole('dialog');
+    await userEvent.click(within(ringing2).getByRole('button', { name: /accept/i }));
+    act(() => s2.up());
+    await screen.findByRole('region', { name: 'Current call' });
+    act(() => s2.remoteHangup());
+    const popup2 = await screen.findByRole('dialog', { name: /^disposition$/i });
+    expect(await within(popup2).findByText('saved automatically')).toBeInTheDocument();
+    await waitFor(() => expect(calls.filter((c) => c.key === 'POST /leads/9/disposition')).toHaveLength(2), {
+      timeout: 5000,
     });
   });
 
