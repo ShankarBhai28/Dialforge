@@ -1,4 +1,5 @@
 const express = require('express');
+const { floorSummary, liveAgents } = require('../services/liveFloor');
 const pool = require('../../db');
 const { requireAdminSide, requirePermission, requireRole } = require('../middleware/auth');
 const { collectHealth } = require('../services/health');
@@ -39,25 +40,14 @@ router.get('/admin/dashboard', requirePermission('dashboard', 'view'), async (re
 });
 
 // --- Admin: real-time live agent status ---
+// Each agent with campaign, team, line, login time, current call and today's
+// numbers (services/liveFloor.js); the summary = callers waiting + today's totals.
 router.get('/admin/live-agents', requirePermission('live', 'view'), async (req, res) => {
-  const [cond, params] = scopeCondition(req.access.scope, 'agents', 'u.id');
-  const [rows] = await pool.query(
-    `
-    SELECT
-      u.id, u.username, e.name AS extension_name,
-      asl.status, asl.reason, asl.started_at,
-      q.name AS queue_name,
-      (SELECT c.to_number FROM calls c WHERE c.from_extension = e.name AND c.end_time IS NULL ORDER BY c.id DESC LIMIT 1) AS active_call_number
-    FROM users u
-    LEFT JOIN extensions e ON u.extension_id = e.id
-    LEFT JOIN agent_status_log asl ON asl.user_id = u.id AND asl.ended_at IS NULL
-    LEFT JOIN queues q ON q.id = asl.queue_id
-    WHERE u.role = 'agent'${cond ? ` AND ${cond}` : ''}
-    ORDER BY u.username
-  `,
-    params,
-  );
-  res.json(rows);
+  res.json(await liveAgents(req.access.scope));
+});
+
+router.get('/admin/live-agents/summary', requirePermission('live', 'view'), async (req, res) => {
+  res.json(await floorSummary(req.access.scope));
 });
 
 // --- Force logout: a supervisor takes a stuck or absent agent offline ---

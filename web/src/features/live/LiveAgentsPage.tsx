@@ -24,7 +24,7 @@ import { formatTime } from '@/lib/format';
 import { useNow } from '@/lib/hooks';
 import { useRealtime } from '@/lib/realtime';
 import { cn, formatSeconds } from '@/lib/utils';
-import { dashboardKeys, useLiveAgents, type LiveAgent } from '@/features/dashboard/api';
+import { dashboardKeys, useFloorSummary, useLiveAgents, type LiveAgent } from '@/features/dashboard/api';
 import { AgentStatusBadge } from '@/features/dashboard/AgentStatusBadge';
 import { MODE_INFO, MonitorBar } from '@/features/monitor/MonitorBar';
 import { startMonitor, useMonitorLine, type MonitorMode } from '@/features/monitor/monitorLine';
@@ -93,6 +93,53 @@ function Counts({
   );
 }
 
+const BREAK_WARN_SEC = 15 * 60;
+const KIND_LABEL = { inbound: 'Inbound', outbound: 'Outbound', dialer: 'Dialer' } as const;
+
+/** Time in status, amber/red when a break or wrap-up runs long. */
+function statusTone(a: LiveAgent, seconds: number | null) {
+  if (seconds === null || a.active_call_number) return '';
+  if (a.status === 'break' && seconds > BREAK_WARN_SEC) return 'font-semibold text-status-break';
+  if (a.status === 'acw' && seconds > Math.max(60, (a.wrapup_sec ?? 0) + 60)) return 'font-semibold text-destructive';
+  return 'text-muted-foreground';
+}
+
+/** Above the table: callers waiting for an agent now, and today's floor totals. */
+function FloorBar() {
+  const floor = useFloorSummary();
+  const f = floor.data;
+  if (!f) return null;
+  const waitingTone = f.waiting === 0 ? 'green' : (f.longestWaitSeconds ?? 0) > 60 ? 'red' : 'amber';
+  return (
+    <div
+      className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border bg-muted/30 px-4 py-3"
+      aria-label="Floor"
+    >
+      <div>
+        <div className="text-xs font-medium text-muted-foreground">Callers waiting</div>
+        <div className="flex items-center gap-2">
+          <StatusPill tone={waitingTone}>{f.waiting === 0 ? 'None' : `${f.waiting} waiting`}</StatusPill>
+          {f.longestWaitSeconds !== null && f.waiting > 0 && (
+            <span className="text-sm tabular-nums">longest {formatSeconds(f.longestWaitSeconds)}</span>
+          )}
+        </div>
+        {f.waiting > 0 && (
+          <div className="text-xs text-muted-foreground">
+            {f.waitingInbound} inbound · {f.waitingDialer} dialer
+          </div>
+        )}
+      </div>
+      <div>
+        <div className="text-xs font-medium text-muted-foreground">Today</div>
+        <div className="text-sm tabular-nums">
+          <b>{f.today.calls}</b> calls · <b>{f.today.connected}</b> connected · talk{' '}
+          <b>{formatSeconds(f.today.talkSeconds)}</b>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AgentsTable({
   agents,
   monitorModes,
@@ -108,85 +155,167 @@ function AgentsTable({
   const line = useMonitorLine();
   const actions = monitorModes.length > 0 || !!onLogout;
   const lineReady = line.status === 'connected' && !line.session;
+  const ago = (iso: string | null | undefined) => (iso ? Math.max(0, (now - new Date(iso).getTime()) / 1000) : null);
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Agent</TableHead>
-          <TableHead>Extension</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Queue</TableHead>
-          <TableHead>Since</TableHead>
-          <TableHead>Active call</TableHead>
-          {actions && <TableHead className="text-right">Actions</TableHead>}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {agents.map((a) => {
-          const since = a.started_at ? (now - new Date(a.started_at).getTime()) / 1000 : null;
-          const monitoredHere = line.session?.agentId === a.id;
-          return (
-            <TableRow key={a.id} className={monitoredHere ? 'bg-status-available/5' : undefined}>
-              <TableCell className="font-semibold">{a.username}</TableCell>
-              <TableCell>{a.extension_name ?? '—'}</TableCell>
-              <TableCell className="whitespace-nowrap">
-                {/* A status the badge doesn't know is shown as-is, like the classic page. */}
-                {a.status && !KNOWN.has(a.status) && !a.active_call_number ? (
-                  <StatusPill tone="grey">{a.status}</StatusPill>
-                ) : (
-                  <AgentStatusBadge status={a.status} onCall={!!a.active_call_number} />
-                )}
-                {a.reason && <span className="ml-2 text-xs text-muted-foreground">{a.reason}</span>}
-              </TableCell>
-              <TableCell>{a.queue_name ?? '—'}</TableCell>
-              <TableCell className="whitespace-nowrap tabular-nums">
-                {a.status && a.started_at ? (
-                  <>
-                    {formatTime(a.started_at)}
-                    {since !== null && <span className="ml-2 text-muted-foreground">({formatSeconds(since)})</span>}
-                  </>
-                ) : (
-                  '—'
-                )}
-              </TableCell>
-              <TableCell className="tabular-nums">{a.active_call_number ?? '—'}</TableCell>
-              {actions && (
-                <TableCell className="text-right whitespace-nowrap">
-                  {a.active_call_number &&
-                    monitorModes.map((m) => {
-                      const Icon = MODE_INFO[m].icon;
-                      return (
-                        <Button
-                          key={m}
-                          variant="ghost"
-                          size="sm"
-                          disabled={!lineReady}
-                          title={lineReady ? MODE_INFO[m].hint : 'Connect your monitoring line first (above)'}
-                          onClick={() => onMonitor(a, m)}
-                          aria-label={`${MODE_INFO[m].label} ${a.username}`}
-                        >
-                          <Icon /> {MODE_INFO[m].label}
-                        </Button>
-                      );
-                    })}
-                  {onLogout && a.status && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive"
-                      onClick={() => onLogout(a)}
-                      aria-label={`Force logout ${a.username}`}
-                    >
-                      <LogOut /> Force logout
-                    </Button>
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Agent</TableHead>
+            <TableHead>Extension</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Campaign</TableHead>
+            <TableHead>Current call</TableHead>
+            <TableHead>Today</TableHead>
+            <TableHead>Logged in</TableHead>
+            {actions && <TableHead className="text-right">Actions</TableHead>}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {agents.map((a) => {
+            const since = a.status ? ago(a.started_at) : null;
+            const monitoredHere = line.session?.agentId === a.id;
+            const call = a.call ?? null;
+            const callSecs = call ? ago(call.connectedAt ?? call.startedAt) : null;
+            const login = ago(a.login_at);
+            return (
+              <TableRow key={a.id} className={monitoredHere ? 'bg-status-available/5' : undefined}>
+                <TableCell>
+                  <div className="font-semibold">{a.username}</div>
+                  {a.teams && <div className="text-xs text-muted-foreground">{a.teams}</div>}
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {a.extension_name ?? '—'}
+                  {a.line && (
+                    <span
+                      className={cn(
+                        'ml-2 inline-block size-2 rounded-full align-middle',
+                        a.line === 'registered'
+                          ? 'bg-status-available'
+                          : a.line === 'unregistered'
+                            ? 'bg-destructive'
+                            : 'bg-muted-foreground/40',
+                      )}
+                      role="img"
+                      aria-label={
+                        a.line === 'registered'
+                          ? 'phone line connected'
+                          : a.line === 'unregistered'
+                            ? 'phone line not connected'
+                            : 'phone line unknown'
+                      }
+                      title={
+                        a.line === 'registered'
+                          ? 'Phone line connected'
+                          : a.line === 'unregistered'
+                            ? 'Phone line NOT connected - calls cannot reach this agent'
+                            : 'Line state unknown'
+                      }
+                    />
                   )}
                 </TableCell>
-              )}
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+                <TableCell className="whitespace-nowrap">
+                  {/* A status the badge doesn't know is shown as-is, like the classic page. */}
+                  {a.status && !KNOWN.has(a.status) && !a.active_call_number ? (
+                    <StatusPill tone="grey">{a.status}</StatusPill>
+                  ) : (
+                    <AgentStatusBadge status={a.status} onCall={!!a.active_call_number} />
+                  )}
+                  {a.reason && <span className="ml-2 text-xs text-muted-foreground">{a.reason}</span>}
+                  {a.status && since !== null && (
+                    <div className={cn('text-xs tabular-nums', statusTone(a, since))}>
+                      {formatTime(a.started_at!)} · {formatSeconds(since)}
+                    </div>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <div>{a.campaign_name ?? '—'}</div>
+                  {a.queue_name && <div className="text-xs text-muted-foreground">{a.queue_name}</div>}
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {call ? (
+                    <>
+                      <div className="tabular-nums">
+                        {call.number}
+                        {call.leadName && <span className="ml-1 text-muted-foreground">· {call.leadName}</span>}
+                      </div>
+                      <div className="text-xs text-muted-foreground tabular-nums">
+                        {KIND_LABEL[call.kind]}
+                        {callSecs !== null && (
+                          <>
+                            {' '}
+                            · {call.connectedAt ? 'talking' : 'ringing'} {formatSeconds(callSecs)}
+                          </>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    (a.active_call_number ?? '—')
+                  )}
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-sm tabular-nums">
+                  {a.today ? (
+                    <>
+                      <div>
+                        {a.today.calls} calls · {a.today.connected} conn.
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        talk {formatSeconds(a.today.talkSeconds)}
+                        {a.today.avgHandleSeconds !== null && <> · AHT {formatSeconds(a.today.avgHandleSeconds)}</>}
+                      </div>
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-sm tabular-nums">
+                  {a.login_at && login !== null ? (
+                    <>
+                      <div>{formatTime(a.login_at)}</div>
+                      <div className="text-xs text-muted-foreground">{formatSeconds(login)}</div>
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                </TableCell>
+                {actions && (
+                  <TableCell className="text-right whitespace-nowrap">
+                    {a.active_call_number &&
+                      monitorModes.map((m) => {
+                        const Icon = MODE_INFO[m].icon;
+                        return (
+                          <Button
+                            key={m}
+                            variant="ghost"
+                            size="sm"
+                            disabled={!lineReady}
+                            title={lineReady ? MODE_INFO[m].hint : 'Connect your monitoring line first (above)'}
+                            onClick={() => onMonitor(a, m)}
+                            aria-label={`${MODE_INFO[m].label} ${a.username}`}
+                          >
+                            <Icon /> {MODE_INFO[m].label}
+                          </Button>
+                        );
+                      })}
+                    {onLogout && a.status && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={() => onLogout(a)}
+                        aria-label={`Force logout ${a.username}`}
+                      >
+                        <LogOut /> Force logout
+                      </Button>
+                    )}
+                  </TableCell>
+                )}
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
 
@@ -197,7 +326,10 @@ export function LiveAgentsPage() {
 
   // Instant refresh on any status change or call event; the query's own
   // interval is only the safety net.
-  const refresh = () => qc.invalidateQueries({ queryKey: dashboardKeys.liveAgents });
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: dashboardKeys.liveAgents });
+    void qc.invalidateQueries({ queryKey: dashboardKeys.floor });
+  };
   useRealtime('agent.status', refresh);
   useRealtime('call.event', refresh);
 
@@ -213,14 +345,17 @@ export function LiveAgentsPage() {
   };
   const [q, setQ] = useState('');
   const [queue, setQueue] = useState('');
+  const [campaign, setCampaign] = useState('');
   const all = agents.data ?? [];
   const queues = [...new Set(all.map((a) => a.queue_name).filter((x): x is string => !!x))].sort();
+  const campaigns = [...new Set(all.map((a) => a.campaign_name).filter((x): x is string => !!x))].sort();
   const term = q.trim().toLowerCase();
   const shown = all.filter(
     (a) =>
       matchesStatus(a, status) &&
       (!term || a.username.toLowerCase().includes(term) || (a.extension_name ?? '').includes(term)) &&
-      (!queue || a.queue_name === queue),
+      (!queue || a.queue_name === queue) &&
+      (!campaign || a.campaign_name === campaign),
   );
 
   // --- monitoring ---
@@ -246,7 +381,7 @@ export function LiveAgentsPage() {
       <CardContent className="pt-5">
         <SectionHeader
           title="Live agents"
-          description="Real-time status and active calls. Updates the moment an agent changes status."
+          description="Who is doing what right now: status, campaign, current call and today's numbers. Updates live."
           actions={
             <Button variant="outline" onClick={() => agents.refetch()} disabled={agents.isFetching}>
               <RefreshCw className={agents.isFetching ? 'animate-spin' : undefined} /> Refresh
@@ -268,8 +403,9 @@ export function LiveAgentsPage() {
           </EmptyState>
         ) : (
           <>
+            <FloorBar />
             <Counts agents={all} value={status} onChange={setStatus} />
-            <div className="mb-4 grid gap-2 sm:grid-cols-3">
+            <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               <Select aria-label="Show" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
                 {STATUS_FILTERS.map((f) => (
                   <option key={f.value} value={f.value}>
@@ -288,6 +424,14 @@ export function LiveAgentsPage() {
                   onChange={(e) => setQ(e.target.value)}
                 />
               </div>
+              <Select aria-label="Filter by campaign" value={campaign} onChange={(e) => setCampaign(e.target.value)}>
+                <option value="">All campaigns</option>
+                {campaigns.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </Select>
               <Select aria-label="Filter by queue" value={queue} onChange={(e) => setQueue(e.target.value)}>
                 <option value="">All queues</option>
                 {queues.map((name) => (

@@ -19,11 +19,38 @@ export type LiveAgent = {
   started_at: string | null;
   queue_name: string | null;
   active_call_number: string | null;
+  // Live Agents wallboard (backend/src/services/liveFloor.js).
+  campaign_name?: string | null;
+  /** The campaign's wrap-up seconds (to flag a long wrap-up). */
+  wrapup_sec?: number | null;
+  teams?: string | null;
+  /** registered | unregistered | unknown; null = not logged in. */
+  line?: string | null;
+  login_at?: string | null;
+  call?: {
+    id: number;
+    number: string;
+    leadName: string | null;
+    kind: 'inbound' | 'outbound' | 'dialer';
+    startedAt: string;
+    connectedAt: string | null;
+  } | null;
+  today?: { calls: number; connected: number; talkSeconds: number; avgHandleSeconds: number | null };
+};
+
+/** GET /admin/live-agents/summary: callers waiting for an agent now, and today's totals. */
+export type FloorSummary = {
+  waiting: number;
+  waitingInbound: number;
+  waitingDialer: number;
+  longestWaitSeconds: number | null;
+  today: { calls: number; connected: number; talkSeconds: number };
 };
 
 export const dashboardKeys = {
   summary: ['admin', 'dashboard'] as const,
   liveAgents: ['admin', 'live-agents'] as const,
+  floor: ['admin', 'live-agents', 'summary'] as const,
 };
 
 export function useDashboardSummary() {
@@ -40,5 +67,14 @@ export function useLiveAgents() {
     queryFn: () => get<LiveAgent[]>('/admin/live-agents'),
     // Live updates refresh it instantly; this is only a safety net.
     refetchInterval: 15_000,
+  });
+}
+
+export function useFloorSummary() {
+  return useQuery({
+    queryKey: dashboardKeys.floor,
+    queryFn: () => get<FloorSummary>('/admin/live-agents/summary'),
+    // Waiting callers change by the second; live updates also refresh it.
+    refetchInterval: 5_000,
   });
 }

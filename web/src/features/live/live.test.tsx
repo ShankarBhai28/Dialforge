@@ -210,3 +210,82 @@ describe('Live Agents', () => {
     expect(screen.queryByRole('button', { name: /listen/i })).not.toBeInTheDocument();
   });
 });
+
+describe('Live agents - wallboard', () => {
+  it('shows campaign, team, line, the current call with its lead and kind, today, login; waiting callers on top', async () => {
+    const started = new Date(Date.now() - 20 * 60 * 1000).toISOString(); // a 20-minute break
+    fakeApi({
+      'GET /admin/live-agents': {
+        body: [
+          {
+            id: 7,
+            username: 'agent04',
+            extension_name: '1003',
+            status: 'available',
+            reason: null,
+            started_at: started,
+            queue_name: 'Sales Q',
+            campaign_name: 'Home Loans',
+            teams: 'Team A',
+            line: 'registered',
+            login_at: started,
+            active_call_number: '9003220102',
+            call: {
+              id: 70,
+              number: '9003220102',
+              leadName: 'Ravi',
+              kind: 'dialer',
+              startedAt: started,
+              connectedAt: started,
+            },
+            today: { calls: 12, connected: 6, talkSeconds: 900, avgHandleSeconds: 170 },
+          },
+          {
+            id: 8,
+            username: 'agent05',
+            extension_name: '1004',
+            status: 'break',
+            reason: 'Tea',
+            started_at: started,
+            queue_name: 'Sales Q',
+            campaign_name: 'Home Loans',
+            line: 'unregistered',
+            login_at: started,
+            active_call_number: null,
+            call: null,
+            today: { calls: 0, connected: 0, talkSeconds: 0, avgHandleSeconds: null },
+          },
+        ],
+      },
+      'GET /admin/live-agents/summary': {
+        body: {
+          waiting: 3,
+          waitingInbound: 2,
+          waitingDialer: 1,
+          longestWaitSeconds: 75,
+          today: { calls: 40, connected: 22, talkSeconds: 3600 },
+        },
+      },
+    });
+    renderPage(<LiveAgentsPage />);
+    const row = (await screen.findByText('agent04')).closest('tr')!;
+    expect(within(row).getByText('Team A')).toBeInTheDocument();
+    expect(within(row).getByText('Home Loans')).toBeInTheDocument();
+    expect(within(row).getByRole('img', { name: 'phone line connected' })).toBeInTheDocument();
+    expect(within(row).getByText(/· Ravi/)).toBeInTheDocument();
+    expect(within(row).getByText(/Dialer · talking/)).toBeInTheDocument();
+    expect(within(row).getByText(/12 calls · 6 conn/)).toBeInTheDocument();
+    expect(within(row).getByText(/AHT/)).toBeInTheDocument();
+    const onBreak = screen.getByText('agent05').closest('tr')!;
+    expect(within(onBreak).getByRole('img', { name: 'phone line not connected' })).toBeInTheDocument();
+    // a break over 15 minutes is flagged
+    // (the first "20m" is the time on break; the second is the time logged in)
+    expect(within(onBreak).getAllByText(/20m/)[0].className).toMatch(/text-status-break/);
+    const floor = await screen.findByLabelText('Floor');
+    expect(within(floor).getByText('3 waiting')).toBeInTheDocument();
+    expect(within(floor).getByText(/longest 1m 15s/)).toBeInTheDocument();
+    expect(within(floor).getByText(/2 inbound · 1 dialer/)).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Filter by campaign'), 'Home Loans');
+    expect(screen.getByText('agent04')).toBeInTheDocument();
+  });
+});
