@@ -88,7 +88,8 @@ test("status: one campaign's outcomes only; leads of several campaigns are refus
   );
   const r = await runBulk({ action: 'status', ids: [1, 2], status: 'interested' }, ADMIN, 5, one.deps);
   assert.strictEqual(r.changed, 2);
-  assert.deepStrictEqual(updates(one.sql)[0][1].slice(0, 2), ['interested', 5]);
+  // status + what it means (not final here: dialable now), attempts kept, by user 5
+  assert.deepStrictEqual(updates(one.sql)[0][1].slice(0, 4), ['interested', 0, 0, 5]);
 });
 
 test("move: into a list (and the list's campaign); ready hopper rows go", async () => {

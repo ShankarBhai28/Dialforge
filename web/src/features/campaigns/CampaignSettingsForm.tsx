@@ -298,6 +298,17 @@ export function CampaignSettingsForm({ campaign, onDone }: { campaign: Campaign 
               min={1}
               max={200}
             />
+            {form.dialMode !== 'manual' && (
+              <NumberField
+                id="c-gap"
+                label="Spacing across campaigns (hours)"
+                hint="0 = off. Skip a number another campaign called (or that called in) in the last N hours."
+                value={form.numberGapHours}
+                onChange={(v) => set('numberGapHours', v)}
+                min={0}
+                max={168}
+              />
+            )}
             <NumberField
               id="c-wrapup"
               label="Wrap-up (sec)"

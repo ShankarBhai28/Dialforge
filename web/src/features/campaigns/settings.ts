@@ -35,6 +35,7 @@ export type CampaignForm = {
   maxChannels: string;
   wrapupSec: string;
   abandonWaitSec: string;
+  numberGapHours: string;
   callWindowStart: string;
   callWindowEnd: string;
   timezone: string;
@@ -51,6 +52,7 @@ const DEFAULTS = {
   maxChannels: 10,
   wrapupSec: 10,
   abandonWaitSec: 5,
+  numberGapHours: 0,
 };
 
 export function campaignForm(c: Campaign | null): CampaignForm {
@@ -73,6 +75,7 @@ export function campaignForm(c: Campaign | null): CampaignForm {
     maxChannels: str(c?.max_channels, DEFAULTS.maxChannels),
     wrapupSec: str(c?.wrapup_sec, DEFAULTS.wrapupSec),
     abandonWaitSec: str(c?.abandon_wait_sec, DEFAULTS.abandonWaitSec),
+    numberGapHours: str(c?.number_gap_hours, DEFAULTS.numberGapHours),
     callWindowStart: (c?.call_window_start ?? '09:00').slice(0, 5),
     callWindowEnd: (c?.call_window_end ?? '21:00').slice(0, 5),
     timezone: c?.timezone ?? 'Asia/Kolkata',
@@ -101,6 +104,7 @@ export function campaignBody(f: CampaignForm): CampaignBody {
     maxChannels: num(f.maxChannels, DEFAULTS.maxChannels),
     wrapupSec: num(f.wrapupSec, DEFAULTS.wrapupSec),
     abandonWaitSec: num(f.abandonWaitSec, DEFAULTS.abandonWaitSec),
+    numberGapHours: num(f.numberGapHours, DEFAULTS.numberGapHours),
     callWindowStart: f.callWindowStart,
     callWindowEnd: f.callWindowEnd,
     timezone: f.timezone.trim() || 'Asia/Kolkata',
@@ -132,6 +136,7 @@ export function checkCampaign(b: CampaignBody): string | null {
     return 'preview auto-dial must be 0-120 seconds';
   if (!inRange(b.wrapupSec, 0, 600)) return 'wrap-up must be 0-600 seconds';
   if (!whole(b.abandonWaitSec, 2, 30)) return 'max wait for an agent must be 2-30 seconds';
+  if (!whole(b.numberGapHours, 0, 168)) return 'spacing across campaigns must be 0-168 hours (0 = off)';
   const timeRe = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
   if (!timeRe.test(b.callWindowStart) || !timeRe.test(b.callWindowEnd)) return 'calling window times must be HH:MM';
   if (b.callWindowStart >= b.callWindowEnd) return 'calling window start must be before its end';

@@ -22,6 +22,8 @@ function parseCampaignSettings(body) {
     call_window_end: body.callWindowEnd || '21:00',
     timezone: body.timezone || 'Asia/Kolkata',
     abandon_wait_sec: num(body.abandonWaitSec, 5),
+    // 0 = off; otherwise skip numbers another campaign reached in the last N hours.
+    number_gap_hours: num(body.numberGapHours, 0),
     // Recording is on unless switched off.
     record_calls: body.recordCalls === false ? 0 : 1,
   };
@@ -41,6 +43,8 @@ function parseCampaignSettings(body) {
   if (!inRange(s.wrapup_sec, 0, 600)) return { error: 'wrap-up must be 0-600 seconds' };
   if (!inRange(s.abandon_wait_sec, 2, 30) || !Number.isInteger(s.abandon_wait_sec))
     return { error: 'max wait for an agent must be 2-30 seconds' };
+  if (!inRange(s.number_gap_hours, 0, 168) || !Number.isInteger(s.number_gap_hours))
+    return { error: 'spacing across campaigns must be 0-168 hours (0 = off)' };
   const timeRe = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
   if (!timeRe.test(s.call_window_start) || !timeRe.test(s.call_window_end))
     return { error: 'calling window times must be HH:MM' };

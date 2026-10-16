@@ -141,8 +141,34 @@ async function holdLeadForOutcome(pool, leadId) {
   await pool.query("DELETE FROM dial_hopper WHERE lead_id = ? AND status = 'ready'", [leadId]);
 }
 
+/**
+ * Spacing across campaigns (campaign setting "number_gap_hours"): of these
+ * normalised numbers, the ones another campaign dialled - or that were in a
+ * call outside this campaign (manual, inbound) - in the last `hours` hours.
+ */
+async function recentlyContacted(db, phones, campaignId, hours) {
+  const out = new Set();
+  if (!phones.length || !(hours > 0)) return out;
+  const [dialled] = await db.query(
+    `SELECT DISTINCT phone FROM dial_attempts
+     WHERE campaign_id <> ? AND started_at > NOW() - INTERVAL ? HOUR AND phone IN (?)`,
+    [campaignId, hours, phones],
+  );
+  dialled.forEach((r) => out.add(r.phone));
+  // Calls keep the number as dialled / received (919..., 0..., +91...).
+  const variants = phones.flatMap((n) => [n, `91${n}`, `0${n}`, `+91${n}`]);
+  const [calls] = await db.query(
+    `SELECT DISTINCT to_number FROM calls
+     WHERE (campaign_id IS NULL OR campaign_id <> ?) AND start_time > NOW() - INTERVAL ? HOUR AND to_number IN (?)`,
+    [campaignId, hours, variants],
+  );
+  calls.forEach((r) => out.add(normalizePhone(r.to_number)));
+  return out;
+}
+
 module.exports = {
   OUTCOME_HOLD_MIN,
+  recentlyContacted,
   holdLeadForOutcome,
   normalizePhone,
   localTimeIn,

@@ -9,6 +9,7 @@ const { addDnc } = require('./dnc');
 const { campaignInScope, can } = require('./access');
 const { leadWhere } = require('./leadFilters');
 const { deleteLeads } = require('./softDelete');
+const { applyStatus, statusEffect } = require('./leadStatus');
 
 const MAX_LEADS = 50000;
 const CHUNK = 1000;
@@ -100,12 +101,15 @@ async function runBulk(body, access, userId, deps = { pool, addDnc, deleteLeads,
         400,
         'these leads are in different campaigns - filter one campaign to change status (each has its own outcomes)',
       );
-    if (status !== 'new') {
-      const codes = (await deps.getDispositions(campaigns[0])).map((d) => d.code);
-      if (!codes.includes(status)) throw err(400, `status must be new or one of: ${codes.join(', ')}`);
-    }
-    const changed = await updateIds(db, 'UPDATE leads SET status = ?, updated_by = ?', [status, userId], ids);
-    return { action, changed, skipped: 0, notes };
+    // Does what the outcome means, like the agent's outcome (services/leadStatus.js).
+    const effect = statusEffect(status, await deps.getDispositions(campaigns[0]));
+    if (effect.error) throw err(400, effect.error);
+    const r = await applyStatus(db, leads, status, effect, userId, { addDnc: deps.addDnc });
+    if (effect.isFinal) notes.push('done - no more calls');
+    else if (effect.retryMin) notes.push(`dialable again in ${effect.retryMin} min`);
+    else notes.push(effect.resetAttempts ? 'dialable now, attempts reset' : 'dialable now');
+    if (r.dnc) notes.push(`${plural(r.dnc, 'number')} on the DNC list`);
+    return { action, changed: r.changed, skipped: 0, notes };
   }
 
   if (action === 'move') {

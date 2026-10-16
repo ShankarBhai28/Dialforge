@@ -12,6 +12,7 @@ const { pageResult, parsePaging, whereClause } = require('../services/paging');
 const { leadWhere } = require('../services/leadFilters');
 const { runBulk } = require('../services/leadBulk');
 const { exportLeads } = require('../services/leadExport');
+const { applyStatus, statusEffect } = require('../services/leadStatus');
 const {
   LEAD_BASE_COLUMNS,
   applyCustomEdits,
@@ -358,13 +359,10 @@ router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, r
   if (priority !== undefined && !(Number.isInteger(priority) && priority >= -100 && priority <= 100)) {
     return res.status(400).json({ error: 'priority must be a whole number -100..100' });
   }
-  if (status && status !== 'new') {
-    const codes = (await getDispositions(campaignId)).map((x) => x.code);
-    if (!codes.includes(status))
-      return res.status(400).json({ error: `status must be new or one of: ${codes.join(', ')}` });
-  }
+  // A changed status does what that outcome means (services/leadStatus.js); checked below.
+  let effect = null;
   const [rows] = await pool.query(
-    'SELECT id, alt_phone, priority, custom_data, campaign_id, assigned_user_id FROM leads WHERE id = ? AND deleted_at IS NULL',
+    'SELECT id, phone, status, alt_phone, priority, custom_data, campaign_id, assigned_user_id FROM leads WHERE id = ? AND deleted_at IS NULL',
     [req.params.id],
   );
   if (!rows[0] || !campaignInScope(req.access.scope, rows[0].campaign_id))
@@ -382,6 +380,10 @@ router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, r
     if (!l[0]) return res.status(400).json({ error: 'list not found' });
     if (l[0].campaign_id !== campaignId)
       return res.status(400).json({ error: `list "${l[0].name}" belongs to a different campaign` });
+  }
+  if (status && status !== rows[0].status) {
+    effect = statusEffect(status, await getDispositions(campaignId));
+    if (effect.error) return res.status(400).json({ error: effect.error });
   }
   // assignedUserId left out = unchanged; null / '' = shared with the campaign again.
   let assigned;
@@ -407,7 +409,7 @@ router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, r
   }
 
   await pool.query(
-    'UPDATE leads SET name = ?, phone = ?, alt_phone = ?, priority = ?, custom_data = ?, campaign_id = ?, list_id = ?, status = COALESCE(?, status), assigned_user_id = ?, updated_by = ? WHERE id = ?',
+    'UPDATE leads SET name = ?, phone = ?, alt_phone = ?, priority = ?, custom_data = ?, campaign_id = ?, list_id = ?, assigned_user_id = ?, updated_by = ? WHERE id = ?',
     [
       name || null,
       phone,
@@ -416,7 +418,6 @@ router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, r
       customData == null ? null : JSON.stringify(customData),
       campaignId,
       listId,
-      status || null,
       assigned === undefined ? rows[0].assigned_user_id : assigned,
       req.session.user.id,
       req.params.id,
@@ -424,6 +425,7 @@ router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, r
   );
   // Given to one agent: the dialer leaves it to them (a ready hopper row goes).
   if (assigned) await pool.query("DELETE FROM dial_hopper WHERE lead_id = ? AND status = 'ready'", [req.params.id]);
+  if (effect) await applyStatus(pool, [{ id: rows[0].id, phone }], status, effect, req.session.user.id);
   res.json({ status: 'ok' });
 });
 

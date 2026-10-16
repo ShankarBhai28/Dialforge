@@ -31,6 +31,7 @@ export type Campaign = {
   preview_autodial_sec: number | null;
   wrapup_sec: number;
   abandon_wait_sec: number;
+  number_gap_hours?: number;
   call_window_start: string;
   call_window_end: string;
   timezone: string;
@@ -56,6 +57,7 @@ export type CampaignBody = {
   maxChannels: number;
   wrapupSec: number;
   abandonWaitSec: number;
+  numberGapHours: number;
   callWindowStart: string;
   callWindowEnd: string;
   timezone: string;

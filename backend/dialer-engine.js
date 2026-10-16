@@ -17,7 +17,7 @@
 require('dotenv').config();
 const pool = require('./db');
 const ari = require('./ari');
-const { normalizePhone, isWithinCallWindow, finishAttempt } = require('./dialer-common');
+const { normalizePhone, isWithinCallWindow, finishAttempt, recentlyContacted } = require('./dialer-common');
 const licence = require('./src/services/licence');
 
 const DIALER_APP = 'dialforge-dialer';
@@ -144,7 +144,18 @@ async function cleanHopper(c) {
      WHERE h.campaign_id = ? AND h.status = 'ready'`,
     [c.id],
   );
-  const removed = stale.affectedRows + dnc.affectedRows;
+  // Spacing across campaigns: a waiting number another campaign has just dialled.
+  let spaced = { affectedRows: 0 };
+  if (Number(c.number_gap_hours) > 0) {
+    [spaced] = await pool.query(
+      `DELETE h FROM dial_hopper h
+       WHERE h.campaign_id = ? AND h.status = 'ready' AND EXISTS (
+         SELECT 1 FROM dial_attempts a WHERE a.phone = h.phone AND a.campaign_id <> h.campaign_id
+           AND a.started_at > NOW() - INTERVAL ? HOUR)`,
+      [c.id, Number(c.number_gap_hours)],
+    );
+  }
+  const removed = stale.affectedRows + dnc.affectedRows + spaced.affectedRows;
   if (removed) log(`campaign ${c.id}: removed ${removed} no-longer-dialable lead(s) from hopper`);
 }
 
@@ -179,12 +190,14 @@ async function fillHopper(c, idleAgents, counts) {
   const phones = candidates.map((x) => normalizePhone(x.phone));
   const [dncRows] = await pool.query('SELECT phone FROM dnc_numbers WHERE tenant_id = 1 AND phone IN (?)', [phones]);
   const dnc = new Set(dncRows.map((r) => r.phone));
+  // Spacing across campaigns: skip a number another campaign reached lately.
+  const recent = await recentlyContacted(pool, phones, c.id, Number(c.number_gap_hours) || 0);
 
   const rows = [];
   for (const lead of candidates) {
     if (rows.length >= need) break;
     const phone = normalizePhone(lead.phone);
-    if (dnc.has(phone)) continue;
+    if (dnc.has(phone) || recent.has(phone)) continue;
     // An "only me" callback can only go to that agent - which only preview
     // mode can guarantee. Auto-dial modes leave it on the agent's
     // My Callbacks list instead of handing it to whoever is free.
