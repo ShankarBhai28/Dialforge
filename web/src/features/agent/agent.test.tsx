@@ -232,6 +232,29 @@ describe('agent screen', () => {
     });
   });
 
+  it('on a break: one click on Ready makes the agent Available again', async () => {
+    const onBreak = {
+      loginSeconds: 3725,
+      talkSeconds: 60,
+      breakSeconds: 120,
+      acwSeconds: 0,
+      handleSeconds: 60,
+      currentStatus: 'break',
+      currentReason: 'Tea Break',
+      currentQueueName: 'Support Queue',
+    };
+    // The queue picked earlier in this shift is remembered (as after a page reload).
+    sessionStorage.setItem('dialforge.agent.queue', JSON.stringify({ id: 4, name: 'Support Queue' }));
+    const { calls } = await connect(
+      backend({ 'GET /agent/stats': { body: onBreak }, 'POST /agent/status': { body: { status: 'ok' } } }),
+    );
+    expect(await screen.findByText('Tea Break')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'Ready' }));
+    await waitFor(() => expect(calls.some((c) => c.key === 'POST /agent/status')).toBe(true));
+    expect(calls.find((c) => c.key === 'POST /agent/status')?.body).toMatchObject({ status: 'available' });
+    sessionStorage.removeItem('dialforge.agent.queue');
+  });
+
   it('warm transfer to an agent sends the right request', async () => {
     const { calls, ua } = await connect(
       backend({

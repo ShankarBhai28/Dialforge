@@ -47,8 +47,9 @@ function StatusMenu({ stats }: { stats: AgentStats | undefined }) {
   const ref = useRef<HTMLDivElement>(null);
   const now = useNow(500);
   const pill = pillFor(stats, state.autoAvailableAt, now);
-  // In wrap-up with no call or disposition pending: one click to take the next call.
-  const canBeReady = stats?.currentStatus === 'acw' && !state.outcomeFor && !state.call;
+  // In wrap-up or on a break, with no call or disposition pending: one click back to Available.
+  const canBeReady =
+    (stats?.currentStatus === 'acw' || stats?.currentStatus === 'break') && !state.outcomeFor && !state.call;
 
   useEffect(() => {
     if (!open) return;
