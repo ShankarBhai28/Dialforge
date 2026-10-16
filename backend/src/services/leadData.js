@@ -3,6 +3,11 @@
 // each change is kept in the history (form_responses.changes, audit log).
 const { normalizePhone } = require('../../dialer-common');
 
+// One name per customer: a campaign form field with this key IS the lead's
+// name (leads.name) - an agent saving it renames the lead, and the form shows
+// the lead's name. Kept in custom_data too, so the form keeps working as is.
+const NAME_KEY = 'name';
+
 const parse = (v) => (v == null ? {} : typeof v === 'string' ? JSON.parse(v || '{}') : v) || {};
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const empty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -47,8 +52,11 @@ async function adoptCallForms(db, leadId, callId) {
   const [[lead]] = await db.query('SELECT custom_data FROM leads WHERE id = ?', [leadId]);
   const next = parse(lead && lead.custom_data);
   for (const r of rows) for (const [k, v] of Object.entries(parse(r.data))) if (!empty(v)) next[k] = v;
-  await db.query('UPDATE leads SET custom_data = ? WHERE id = ?', [
+  // The form's Name is the lead's name when the lead has none yet.
+  const name = empty(next[NAME_KEY]) ? null : String(next[NAME_KEY]).slice(0, 100);
+  await db.query("UPDATE leads SET custom_data = ?, name = COALESCE(NULLIF(name, ''), ?) WHERE id = ?", [
     Object.keys(next).length ? JSON.stringify(next) : null,
+    name,
     leadId,
   ]);
   return rows.length;
@@ -61,4 +69,4 @@ const numberVariants = (phones) =>
     .filter(Boolean)
     .flatMap((n) => [n, `91${n}`, `0${n}`, `+91${n}`]);
 
-module.exports = { diffCustom, mergeChanged, adoptCallForms, numberVariants, parseCustom: parse };
+module.exports = { NAME_KEY, diffCustom, mergeChanged, adoptCallForms, numberVariants, parseCustom: parse };

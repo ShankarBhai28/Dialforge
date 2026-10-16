@@ -13,7 +13,7 @@ const { leadWhere } = require('../services/leadFilters');
 const { runBulk } = require('../services/leadBulk');
 const { exportLeads } = require('../services/leadExport');
 const { applyStatus, statusEffect } = require('../services/leadStatus');
-const { adoptCallForms, mergeChanged, parseCustom } = require('../services/leadData');
+const { NAME_KEY, adoptCallForms, mergeChanged, parseCustom } = require('../services/leadData');
 const {
   LEAD_BASE_COLUMNS,
   applyCustomEdits,
@@ -426,6 +426,13 @@ router.put('/admin/leads/:id', requirePermission('leads', 'edit'), async (req, r
     customData = r.value;
   }
 
+  // One name per customer: the campaign form's Name field follows the lead's name.
+  if (campaignId && (await getCampaignFormFields(campaignId)).some((x) => x.field_key === NAME_KEY)) {
+    const c = { ...(customData || {}) };
+    if (name) c[NAME_KEY] = String(name).trim();
+    else delete c[NAME_KEY];
+    customData = Object.keys(c).length ? c : null;
+  }
   await pool.query(
     'UPDATE leads SET name = ?, phone = ?, alt_phone = ?, priority = ?, custom_data = ?, campaign_id = ?, list_id = ?, assigned_user_id = ?, updated_by = ? WHERE id = ?',
     [

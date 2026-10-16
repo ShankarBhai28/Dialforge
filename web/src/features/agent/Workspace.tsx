@@ -255,7 +255,10 @@ function LeadForm({ form }: { form: AgentForm }) {
   // Ready for this opening once fresh data is in (set during render: no extra effect).
   if (settled && readyFor !== version) setReadyFor(version);
   if (readyFor !== version) return <Skeleton className="h-40" />;
-  const current = leadId ? (history.data?.lead.customData ?? null) : null;
+  // One name per customer: the form's Name field is the lead's name.
+  const lead = history.data?.lead;
+  const base = lead?.customData ?? state.workspace.lead?.custom_data ?? {};
+  const current = leadId && lead ? { ...base, ...(lead.name ? { name: lead.name } : {}) } : null;
   return <AgentFormCard key={version} form={form} current={current} />;
 }
 

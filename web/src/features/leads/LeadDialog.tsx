@@ -40,10 +40,13 @@ export function LeadDialog({ lead, onOpenChange }: { lead: Lead; onOpenChange: (
   const forms = useForms();
   const formId = campaigns.data?.find((c) => String(c.id) === campaignId)?.form_id;
   const form = formId ? forms.data?.find((f) => f.id === formId) : undefined;
-  const fields = form?.fields ?? [];
+  // The form's Name field is the lead's Name (one name per customer): shown once, above.
+  const fields = (form?.fields ?? []).filter((f) => f.field_key !== 'name');
   const saved = fieldValues(fields, lead.custom_data);
   const customValue = (key: string) => customEdits[key] ?? saved[key];
-  const otherSaved = Object.entries(lead.custom_data ?? {}).filter(([k]) => !fields.some((f) => f.field_key === k));
+  const otherSaved = Object.entries(lead.custom_data ?? {}).filter(
+    ([k]) => k !== 'name' && !fields.some((f) => f.field_key === k),
+  );
 
   // The server checks status against the chosen campaign's dispositions
   // (or the defaults when unassigned), so offer exactly those.

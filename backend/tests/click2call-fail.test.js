@@ -16,6 +16,9 @@ fake('db.js', {
     sql.push([s, params]);
     if (s.startsWith('INSERT INTO calls')) return [{ insertId: 68 }];
     if (s.startsWith('SELECT status, deleted_at FROM leads')) return [[{ status: 'new' }]];
+    // 9840055555 typed on the dialpad is lead 44
+    if (s.startsWith('SELECT id FROM leads WHERE (phone = ? OR alt_phone = ?)'))
+      return [params[0] === '9840055555' ? [{ id: 44 }] : []];
     return [[]];
   },
 });
@@ -98,4 +101,14 @@ test('any other failure: closed too, with the reason', async () => {
   const [status, body] = await call({ toNumber: '7339332413', fromExtension: '1003' });
   assert.strictEqual(status, 502);
   assert.match(body.error, /Could not start the call: ARI not reachable/);
+});
+
+test('a dialpad number that is a known lead counts as its attempt (given back when the call fails to start)', async () => {
+  sql.length = 0;
+  failWith = 'ARI not reachable';
+  const [status] = await call({ toNumber: '9840055555', fromExtension: '1003' });
+  assert.strictEqual(status, 502);
+  assert.ok(sql.some(([s, p]) => /UPDATE leads SET attempts = attempts \+ 1/.test(s) && p[0] === 44));
+  assert.ok(sql.some(([s, p]) => /INSERT INTO calls/.test(s) && p[0] === 44));
+  assert.ok(sql.some(([s, p]) => /attempts = GREATEST\(attempts - 1, 0\)/.test(s) && p[1] === 44));
 });

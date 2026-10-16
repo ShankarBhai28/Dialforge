@@ -6,7 +6,7 @@ const { findCurrentCampaign } = require('../services/agents');
 const { loadFormsWithFields, validateFormData, validateFormFields } = require('../services/forms');
 
 const { scopeCondition } = require('../services/access');
-const { diffCustom, mergeChanged, parseCustom } = require('../services/leadData');
+const { NAME_KEY, diffCustom, mergeChanged, parseCustom } = require('../services/leadData');
 
 const router = express.Router();
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
@@ -138,7 +138,8 @@ router.post('/agent/form-responses', requireCaller, async (req, res) => {
   const [form] = await loadFormsWithFields("WHERE id = ? AND status = 'active'", [campaign.form_id]);
   if (!form) return res.status(400).json({ error: 'your current campaign has no active form' });
 
-  const { leadId, callId } = req.body;
+  let { leadId } = req.body;
+  const { callId } = req.body;
   // The lead must belong to the campaign being worked, and the call must
   // be one this agent placed/took - otherwise answers could be attached
   // to someone else's record.
@@ -161,6 +162,15 @@ router.post('/agent/form-responses', requireCaller, async (req, res) => {
   const submitted = req.body.data && typeof req.body.data === 'object' ? req.body.data : {};
   const changed = Array.isArray(req.body.changed) ? keys.filter((k) => req.body.changed.includes(k)) : keys;
 
+  if (!leadId && callId) {
+    // The screen didn't know the lead (a typed number, or the outcome already
+    // linked the call): the call's lead in this campaign, if it has one.
+    const [[c]] = await pool.query(
+      'SELECT l.id FROM calls ca JOIN leads l ON l.id = ca.lead_id WHERE ca.id = ? AND l.campaign_id = ? AND l.deleted_at IS NULL',
+      [callId, campaign.id],
+    );
+    if (c) leadId = c.id;
+  }
   if (!leadId) {
     // A first call (no lead yet): kept with the call; the lead created at the
     // outcome takes these answers (leadData.adoptCallForms).
@@ -177,8 +187,10 @@ router.post('/agent/form-responses', requireCaller, async (req, res) => {
   try {
     await conn.beginTransaction();
     // Locked: two saves at once can't lose each other's fields.
-    const [[lead]] = await conn.query('SELECT custom_data FROM leads WHERE id = ? FOR UPDATE', [leadId]);
+    const [[lead]] = await conn.query('SELECT name, custom_data FROM leads WHERE id = ? FOR UPDATE', [leadId]);
+    // The lead's name is the form's Name (one name per customer).
     const current = parseCustom(lead && lead.custom_data);
+    if (keys.includes(NAME_KEY) && lead && lead.name) current[NAME_KEY] = lead.name;
     const { error, data } = validateFormData(form.fields, { ...current, ...pick(submitted, changed) }, changed);
     if (error) {
       await conn.rollback();
@@ -186,9 +198,11 @@ router.post('/agent/form-responses', requireCaller, async (req, res) => {
     }
     const next = mergeChanged(current, data, changed);
     const changes = diffCustom(current, next, changed);
-    await conn.query('UPDATE leads SET custom_data = ?, updated_by = ? WHERE id = ?', [
+    const renamed = changed.includes(NAME_KEY);
+    await conn.query(`UPDATE leads SET custom_data = ?, updated_by = ?${renamed ? ', name = ?' : ''} WHERE id = ?`, [
       Object.keys(next).length ? JSON.stringify(next) : null,
       req.session.user.id,
+      ...(renamed ? [next[NAME_KEY] ? String(next[NAME_KEY]).slice(0, 100) : null] : []),
       leadId,
     ]);
     // The save itself, with its full answers (Forms -> Responses) and what it changed (history).

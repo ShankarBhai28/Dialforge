@@ -207,21 +207,23 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
   }
 
   let heldFrom; // the lead's redial time before this call held it
-  if (leadId) {
-    const [inHopper] = await pool.query('SELECT locked_by FROM dial_hopper WHERE lead_id = ?', [leadId]);
+  // A number typed on the dialpad that is a known lead is that lead's call:
+  // its attempt counts, it's held from the dialer, and it goes into its history.
+  const callLead = leadId || (await findLeadByPhone(toNumber, campaign ? campaign.id : null));
+  if (callLead) {
+    const [inHopper] = await pool.query('SELECT locked_by FROM dial_hopper WHERE lead_id = ?', [callLead]);
     if (inHopper[0] && inHopper[0].locked_by && inHopper[0].locked_by !== previewLockOwner(req.session.user.id)) {
       return res.status(409).json({ error: 'another agent is previewing this lead right now' });
     }
-    await pool.query('DELETE FROM dial_hopper WHERE lead_id = ?', [leadId]); // incl. this agent's preview lock
-    await pool.query('UPDATE leads SET attempts = attempts + 1, last_attempt_at = NOW() WHERE id = ?', [leadId]);
+    await pool.query('DELETE FROM dial_hopper WHERE lead_id = ?', [callLead]); // incl. this agent's preview lock
+    await pool.query('UPDATE leads SET attempts = attempts + 1, last_attempt_at = NOW() WHERE id = ?', [callLead]);
     // The agent is calling this lead by hand: the dialer leaves it alone until the outcome.
-    const [[before]] = await pool.query('SELECT next_call_at FROM leads WHERE id = ?', [leadId]);
+    const [[before]] = await pool.query('SELECT next_call_at FROM leads WHERE id = ?', [callLead]);
     heldFrom = before ? before.next_call_at : null;
-    await holdLeadForOutcome(pool, leadId);
+    await holdLeadForOutcome(pool, callLead);
   }
 
-  // A number typed on the dialpad that is a known lead: the call goes into that lead's history.
-  const linkedLead = leadId || (await findLeadByPhone(toNumber, campaign ? campaign.id : null));
+  const linkedLead = callLead;
   const [insertResult] = await pool.query(
     `INSERT INTO calls (tenant_id, lead_id, direction, from_extension, to_number, campaign_id, agent_user_id)
      VALUES (1, ?, 'outbound', ?, ?, ?, ?)`,
@@ -244,16 +246,16 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
       appArgs: `click2call,${callId},agent`,
     });
     activeCalls.set(callId, { agentChannelId: agentChannel.id, destChannelId: null, bridgeId: null });
-    res.status(202).json({ callId, status: 'ringing_agent' });
+    res.status(202).json({ callId, status: 'ringing_agent', leadId: linkedLead || null });
   } catch (err) {
     // Nothing rang: close the call (it would otherwise look live forever)
     // and give the lead its attempt back.
     await logEvent(callId, 'error', { message: err.message });
     await pool.query("UPDATE calls SET end_time = NOW(), disposition = 'agent_unanswered' WHERE id = ?", [callId]);
-    if (leadId) {
+    if (callLead) {
       await pool.query('UPDATE leads SET attempts = GREATEST(attempts - 1, 0), next_call_at = ? WHERE id = ?', [
         heldFrom ?? null,
-        leadId,
+        callLead,
       ]);
     }
     // "Allocation failed" = Asterisk couldn't reach the agent's line (browser

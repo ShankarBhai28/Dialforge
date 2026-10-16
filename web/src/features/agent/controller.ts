@@ -274,11 +274,13 @@ export class AgentController {
       talkStartedAt: null,
     };
     try {
-      const { callId } = await post<{ callId: number }>('/calls/click2call', {
+      const { callId, leadId } = await post<{ callId: number; leadId?: number | null }>('/calls/click2call', {
         toNumber: phone,
         leadId: lead?.id ?? null,
       });
       this.set({ workspace: { ...this.state.workspace, callId } });
+      // A typed number that is a known lead: open it, so the form shows the lead's current details.
+      if (!lead && leadId) void this.adoptDialledLead(leadId, callId, phone);
       if (this.outcomeTarget && !this.outcomeTarget.callId) this.outcomeTarget = { ...this.outcomeTarget, callId };
       if (this.pendingCall) this.pendingCall = { ...this.pendingCall, callId };
       else if (this.state.call) {
@@ -294,6 +296,21 @@ export class AgentController {
       this.expectingOwnLeg = false;
     }
     setTimeout(() => this.refresh('calls', 'stats'), 2000);
+  }
+
+  /** The lead a typed number turned out to be: shown in the workspace and used for the outcome. */
+  private async adoptDialledLead(leadId: number, callId: number, phone: string) {
+    let found: Lead;
+    try {
+      found = await get<Lead>(`/agent/leads/${leadId}`);
+    } catch {
+      return; // not one this agent may open: the call goes on without it
+    }
+    if (this.state.workspace.callId !== callId || this.state.workspace.lead) return; // moved on meanwhile
+    this.openWorkspace(found, callId, describe(found, phone), phone);
+    if (this.outcomeTarget && this.outcomeTarget.leadId == null) {
+      this.outcomeTarget = { ...this.outcomeTarget, leadId: found.id, name: found.name ?? null };
+    }
   }
 
   /**

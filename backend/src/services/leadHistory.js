@@ -247,7 +247,12 @@ async function leadHistory(
       .filter(([k]) => k in after && String(before[k] ?? '') !== String(after[k] ?? ''))
       .map(([k, label]) => ({ field: label, from: before[k] ?? null, to: after[k] ?? null }));
     // The form fields too (the lead's current values).
-    if ('custom_data' in after) changes.push(...changeList(diffCustom(before.custom_data, after.custom_data)));
+    if ('custom_data' in after)
+      changes.push(
+        ...changeList(
+          diffCustom(before.custom_data, after.custom_data).filter((c) => !(c.key === 'name' && 'name' in after)),
+        ),
+      );
     // An upload that updated the lead says which file.
     const source = e.action === 'leads.update' && /^upload /.test(e.summary || '') ? e.summary : null;
     if (changes.length) timeline.push({ type: 'edit', at: e.at, agent: e.username, changes, source });

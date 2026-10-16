@@ -150,3 +150,20 @@ test('history says what each save changed: form saves, admin edits and uploads (
     { field: 'Budget', from: '40L', to: '60L' },
   ]);
 });
+
+test("one name per customer: a first call's form Name names a lead that has none (never renames one)", async () => {
+  const sql = [];
+  const db = {
+    async query(q, p) {
+      sql.push([q.replace(/\s+/g, ' ').trim(), p]);
+      if (q.startsWith('SELECT id, data FROM form_responses'))
+        return [[{ id: 5, data: { name: 'Shankar', last_name: 'G' } }]];
+      if (q.startsWith('SELECT custom_data FROM leads')) return [[{ custom_data: null }]];
+      return [{ affectedRows: 1 }];
+    },
+  };
+  await adoptCallForms(db, 9, 31);
+  const [s, p] = sql[3];
+  assert.match(s, /name = COALESCE\(NULLIF\(name, ''\), \?\)/); // an existing name wins
+  assert.deepStrictEqual([JSON.parse(p[0]), p[1], p[2]], [{ name: 'Shankar', last_name: 'G' }, 'Shankar', 9]);
+});
