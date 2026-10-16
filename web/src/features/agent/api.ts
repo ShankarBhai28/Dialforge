@@ -170,6 +170,8 @@ export type CampaignInfo = {
   dialMode: string;
   wrapupSec: number;
   dialerState: string;
+  /** Saved by itself when the agent gives no disposition within `seconds` after the call. */
+  autoDispo?: { seconds: number; code: string; label: string } | null;
 } | null;
 export type WebrtcConfig = { sipDomain: string; wsUrl: string; iceServers: RTCIceServer[] };
 
@@ -179,6 +181,7 @@ export const agentKeys = {
   leads: ['agent', 'leads'] as const,
   callbacks: ['agent', 'callbacks'] as const,
   dispositions: ['agent', 'dispositions'] as const,
+  campaignInfo: ['agent', 'campaign-info'] as const,
   form: ['agent', 'form'] as const,
   calls: ['agent', 'calls'] as const,
   control: ['agent', 'call-control'] as const,
@@ -197,6 +200,9 @@ export const useAgentCallbacks = () =>
     queryFn: () => get<AgentCallback[]>('/agent/callbacks'),
     refetchInterval: 30_000,
   });
+/** The campaign being worked: wrap-up and auto disposition (for the disposition popup). */
+export const useCampaignInfo = (enabled = true) =>
+  useQuery({ queryKey: agentKeys.campaignInfo, queryFn: () => get<CampaignInfo>('/agent/campaign-info'), enabled });
 export const useAgentDispositions = () =>
   useQuery({ queryKey: agentKeys.dispositions, queryFn: () => get<Disposition[]>('/agent/dispositions') });
 export const useAgentForm = () =>

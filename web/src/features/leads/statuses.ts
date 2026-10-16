@@ -9,6 +9,7 @@ export const DEFAULT_DISPOSITIONS: Disposition[] = [
   { code: 'callback', label: 'Callback' },
   { code: 'no_answer', label: 'No Answer' },
   { code: 'do_not_call', label: 'Do Not Call' },
+  { code: 'no_dispo', label: 'No Disposition' },
 ];
 
 const LABELS: Record<string, string> = {

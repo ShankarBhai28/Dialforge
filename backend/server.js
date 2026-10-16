@@ -34,6 +34,7 @@ const pool = require('./db');
 const { MySqlSessionStore } = require('./src/services/sessionStore');
 const sessions = require('./src/services/sessions');
 const { startStaleAgentCleanup } = require('./src/services/agentLogout');
+const { startAutoDispoSweeper } = require('./src/services/autoDispo');
 const { startHealthWatch } = require('./src/services/health');
 const { startPresenceSync } = require('./src/services/presence');
 const dialerFeed = require('./src/realtime/dialerFeed');
@@ -59,6 +60,7 @@ const server = https.createServer(tlsOptions, app);
 hub.attach(server, sessionMiddleware);
 dialerFeed.start();
 startStaleAgentCleanup();
+startAutoDispoSweeper();
 startHealthWatch();
 startPresenceSync(); // live_agents table
 server.listen(PORT, () => console.log(`VIZTEX backend listening on port ${PORT} (HTTPS)`));

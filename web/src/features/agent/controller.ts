@@ -543,7 +543,7 @@ export class AgentController {
   async saveOutcome(
     target: OutcomeTarget,
     status: string,
-    extra?: { callbackAt: string; callbackMine: boolean; note: string },
+    extra?: { callbackAt?: string; callbackMine?: boolean; note?: string },
   ) {
     const body = { status, ...(extra ?? {}) };
     // callId: the outcome is kept on that call too (reports).
@@ -555,7 +555,11 @@ export class AgentController {
     if (!target.late) await this.scheduleAutoAvailable();
   }
 
-  /** Auto-dial campaigns need agents back promptly: Available again after wrap-up. */
+  /**
+   * After the disposition: Available again once the campaign's wrap-up
+   * seconds pass (0 = at once) - in every dial mode, so the next call (dialer,
+   * preview lead or queue) can come.
+   */
   private async scheduleAutoAvailable() {
     this.clearWrapup();
     let info: CampaignInfo = null;
@@ -564,9 +568,10 @@ export class AgentController {
     } catch {
       return;
     }
-    if (!info || !['progressive', 'predictive'].includes(info.dialMode)) return;
-    this.say(`Back to Available in ${info.wrapupSec}s…`);
-    this.set({ autoAvailableAt: Date.now() + info.wrapupSec * 1000 });
+    if (!info) return;
+    const wrapupSec = Math.max(0, Number(info.wrapupSec) || 0);
+    if (wrapupSec > 0) this.say(`Back to Available in ${wrapupSec}s…`);
+    this.set({ autoAvailableAt: Date.now() + wrapupSec * 1000 });
     this.wrapupTimer = setTimeout(async () => {
       this.wrapupTimer = null;
       this.set({ autoAvailableAt: null });
@@ -578,7 +583,7 @@ export class AgentController {
       }
       // Only if nothing else changed the status meanwhile.
       if (stats.currentStatus === 'acw' && this.state.queue) await this.postStatus('available', null);
-    }, info.wrapupSec * 1000);
+    }, wrapupSec * 1000);
   }
   private clearWrapup() {
     if (this.wrapupTimer) clearTimeout(this.wrapupTimer);

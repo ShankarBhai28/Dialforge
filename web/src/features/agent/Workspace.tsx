@@ -78,7 +78,7 @@ function PreviewCard() {
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
               <span>List: {lead.list_name || '—'}</span>
               <span>Attempts so far: {lead.attempts ?? 0}</span>
-              <span>Last outcome: {dispositionLabel(lead.status, dispositions)}</span>
+              <span>Last disposition: {dispositionLabel(lead.status, dispositions)}</span>
               {lead.is_callback && (
                 <span className="font-bold text-status-break">
                   Callback{lead.callback_note ? `: ${lead.callback_note}` : ''}
@@ -147,8 +147,8 @@ function EarlierLeadNote({ phone }: { phone: string | null }) {
   return (
     <p role="note" className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
       Earlier lead{d.name ? <b className="text-foreground"> {d.name}</b> : ''} (deleted {formatDateTime(d.deletedAt)}
-      {d.withList ? `, with list "${d.withList}"` : ''}){d.lastOutcome ? ` - last outcome ${d.lastOutcome}` : ''}. The
-      outcome you give makes it an active lead again, with its old details.
+      {d.withList ? `, with list "${d.withList}"` : ''}){d.lastOutcome ? ` - last disposition ${d.lastOutcome}` : ''}.
+      The disposition you give makes it an active lead again, with its old details.
       {d.id ? (
         <>
           {' '}
@@ -374,7 +374,7 @@ export function Workspace() {
             <LeadForm form={form} />
           ) : (
             <p className="text-sm text-muted-foreground">
-              This campaign has no form - pick the outcome when the call ends.
+              This campaign has no form - pick the disposition when the call ends.
             </p>
           )}
         </>

@@ -47,6 +47,16 @@ const DEFAULT_DISPOSITIONS = [
     is_callback: 0,
     is_success: 0,
   },
+  // For auto disposition (campaign setting): the agent gave none in time.
+  {
+    code: 'no_dispo',
+    label: 'No Disposition',
+    is_final: 0,
+    retry_after_min: 60,
+    marks_dnc: 0,
+    is_callback: 0,
+    is_success: 0,
+  },
 ];
 
 // A lead with no campaign (e.g. added by an admin without one) falls back

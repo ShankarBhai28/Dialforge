@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNow } from '@/lib/hooks';
 import { useMutation } from '@tanstack/react-query';
 import { Phone, PhoneIncoming, PhoneOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -16,7 +17,7 @@ import {
 import { Field, FormError } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
 import { toDateTimeLocal } from '@/lib/format';
-import { useAgentDispositions, useAgentQueues, type Disposition } from './api';
+import { useAgentDispositions, useAgentQueues, type Disposition, useCampaignInfo } from './api';
 import { useController } from './AgentProvider';
 import type { OutcomeTarget } from './controller';
 import { startRingtone, stopRingtone } from './softphone/ringtone';
@@ -118,7 +119,12 @@ export function QueuePickerDialog() {
 /** Suggested callback time, for <input type="datetime-local">. */
 const oneHourFromNow = () => toDateTimeLocal(Date.now() + 60 * 60 * 1000);
 
-/** After every answered call: what happened? Callback outcomes ask for a time. */
+/**
+ * After every answered call: the disposition. Callback dispositions ask for a
+ * time. With auto disposition on (campaign), a countdown saves the campaign's
+ * chosen disposition when the agent gives none in time; it pauses while the
+ * agent is filling in a callback.
+ */
 export function OutcomeDialog() {
   const { controller, state } = useController();
   const target = state.outcomeFor;
@@ -136,10 +142,23 @@ export function OutcomeDialog() {
     setMine(true);
   }
   const save = useMutation({
-    mutationFn: (v: { status: string; extra?: { callbackAt: string; callbackMine: boolean; note: string } }) =>
+    mutationFn: (v: { status: string; extra?: { callbackAt?: string; callbackMine?: boolean; note?: string } }) =>
       controller.saveOutcome(target!, v.status, v.extra),
     meta: { errorInline: true },
   });
+
+  // Auto disposition: not for a disposition given later from the call log.
+  const info = useCampaignInfo(!!target && !target.late);
+  const auto = target && !target.late ? (info.data?.autoDispo ?? null) : null;
+  const now = useNow();
+  const [openedAt, setOpenedAt] = useState<{ for: OutcomeTarget | null; at: number }>({ for: null, at: 0 });
+  if (target && openedAt.for !== target) setOpenedAt({ for: target, at: now }); // the page clock (ticks each second)
+  const left = auto ? Math.max(0, Math.ceil(auto.seconds - (now - openedAt.at) / 1000)) : null;
+  const autoDue = auto && left === 0 && !callbackFor && !save.isPending && !save.isSuccess && !save.isError;
+  useEffect(() => {
+    if (autoDue && auto) save.mutate({ status: auto.code, extra: { note: 'Auto disposition (none given in time)' } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the countdown reaches 0
+  }, [autoDue]);
 
   function pick(d: Disposition) {
     if (d.is_callback) {
@@ -167,14 +186,23 @@ export function OutcomeDialog() {
         onPointerDownOutside={(e) => e.preventDefault()}
       >
         <DialogHeader>
-          <DialogTitle>Call outcome</DialogTitle>
-          <DialogDescription>What happened on the call with {target?.name || target?.phone}?</DialogDescription>
+          <DialogTitle>Disposition</DialogTitle>
+          <DialogDescription>
+            Choose the disposition for the call with {target?.name || target?.phone}.
+          </DialogDescription>
+          {auto && left !== null && (
+            <p role="timer" className="text-sm font-medium text-status-break">
+              {callbackFor
+                ? 'Auto disposition paused while you set the callback.'
+                : `Auto disposition in ${left}s: ${auto.label}`}
+            </p>
+          )}
         </DialogHeader>
         <DialogBody className="space-y-2 pb-5">
           {dispositions.isPending ? (
             <Skeleton className="h-24" />
           ) : dispositions.error ? (
-            // The dialog can't be closed without an outcome, so never leave it empty.
+            // The dialog can't be closed without a disposition, so never leave it empty.
             <ErrorState message={dispositions.error.message} onRetry={() => dispositions.refetch()} />
           ) : (
             (dispositions.data ?? []).map((d) => (

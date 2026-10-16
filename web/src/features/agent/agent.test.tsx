@@ -160,14 +160,48 @@ describe('agent screen', () => {
     );
 
     act(() => s.remoteHangup());
-    const outcome = await screen.findByRole('dialog', { name: /call outcome/i });
+    const outcome = await screen.findByRole('dialog', { name: /^disposition$/i });
     await userEvent.click(within(outcome).getByRole('button', { name: 'Callback' }));
     await userEvent.type(within(outcome).getByLabelText('Note (optional)'), 'after 6');
     await userEvent.click(within(outcome).getByRole('button', { name: /confirm callback/i }));
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: /call outcome/i })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^disposition$/i })).not.toBeInTheDocument());
     const body = calls.find((c) => c.key === 'POST /leads/9/disposition')?.body as Record<string, unknown>;
     expect(body).toMatchObject({ status: 'callback', callbackMine: true, note: 'after 6' });
     expect(new Date(body.callbackAt as string).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("auto disposition: no disposition given in time -> the campaign's choice is saved by itself", async () => {
+    const { calls, ua } = await connect(
+      backend({
+        'GET /agent/call-policy': { body: { autoAnswer: false } },
+        'GET /agent/active-call': { body: ACTIVE },
+        'POST /leads/9/disposition': { body: { status: 'ok' } },
+        'GET /agent/campaign-info': {
+          body: {
+            id: 1,
+            name: 'Sales',
+            dialMode: 'preview',
+            wrapupSec: 0,
+            dialerState: 'running',
+            autoDispo: { seconds: 2, code: 'no_dispo', label: 'No Disposition' },
+          },
+        },
+      }),
+    );
+    const s = new FakeSession('9876543210', 'Meena');
+    act(() => void ua.ring(s));
+    const ringing = await screen.findByRole('dialog');
+    await userEvent.click(within(ringing).getByRole('button', { name: /accept/i }));
+    act(() => s.up());
+    await screen.findByRole('region', { name: 'Current call' });
+    act(() => s.remoteHangup());
+    const popup = await screen.findByRole('dialog', { name: /^disposition$/i });
+    expect(await within(popup).findByRole('timer')).toHaveTextContent(/Auto disposition in \ds: No Disposition/);
+    await waitFor(() => expect(calls.some((c) => c.key === 'POST /leads/9/disposition')).toBe(true), { timeout: 5000 });
+    expect(calls.find((c) => c.key === 'POST /leads/9/disposition')?.body).toMatchObject({
+      status: 'no_dispo',
+      note: 'Auto disposition (none given in time)',
+    });
   });
 
   it('warm transfer to an agent sends the right request', async () => {
@@ -303,11 +337,11 @@ describe('agent screen', () => {
     // Clicking the customer opens them, the form filled with the lead's current details.
     expect(within(log).getByText('talked 55s')).toBeInTheDocument();
     // An answered call without an outcome: flagged, and the outcome can be given now.
-    expect(within(log).getByText('Needs outcome')).toBeInTheDocument();
-    await userEvent.click(within(log).getByRole('button', { name: 'Give outcome for 9000000002' }));
-    const late = await screen.findByRole('dialog', { name: /call outcome/i });
+    expect(within(log).getByText('Needs disposition')).toBeInTheDocument();
+    await userEvent.click(within(log).getByRole('button', { name: 'Give disposition for 9000000002' }));
+    const late = await screen.findByRole('dialog', { name: /^disposition$/i });
     await userEvent.click(within(late).getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('dialog', { name: /call outcome/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: /^disposition$/i })).not.toBeInTheDocument();
 
     await userEvent.click(within(log).getByRole('button', { name: 'Open Ravi' }));
     expect(await screen.findByLabelText('Amount *')).toHaveValue(4500);

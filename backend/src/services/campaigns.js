@@ -24,6 +24,10 @@ function parseCampaignSettings(body) {
     abandon_wait_sec: num(body.abandonWaitSec, 5),
     // 0 = off; otherwise skip numbers another campaign reached in the last N hours.
     number_gap_hours: num(body.numberGapHours, 0),
+    // Auto disposition: 0 = off; otherwise this disposition is saved when the
+    // agent gives none within that many seconds after the call.
+    auto_dispo_sec: num(body.autoDispoSec, 0),
+    auto_dispo_code: body.autoDispoCode ? String(body.autoDispoCode).trim().slice(0, 30) : null,
     // Recording is on unless switched off.
     record_calls: body.recordCalls === false ? 0 : 1,
   };
@@ -43,6 +47,9 @@ function parseCampaignSettings(body) {
   if (!inRange(s.wrapup_sec, 0, 600)) return { error: 'wrap-up must be 0-600 seconds' };
   if (!inRange(s.abandon_wait_sec, 2, 30) || !Number.isInteger(s.abandon_wait_sec))
     return { error: 'max wait for an agent must be 2-30 seconds' };
+  if (!inRange(s.auto_dispo_sec, 0, 600) || !Number.isInteger(s.auto_dispo_sec))
+    return { error: 'auto disposition must be 0-600 seconds (0 = off)' };
+  if (s.auto_dispo_sec > 0 && !s.auto_dispo_code) return { error: 'pick the disposition to save automatically' };
   if (!inRange(s.number_gap_hours, 0, 168) || !Number.isInteger(s.number_gap_hours))
     return { error: 'spacing across campaigns must be 0-168 hours (0 = off)' };
   const timeRe = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;

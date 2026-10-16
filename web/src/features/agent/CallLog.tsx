@@ -50,7 +50,7 @@ type Tone = 'good' | 'callback' | 'warn' | 'muted' | 'bad';
 export function callChip(c: CallRow): { text: string; tone: Tone } {
   if (live(c)) return { text: 'In progress', tone: 'good' };
   if (c.outcome_label) return { text: c.outcome_label, tone: c.is_callback ? 'callback' : 'good' };
-  if (answered(c)) return { text: 'Needs outcome', tone: 'warn' };
+  if (answered(c)) return { text: 'Needs disposition', tone: 'warn' };
   const text = (c.disposition && RESULT[c.disposition]) || 'No answer';
   return {
     text,
@@ -73,7 +73,7 @@ const FILTERS: { key: Filter; label: string; test: (c: CallRow) => boolean }[] =
   { key: 'all', label: 'All calls', test: () => true },
   { key: 'answered', label: 'Answered', test: answered },
   { key: 'not_answered', label: 'Not answered', test: (c) => !answered(c) && !live(c) },
-  { key: 'needs_outcome', label: 'Needs outcome', test: needsOutcome },
+  { key: 'needs_outcome', label: 'Needs disposition', test: needsOutcome },
   { key: 'callbacks', label: 'Callbacks set', test: (c) => !!c.is_callback },
   { key: 'inbound', label: 'Inbound', test: (c) => c.direction === 'inbound' },
   { key: 'outbound', label: 'Outbound', test: (c) => c.direction !== 'inbound' },
@@ -176,8 +176,8 @@ function CallItem({ c, playing, onPlay }: { c: CallRow; playing: boolean; onPlay
                   variant="ghost"
                   size="icon"
                   className="size-7 text-status-break"
-                  aria-label={`Give outcome for ${c.to_number}`}
-                  title="Give outcome"
+                  aria-label={`Give disposition for ${c.to_number}`}
+                  title="Give disposition"
                   disabled={!!state.call}
                   onClick={() =>
                     controller.giveOutcomeLater({
@@ -334,7 +334,7 @@ export function CallLog() {
           onClick={() => setFilter('needs_outcome')}
           className="cursor-pointer rounded-md border border-status-break/40 bg-status-break/10 px-2 py-1 text-left text-xs text-status-break"
         >
-          {counts.needs_outcome} answered call{counts.needs_outcome === 1 ? '' : 's'} without an outcome - show
+          {counts.needs_outcome} answered call{counts.needs_outcome === 1 ? '' : 's'} without a disposition - show
         </button>
       )}
       <div className="-mx-2 min-h-0 flex-1 overflow-y-auto">

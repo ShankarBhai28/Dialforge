@@ -36,6 +36,9 @@ export type CampaignForm = {
   wrapupSec: string;
   abandonWaitSec: string;
   numberGapHours: string;
+  /** Auto disposition: seconds ('' or 0 = off) and which disposition. */
+  autoDispoSec: string;
+  autoDispoCode: string;
   callWindowStart: string;
   callWindowEnd: string;
   timezone: string;
@@ -53,6 +56,7 @@ const DEFAULTS = {
   wrapupSec: 10,
   abandonWaitSec: 5,
   numberGapHours: 0,
+  autoDispoSec: 0,
 };
 
 export function campaignForm(c: Campaign | null): CampaignForm {
@@ -76,6 +80,9 @@ export function campaignForm(c: Campaign | null): CampaignForm {
     wrapupSec: str(c?.wrapup_sec, DEFAULTS.wrapupSec),
     abandonWaitSec: str(c?.abandon_wait_sec, DEFAULTS.abandonWaitSec),
     numberGapHours: str(c?.number_gap_hours, DEFAULTS.numberGapHours),
+    autoDispoSec: str(c?.auto_dispo_sec, DEFAULTS.autoDispoSec),
+    // "No Disposition" is offered first: not final, redialled later.
+    autoDispoCode: c?.auto_dispo_code ?? 'no_dispo',
     callWindowStart: (c?.call_window_start ?? '09:00').slice(0, 5),
     callWindowEnd: (c?.call_window_end ?? '21:00').slice(0, 5),
     timezone: c?.timezone ?? 'Asia/Kolkata',
@@ -105,6 +112,8 @@ export function campaignBody(f: CampaignForm): CampaignBody {
     wrapupSec: num(f.wrapupSec, DEFAULTS.wrapupSec),
     abandonWaitSec: num(f.abandonWaitSec, DEFAULTS.abandonWaitSec),
     numberGapHours: num(f.numberGapHours, DEFAULTS.numberGapHours),
+    autoDispoSec: num(f.autoDispoSec, DEFAULTS.autoDispoSec),
+    autoDispoCode: num(f.autoDispoSec, DEFAULTS.autoDispoSec) > 0 ? f.autoDispoCode || null : null,
     callWindowStart: f.callWindowStart,
     callWindowEnd: f.callWindowEnd,
     timezone: f.timezone.trim() || 'Asia/Kolkata',
@@ -137,6 +146,8 @@ export function checkCampaign(b: CampaignBody): string | null {
   if (!inRange(b.wrapupSec, 0, 600)) return 'wrap-up must be 0-600 seconds';
   if (!whole(b.abandonWaitSec, 2, 30)) return 'max wait for an agent must be 2-30 seconds';
   if (!whole(b.numberGapHours, 0, 168)) return 'spacing across campaigns must be 0-168 hours (0 = off)';
+  if (!whole(b.autoDispoSec, 0, 600)) return 'auto disposition must be 0-600 seconds (0 = off)';
+  if (b.autoDispoSec > 0 && !b.autoDispoCode) return 'pick the disposition to save automatically';
   const timeRe = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
   if (!timeRe.test(b.callWindowStart) || !timeRe.test(b.callWindowEnd)) return 'calling window times must be HH:MM';
   if (b.callWindowStart >= b.callWindowEnd) return 'calling window start must be before its end';

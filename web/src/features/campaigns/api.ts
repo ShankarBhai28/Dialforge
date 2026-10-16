@@ -32,6 +32,8 @@ export type Campaign = {
   wrapup_sec: number;
   abandon_wait_sec: number;
   number_gap_hours?: number;
+  auto_dispo_sec?: number;
+  auto_dispo_code?: string | null;
   call_window_start: string;
   call_window_end: string;
   timezone: string;
@@ -58,6 +60,8 @@ export type CampaignBody = {
   wrapupSec: number;
   abandonWaitSec: number;
   numberGapHours: number;
+  autoDispoSec: number;
+  autoDispoCode: string | null;
   callWindowStart: string;
   callWindowEnd: string;
   timezone: string;

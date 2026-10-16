@@ -12,6 +12,15 @@ const {
 
 const { campaignInScope, scopeCondition } = require('../services/access');
 
+/** The auto disposition (if on) must be one of the campaign's, and not a callback (that needs a time). */
+function checkAutoDispo(settings, dispositions) {
+  if (!settings.auto_dispo_code) return null;
+  const d = dispositions.find((x) => x.code === settings.auto_dispo_code);
+  if (!d) return `auto disposition must be one of: ${dispositions.map((x) => x.code).join(', ')}`;
+  if (d.is_callback) return 'a callback needs a date and time - pick another auto disposition';
+  return null;
+}
+
 const router = express.Router();
 
 // --- Admin: campaigns (each references one queue) ---
@@ -52,6 +61,8 @@ router.post(
     if (formError) return res.status(400).json({ error: formError });
     const { error, settings } = parseCampaignSettings(req.body);
     if (error) return res.status(400).json({ error });
+    const autoError = checkAutoDispo(settings, DEFAULT_DISPOSITIONS);
+    if (autoError) return res.status(400).json({ error: autoError });
     const conn = await pool.getConnection();
     let result;
     try {
@@ -95,6 +106,8 @@ router.put('/admin/campaigns/:id', requirePermission('campaigns', 'edit'), async
   if (formError) return res.status(400).json({ error: formError });
   const { error, settings } = parseCampaignSettings(req.body);
   if (error) return res.status(400).json({ error });
+  const autoError = checkAutoDispo(settings, await getDispositions(rows[0].id));
+  if (autoError) return res.status(400).json({ error: autoError });
 
   await pool.query('UPDATE campaigns SET ? WHERE id = ?', [
     {

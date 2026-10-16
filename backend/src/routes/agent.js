@@ -115,9 +115,20 @@ router.get('/agent/call-state/:callId', requireCaller, async (req, res) => {
 
 router.get('/agent/campaign-info', requireCaller, async (req, res) => {
   const c = await findCurrentCampaign(req.session.user.id);
-  res.json(
-    c ? { id: c.id, name: c.name, dialMode: c.dial_mode, wrapupSec: c.wrapup_sec, dialerState: c.dialer_state } : null,
-  );
+  if (!c) return res.json(null);
+  const auto =
+    c.auto_dispo_sec > 0 && c.auto_dispo_code
+      ? (await getDispositions(c.id)).find((d) => d.code === c.auto_dispo_code)
+      : null;
+  res.json({
+    id: c.id,
+    name: c.name,
+    dialMode: c.dial_mode,
+    wrapupSec: c.wrapup_sec,
+    dialerState: c.dialer_state,
+    // Auto disposition: saved when the agent gives none within this many seconds.
+    autoDispo: auto ? { seconds: c.auto_dispo_sec, code: auto.code, label: auto.label } : null,
+  });
 });
 
 // --- Agent: dispositions + callbacks for the campaign they're working ---

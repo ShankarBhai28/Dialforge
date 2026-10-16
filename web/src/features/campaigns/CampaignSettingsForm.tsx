@@ -10,6 +10,8 @@ import { DialogBody, DialogFooter } from '@/components/ui/dialog';
 import { Field, FormError } from '@/components/common';
 import { useQueues } from '@/features/queues/api';
 import { useFormOptions, useSaveCampaign, type Campaign, type DialMode } from './api';
+import { useDispositions } from '@/features/leads/api';
+import { DEFAULT_DISPOSITIONS } from '@/features/leads/statuses';
 import {
   DIAL_MODES,
   campaignBody,
@@ -106,6 +108,11 @@ export function CampaignSettingsForm({ campaign, onDone }: { campaign: Campaign 
   const set = <K extends keyof CampaignForm>(key: K, value: CampaignForm[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
   const show = modeFields(form.dialMode);
+  // The campaign's own dispositions (a new campaign gets the defaults); not callbacks - they need a time.
+  const dispositions = useDispositions(campaign?.id ?? null);
+  const autoChoices = (campaign ? (dispositions.data ?? []) : DEFAULT_DISPOSITIONS).filter(
+    (d) => !(d as { is_callback?: number }).is_callback && d.code !== 'callback',
+  );
 
   // Only active forms can be attached, but keep the current one visible
   // (marked) so an edit doesn't silently drop it.
@@ -312,12 +319,40 @@ export function CampaignSettingsForm({ campaign, onDone }: { campaign: Campaign 
             <NumberField
               id="c-wrapup"
               label="Wrap-up (sec)"
-              hint="0-600"
+              hint="0-600. After the disposition, the agent is Available again after this many seconds."
               value={form.wrapupSec}
               onChange={(v) => set('wrapupSec', v)}
               min={0}
               max={600}
             />
+            <NumberField
+              id="c-autodispo"
+              label="Auto disposition (sec)"
+              hint="0 = off. If the agent gives no disposition this long after a call, it is saved by itself."
+              value={form.autoDispoSec}
+              onChange={(v) => set('autoDispoSec', v)}
+              min={0}
+              max={600}
+            />
+            {Number(form.autoDispoSec) > 0 && (
+              <Field
+                id="c-autodispo-code"
+                label="Auto disposition to save"
+                hint="Callback dispositions need a time, so they can't be chosen."
+              >
+                <Select
+                  id="c-autodispo-code"
+                  value={form.autoDispoCode}
+                  onChange={(e) => set('autoDispoCode', e.target.value)}
+                >
+                  {autoChoices.map((d) => (
+                    <option key={d.code} value={d.code}>
+                      {d.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             <Field id="c-from" label="Calling from">
               <Input
                 id="c-from"
