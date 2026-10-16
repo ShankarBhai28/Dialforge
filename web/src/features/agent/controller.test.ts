@@ -103,6 +103,7 @@ describe('click-to-call', () => {
       status: 'available',
       reason: null,
       queueId: 4,
+      extraQueueIds: [],
     });
   });
 
@@ -299,7 +300,26 @@ describe('status and queue', () => {
       status: 'available',
       reason: null,
       queueId: 5,
+      extraQueueIds: [],
     });
+  });
+
+  it('blended: extra queues go with Available, are remembered for the shift, never the main queue itself', async () => {
+    const t = setup({ 'POST /agent/status': { body: { status: 'ok' } } }, { queue: null });
+    await t.controller.selectQueue({ id: 5, name: 'Sales' }, [6, 5, 7]);
+    expect(t.calls.find((c) => c.key === 'POST /agent/status')?.body).toMatchObject({
+      queueId: 5,
+      extraQueueIds: [6, 7],
+    });
+    expect(t.state().extraQueueIds).toEqual([6, 7]);
+    // A later Available (e.g. after a break) keeps them.
+    t.calls.length = 0;
+    await t.controller.setStatus('available');
+    expect(t.calls.find((c) => c.key === 'POST /agent/status')?.body).toMatchObject({ extraQueueIds: [6, 7] });
+    // Breaks don't send them (the server keeps the shift's choice).
+    t.calls.length = 0;
+    await t.controller.setStatus('break', 'Lunch');
+    expect(t.calls.find((c) => c.key === 'POST /agent/status')?.body).not.toHaveProperty('extraQueueIds');
   });
 
   it('a queue removed from the team: says why and asks again', async () => {

@@ -4,7 +4,7 @@ const ExcelJS = require('exceljs');
 const pool = require('../../db');
 const { normalizePhone } = require('../../dialer-common');
 const { requirePermission, requireCaller } = require('../middleware/auth');
-const { findCurrentCampaign } = require('../services/agents');
+const { findCurrentCampaign, findWorkingCampaign } = require('../services/agents');
 const { getDispositions } = require('../services/dispositions');
 const { addDnc, isDnc } = require('../services/dnc');
 const { audit } = require('../services/audit');
@@ -152,7 +152,7 @@ router.get('/agent/leads/:id/history', requireCaller, async (req, res) => {
   const lead = await leadForAgent(req, res);
   if (!lead) return;
   // Other leads with this number: the agent's current campaign (or none) only; their own calls always.
-  const campaign = await findCurrentCampaign(req.session.user.id);
+  const campaign = await findWorkingCampaign(req.session.user.id, req.session.user.extensionName);
   res.json(
     await leadHistory(lead.id, {
       recordingUrl: (id) => `/agent/calls/${id}/recording`,
@@ -182,7 +182,8 @@ router.post('/leads/:id/disposition', requireCaller, async (req, res) => {
   const lead = leadRows[0];
   if (!lead) return res.status(404).json({ error: 'lead not found' });
   if (req.session.user.role === 'agent') {
-    const campaign = await findCurrentCampaign(req.session.user.id);
+    // The call's campaign (a blended agent's call can come from an extra queue), else the main one.
+    const campaign = await findWorkingCampaign(req.session.user.id, req.session.user.extensionName);
     if (lead.campaign_id && (!campaign || campaign.id !== lead.campaign_id)) {
       return res.status(403).json({ error: 'that lead is not in your current campaign' });
     }

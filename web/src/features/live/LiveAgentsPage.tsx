@@ -230,7 +230,10 @@ function AgentsTable({
                   )}
                 </TableCell>
                 <TableCell>{a.campaign_name ?? '—'}</TableCell>
-                <TableCell>{a.queue_name ?? '—'}</TableCell>
+                <TableCell>
+                  {a.queue_name ?? '—'}
+                  {a.extra_queues && <div className="text-xs text-muted-foreground">+ {a.extra_queues}</div>}
+                </TableCell>
                 <TableCell className="whitespace-nowrap">
                   {call ? (
                     <>
@@ -346,14 +349,18 @@ export function LiveAgentsPage() {
   const [queue, setQueue] = useState('');
   const [campaign, setCampaign] = useState('');
   const all = agents.data ?? [];
-  const queues = [...new Set(all.map((a) => a.queue_name).filter((x): x is string => !!x))].sort();
+  const queues = [
+    ...new Set(
+      all.flatMap((a) => [a.queue_name, ...(a.extra_queues ?? '').split(', ')]).filter((x): x is string => !!x),
+    ),
+  ].sort();
   const campaigns = [...new Set(all.map((a) => a.campaign_name).filter((x): x is string => !!x))].sort();
   const term = q.trim().toLowerCase();
   const shown = all.filter(
     (a) =>
       matchesStatus(a, status) &&
       (!term || a.username.toLowerCase().includes(term) || (a.extension_name ?? '').includes(term)) &&
-      (!queue || a.queue_name === queue) &&
+      (!queue || a.queue_name === queue || (a.extra_queues ?? '').split(', ').includes(queue)) &&
       (!campaign || a.campaign_name === campaign),
   );
 

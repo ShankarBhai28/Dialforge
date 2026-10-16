@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Clock, Coffee, Headset, LogOut, PhoneOff, Timer, Users2, type LucideIcon } from 'lucide-react';
+import {
+  ChevronDown,
+  Clock,
+  ListChecks,
+  Coffee,
+  Headset,
+  LogOut,
+  PhoneOff,
+  Timer,
+  Users2,
+  type LucideIcon,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useNow } from '@/lib/hooks';
@@ -22,7 +33,9 @@ function pillFor(stats: AgentStats | undefined, autoAvailableAt: number | null, 
   switch (stats?.currentStatus) {
     case 'available':
       return {
-        text: stats.currentQueueName ? `Available - ${stats.currentQueueName}` : 'Available',
+        text: stats.currentQueueName
+          ? `Available - ${stats.currentQueueName}${stats.extraQueues?.length ? ` +${stats.extraQueues.length}` : ''}`
+          : 'Available',
         cls: 'bg-status-available',
         pulse: true,
       };
@@ -80,6 +93,11 @@ function StatusMenu({ stats }: { stats: AgentStats | undefined }) {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
+        title={
+          stats?.extraQueues?.length
+            ? `Also taking calls from: ${stats.extraQueues.map((q) => q.name).join(', ')}`
+            : undefined
+        }
         className={cn(
           'flex cursor-pointer items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-semibold text-white',
           pill.cls,
@@ -102,6 +120,16 @@ function StatusMenu({ stats }: { stats: AgentStats | undefined }) {
               <span className="size-2 rounded-full bg-status-break" /> Break — {r}
             </button>
           ))}
+          <button
+            role="menuitem"
+            className={cn(item, 'border-t')}
+            onClick={() => {
+              setOpen(false);
+              controller.openQueuePicker();
+            }}
+          >
+            <ListChecks className="size-4 text-muted-foreground" /> Change queues…
+          </button>
         </div>
       )}
     </div>

@@ -86,6 +86,7 @@ function deleteQueue(id, userId, deps) {
     // A campaign without a queue can't dial: stop its dialer too.
     await conn.query("UPDATE campaigns SET queue_id = NULL, dialer_state = 'stopped' WHERE queue_id = ?", [id]);
     await conn.query('UPDATE queues SET deleted_at = NOW(), deleted_by = ? WHERE id = ?', [userId, id]);
+    await conn.query('DELETE FROM agent_extra_queues WHERE queue_id = ?', [id]); // no longer an extra queue for anyone
     return using.length
       ? [`${using.map((c) => c.name).join(', ')} no longer ${using.length === 1 ? 'has' : 'have'} a queue`]
       : [];

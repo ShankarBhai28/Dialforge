@@ -36,6 +36,7 @@ const CLEAR = [
   'dialer_status',
   'agent_status_log',
   'live_agents',
+  'agent_extra_queues',
   'audit_log',
   'sessions',
 ];

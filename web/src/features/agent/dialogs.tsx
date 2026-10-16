@@ -78,9 +78,59 @@ export function IncomingCallDialog() {
   );
 }
 
+/**
+ * Blended: "Also take calls from" - extra queues of the agent's teams. Their
+ * calls reach the agent after that queue's own agents. Only with 2+ queues.
+ */
+export function ExtraQueuesPicker({
+  queues,
+  value,
+  onChange,
+}: {
+  queues: { id: number; name: string }[];
+  value: number[];
+  onChange: (ids: number[]) => void;
+}) {
+  if (queues.length < 2) return null;
+  const toggle = (id: number) => onChange(value.includes(id) ? value.filter((y) => y !== id) : [...value, id]);
+  return (
+    <fieldset className="mb-3 rounded-md border bg-muted/30 px-4 py-3">
+      <legend className="px-1 text-xs font-semibold text-muted-foreground">Also take calls from</legend>
+      <div className="flex flex-wrap gap-x-5 gap-y-2">
+        {queues.map((q) => (
+          <label key={q.id} className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={value.includes(q.id)}
+              onChange={() => toggle(q.id)}
+            />
+            {q.name}
+          </label>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Tick extra queues, then click the queue you work. Their calls reach you after that queue&apos;s own agents.
+      </p>
+    </fieldset>
+  );
+}
+
+/**
+ * Main queue (= the campaign worked: its leads, dialer, form) and - blended -
+ * extra queues to also take calls from (rung after those queues' own agents).
+ * Clicking a main queue goes Available with the ticked extras.
+ */
 export function QueuePickerDialog() {
   const { controller, state } = useController();
   const queues = useAgentQueues(state.queuePickerOpen);
+  const [extras, setExtras] = useState<number[]>([]);
+  const [wasOpen, setWasOpen] = useState(false);
+  // Each opening starts from the shift's choice (adjusted during render).
+  if (state.queuePickerOpen !== wasOpen) {
+    setWasOpen(state.queuePickerOpen);
+    if (state.queuePickerOpen) setExtras(state.extraQueueIds);
+  }
   return (
     <Dialog open={state.queuePickerOpen} onOpenChange={(v) => !v && controller.closeQueuePicker()}>
       <DialogContent size="sm">
@@ -89,6 +139,7 @@ export function QueuePickerDialog() {
           <DialogDescription>Pick which queue you're working before going Available.</DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-2 pb-5">
+          {queues.data && <ExtraQueuesPicker queues={queues.data} value={extras} onChange={setExtras} />}
           {queues.isPending ? (
             <Skeleton className="h-12" />
           ) : queues.error ? (
@@ -102,7 +153,7 @@ export function QueuePickerDialog() {
               <button
                 key={q.id}
                 type="button"
-                onClick={() => void controller.selectQueue({ id: q.id, name: q.name })}
+                onClick={() => void controller.selectQueue({ id: q.id, name: q.name }, extras)}
                 className="flex w-full cursor-pointer items-center justify-between rounded-md border px-4 py-3 text-left hover:border-primary hover:bg-accent/40"
               >
                 <span className="font-semibold">{q.name}</span>

@@ -33,6 +33,8 @@ async function liveAgents(scope, deps = { pool }, now = new Date()) {
        (SELECT c.wrapup_sec FROM campaigns c WHERE c.queue_id = q.id AND c.deleted_at IS NULL ORDER BY c.id LIMIT 1) AS wrapup_sec,
        (SELECT GROUP_CONCAT(t.name ORDER BY t.name SEPARATOR ', ') FROM team_members tm JOIN teams t ON t.id = tm.team_id
          WHERE tm.user_id = u.id) AS teams,
+       (SELECT GROUP_CONCAT(xq.name ORDER BY xq.name SEPARATOR ', ') FROM agent_extra_queues x JOIN queues xq ON xq.id = x.queue_id
+         WHERE x.user_id = u.id) AS extra_queues,
        la.line, la.login_at
      FROM users u
      LEFT JOIN extensions e ON u.extension_id = e.id
@@ -77,6 +79,8 @@ async function liveAgents(scope, deps = { pool }, now = new Date()) {
       reason: a.reason,
       started_at: a.started_at,
       queue_name: a.queue_name,
+      /** Blended: the extra queues this agent also takes calls from. */
+      extra_queues: a.extra_queues || null,
       campaign_name: a.campaign_name || null,
       wrapup_sec: a.wrapup_sec == null ? null : Number(a.wrapup_sec),
       teams: a.teams || null,

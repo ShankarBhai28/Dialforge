@@ -24,6 +24,7 @@ const db = {
       return [openRows.slice(0, 1)];
     if (s.includes('FROM agent_status_log asl JOIN users u')) return [openRows];
     if (s.startsWith('SELECT id FROM calls WHERE (from_extension')) return [activeCall ? [{ id: 1 }] : []];
+    if (s.includes('FROM agent_extra_queues')) return [[]]; // no extra queues (blended agents)
     if (s.includes('asterisk_name FROM queues')) return [[{ asterisk_name: 'support_queue' }]];
     if (s.includes('SELECT queue_id FROM agent_status_log')) return [[{ queue_id: 1 }]];
     if (s.startsWith('SELECT data FROM sessions')) return [[{ data: JSON.stringify({ user: { id: 7 } }) }]];

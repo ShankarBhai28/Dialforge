@@ -10,7 +10,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { cn } from '@/lib/utils';
 import { AgentProvider, useController, usePhone } from './AgentProvider';
 import { ConnectLine, useRememberLine } from './ConnectLine';
-import { IncomingCallDialog, OutcomeDialog, QueuePickerDialog } from './dialogs';
+import { ExtraQueuesPicker, IncomingCallDialog, OutcomeDialog, QueuePickerDialog } from './dialogs';
 import { callTimer, InCallPanel } from './InCallPanel';
 import { LeadsPanel } from './LeadsPanel';
 import { SidePanel } from './SidePanel';
@@ -52,10 +52,11 @@ function StartShift() {
   const { line } = usePhone();
   const queues = useAgentQueues(true);
   const [busy, setBusy] = useState<number | null>(null);
+  const [extras, setExtras] = useState<number[]>(state.extraQueueIds);
   async function start(q: { id: number; name: string }) {
     setBusy(q.id);
     try {
-      await controller.selectQueue(q);
+      await controller.selectQueue(q, extras);
     } finally {
       setBusy(null);
     }
@@ -86,37 +87,40 @@ function StartShift() {
             No campaign is assigned to your team yet - ask your admin to map one.
           </p>
         ) : (
-          <ul className="space-y-2">
-            {queues.data.map((q) => {
-              const last = state.queue?.id === q.id;
-              return (
-                <li key={q.id}>
-                  <button
-                    type="button"
-                    disabled={busy !== null}
-                    onClick={() => void start({ id: q.id, name: q.name })}
-                    aria-label={`Go Available on ${q.name}`}
-                    className={cn(
-                      'flex w-full cursor-pointer items-center justify-between gap-3 rounded-md border px-4 py-3 text-left hover:border-primary hover:bg-accent/40 disabled:opacity-60',
-                      last && 'border-primary bg-accent/30',
-                    )}
-                  >
-                    <span>
-                      <span className="block font-semibold">{q.name}</span>
-                      <span className="block text-xs text-muted-foreground">
-                        {q.campaign_name}
-                        {last && ' · your last queue'}
+          <>
+            <ExtraQueuesPicker queues={queues.data} value={extras} onChange={setExtras} />
+            <ul className="space-y-2">
+              {queues.data.map((q) => {
+                const last = state.queue?.id === q.id;
+                return (
+                  <li key={q.id}>
+                    <button
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => void start({ id: q.id, name: q.name })}
+                      aria-label={`Go Available on ${q.name}`}
+                      className={cn(
+                        'flex w-full cursor-pointer items-center justify-between gap-3 rounded-md border px-4 py-3 text-left hover:border-primary hover:bg-accent/40 disabled:opacity-60',
+                        last && 'border-primary bg-accent/30',
+                      )}
+                    >
+                      <span>
+                        <span className="block font-semibold">{q.name}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {q.campaign_name}
+                          {last && ' · your last queue'}
+                        </span>
                       </span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1 text-sm font-semibold text-status-available">
-                      {busy === q.id ? <LoaderCircle className="size-4 animate-spin" /> : <Play className="size-4" />}
-                      Go Available
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                      <span className="flex shrink-0 items-center gap-1 text-sm font-semibold text-status-available">
+                        {busy === q.id ? <LoaderCircle className="size-4 animate-spin" /> : <Play className="size-4" />}
+                        Go Available
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )}
       </section>
     </div>

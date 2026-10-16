@@ -102,8 +102,9 @@ async function action(name, params) {
   return sendAction(name, params);
 }
 
-function queueAdd(queue, interfaceName) {
-  return action('QueueAdd', { Queue: queue, Interface: interfaceName, Paused: 'false' });
+// penalty: lower is rung first (0 = the queue's own agents; extra-queue agents join with 1).
+function queueAdd(queue, interfaceName, penalty = 0) {
+  return action('QueueAdd', { Queue: queue, Interface: interfaceName, Paused: 'false', Penalty: String(penalty) });
 }
 
 function queueRemove(queue, interfaceName) {

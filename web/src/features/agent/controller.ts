@@ -56,6 +56,8 @@ export type Workspace = {
 export type ControllerState = {
   queue: { id: number; name: string } | null;
   queuePickerOpen: boolean;
+  /** Blended: also take calls from these queues (the shift's choice). */
+  extraQueueIds: number[];
   /** Ringing call waiting for Accept / Reject. */
   incoming: { number: string; name: string } | null;
   call: CallInfo | null;
@@ -78,6 +80,8 @@ type Deps = {
 };
 
 const QUEUE_KEY = 'dialforge.agent.queue';
+/** Blended: the extra queues (ids) chosen for the shift. */
+const EXTRA_KEY = 'dialforge.agent.extraQueues';
 /** How long a notice under the status bar stays (the agent asked for 2 s). */
 export const MESSAGE_MS = 2000;
 const emptyWorkspace = (v = 0): Workspace => ({
@@ -118,6 +122,7 @@ export class AgentController {
     this.storage = storage === undefined ? safeSessionStorage() : storage;
     this.state = {
       queue: this.loadQueue(),
+      extraQueueIds: this.loadExtras(),
       queuePickerOpen: false,
       incoming: null,
       call: null,
@@ -394,6 +399,7 @@ export class AgentController {
           return;
         }
         this.outcomeTarget = target;
+        this.refresh('form', 'dispositions', 'campaignInfo');
         this.setCall({
           number: call.phone,
           name,
@@ -492,16 +498,23 @@ export class AgentController {
       return;
     }
     await this.postStatus(status, reason ?? null);
+    if (status === 'available') this.refresh('form', 'dispositions', 'campaignInfo');
   }
 
   private async postStatus(status: 'available' | 'break', reason: string | null) {
     try {
-      await post('/agent/status', { status, reason, queueId: this.state.queue?.id ?? null });
+      await post('/agent/status', {
+        status,
+        reason,
+        queueId: this.state.queue?.id ?? null,
+        ...(status === 'available' ? { extraQueueIds: this.state.extraQueueIds } : {}),
+      });
     } catch (err) {
       if (err instanceof ApiError && err.status === 403 && status === 'available') {
         // The queue's campaign was unmapped from the agent's team mid-session.
         this.say(err.message || 'This queue is no longer available to you.', true);
         this.saveQueue(null);
+        this.saveExtras([]);
         this.set({ queuePickerOpen: true });
         return;
       }
@@ -514,9 +527,15 @@ export class AgentController {
   closeQueuePicker() {
     this.set({ queuePickerOpen: false });
   }
+  /** "Change queues…": pick the main queue and the extra ones again. */
+  openQueuePicker() {
+    this.set({ queuePickerOpen: true });
+  }
 
-  async selectQueue(queue: { id: number; name: string }) {
+  /** extraQueueIds: blended - also take calls from these queues (left out = keep the shift's choice). */
+  async selectQueue(queue: { id: number; name: string }, extraQueueIds?: number[]) {
     this.saveQueue(queue);
+    if (extraQueueIds) this.saveExtras(extraQueueIds.filter((id) => id !== queue.id));
     this.set({ queuePickerOpen: false });
     await this.postStatus('available', null);
     // A different queue can mean a different campaign: leads, form and outcomes change.
@@ -530,6 +549,24 @@ export class AgentController {
     } catch {
       return null;
     }
+  }
+  private loadExtras(): number[] {
+    try {
+      const v = this.storage?.getItem(EXTRA_KEY);
+      const ids = v ? JSON.parse(v) : [];
+      return Array.isArray(ids) ? ids.filter((x) => Number.isInteger(x)) : [];
+    } catch {
+      return [];
+    }
+  }
+  private saveExtras(ids: number[]) {
+    try {
+      if (ids.length) this.storage?.setItem(EXTRA_KEY, JSON.stringify(ids));
+      else this.storage?.removeItem(EXTRA_KEY);
+    } catch {
+      /* private mode */
+    }
+    this.set({ extraQueueIds: ids });
   }
   private saveQueue(queue: ControllerState['queue']) {
     try {
@@ -554,6 +591,7 @@ export class AgentController {
     else await post(`/agent/calls/${target.callId}/disposition`, body);
     this.set({ outcomeFor: null });
     this.refresh('leads', 'callbacks', 'history', 'calls'); // the call log shows the outcome
+    if (target.late) this.refresh('form', 'campaignInfo');
     if (!target.late) await this.scheduleAutoAvailable();
   }
 
@@ -588,6 +626,8 @@ export class AgentController {
       }
       // Only if nothing else changed the status meanwhile.
       if (stats.currentStatus === 'acw' && this.state.queue) await this.postStatus('available', null);
+      // Back on the main campaign (the last call may have come from an extra queue).
+      this.refresh('form', 'dispositions', 'campaignInfo');
     }, wrapupSec * 1000);
   }
   private clearWrapup() {

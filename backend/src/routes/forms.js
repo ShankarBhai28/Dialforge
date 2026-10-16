@@ -2,7 +2,7 @@ const express = require('express');
 const { deleteForm } = require('../services/softDelete');
 const pool = require('../../db');
 const { requirePermission, requireAdminSide, requireCaller } = require('../middleware/auth');
-const { findCurrentCampaign } = require('../services/agents');
+const { findWorkingCampaign } = require('../services/agents');
 const { loadFormsWithFields, validateFormData, validateFormFields } = require('../services/forms');
 
 const { scopeCondition } = require('../services/access');
@@ -125,7 +125,8 @@ router.get('/admin/forms/:id/responses', requirePermission('forms', 'view'), asy
 
 // --- Agent: the form for the campaign they're currently working ---
 router.get('/agent/form', requireCaller, async (req, res) => {
-  const campaign = await findCurrentCampaign(req.session.user.id);
+  // The call's campaign (a blended agent's call can come from an extra queue), else the main one.
+  const campaign = await findWorkingCampaign(req.session.user.id, req.session.user.extensionName);
   if (!campaign || !campaign.form_id) return res.json(null);
   const [form] = await loadFormsWithFields("WHERE id = ? AND status = 'active'", [campaign.form_id]);
   res.json(form || null);
@@ -133,7 +134,7 @@ router.get('/agent/form', requireCaller, async (req, res) => {
 
 router.post('/agent/form-responses', requireCaller, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
-  const campaign = await findCurrentCampaign(req.session.user.id);
+  const campaign = await findWorkingCampaign(req.session.user.id, req.session.user.extensionName);
   if (!campaign || !campaign.form_id) return res.status(400).json({ error: 'your current campaign has no form' });
   const [form] = await loadFormsWithFields("WHERE id = ? AND status = 'active'", [campaign.form_id]);
   if (!form) return res.status(400).json({ error: 'your current campaign has no active form' });

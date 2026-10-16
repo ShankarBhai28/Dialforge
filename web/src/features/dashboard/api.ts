@@ -18,6 +18,8 @@ export type LiveAgent = {
   reason: string | null;
   started_at: string | null;
   queue_name: string | null;
+  /** Blended: extra queues the agent also takes calls from (comma separated). */
+  extra_queues?: string | null;
   active_call_number: string | null;
   // Live Agents wallboard (backend/src/services/liveFloor.js).
   campaign_name?: string | null;

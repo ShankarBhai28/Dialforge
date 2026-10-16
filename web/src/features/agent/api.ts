@@ -17,6 +17,8 @@ export type AgentStats = {
   currentStatus: AgentStatus | 'offline' | null;
   currentReason: string | null;
   currentQueueName: string | null;
+  /** Blended: the extra queues the agent also takes calls from this shift. */
+  extraQueues?: { id: number; name: string }[];
 };
 
 /** GET /queues (agent): queues of campaigns mapped to the agent's teams. */

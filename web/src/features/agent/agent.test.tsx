@@ -445,9 +445,57 @@ describe('agent screen', () => {
       status: 'available',
       reason: null,
       queueId: 4,
+      extraQueueIds: [],
     });
     expect(await screen.findByLabelText('Number to dial')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Start your shift' })).not.toBeInTheDocument();
+  });
+
+  it('blended: ticking "Also take calls from" sends the extra queues with Available; the pill shows how many', async () => {
+    let status = 'offline';
+    const calls = fakeApi(
+      backend({
+        'GET /agent/stats': () => ({
+          body: {
+            loginSeconds: 0,
+            talkSeconds: 0,
+            breakSeconds: 0,
+            acwSeconds: 0,
+            handleSeconds: 0,
+            currentStatus: status,
+            currentReason: null,
+            currentQueueName: status === 'available' ? 'Support Queue' : null,
+            extraQueues: status === 'available' ? [{ id: 5, name: 'Sales Queue' }] : [],
+          },
+        }),
+        'GET /queues': {
+          body: [
+            { id: 4, name: 'Support Queue', campaign_name: 'Support' },
+            { id: 5, name: 'Sales Queue', campaign_name: 'Sales' },
+          ],
+        },
+        'POST /agent/status': () => {
+          status = 'available';
+          return { body: { status: 'ok' } };
+        },
+      }),
+    );
+    const uas = fakeUAFactory();
+    renderPage(<AgentPage createUA={uas.factory} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect' }));
+    await waitFor(() => expect(uas.made.length).toBe(1));
+    act(() => uas.last().register());
+
+    const extras = await screen.findByRole('group', { name: 'Also take calls from' });
+    await userEvent.click(within(extras).getByLabelText('Sales Queue'));
+    await userEvent.click(screen.getByRole('button', { name: 'Go Available on Support Queue' }));
+    expect(calls.find((c) => c.key === 'POST /agent/status')?.body).toEqual({
+      status: 'available',
+      reason: null,
+      queueId: 4,
+      extraQueueIds: [5],
+    });
+    expect(await screen.findByText('Available - Support Queue +1')).toBeInTheDocument();
   });
 
   it('dialing a number of a deleted lead: no question, an information line in the lead area', async () => {

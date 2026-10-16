@@ -3,9 +3,9 @@ const pool = require('../../db');
 const { requireCaller } = require('../middleware/auth');
 const {
   findAgentQueues,
-  findCurrentCampaign,
   findCurrentQueueAsteriskName,
   setAgentStatus,
+  findWorkingCampaign,
 } = require('../services/agents');
 const { getDispositions } = require('../services/dispositions');
 const { findOtherActiveHolder } = require('../services/extensionGuard');
@@ -16,6 +16,10 @@ const router = express.Router();
 router.post('/agent/status', requireCaller, async (req, res) => {
   if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
   const { status, reason, queueId } = req.body;
+  // Blended: extra queues to take calls from too (only with Available; left out = keep the shift's).
+  const extraQueueIds = Array.isArray(req.body.extraQueueIds)
+    ? [...new Set(req.body.extraQueueIds.map(Number))].filter((id) => Number.isInteger(id) && id !== Number(queueId))
+    : undefined;
   if (!['available', 'break', 'acw'].includes(status)) {
     return res.status(400).json({ error: 'status must be available, break, or acw' });
   }
@@ -29,6 +33,9 @@ router.post('/agent/status', requireCaller, async (req, res) => {
     if (!allowed.some((q) => q.id === Number(queueId))) {
       return res.status(403).json({ error: "this queue is not in any of your teams' campaigns" });
     }
+    if (extraQueueIds && extraQueueIds.some((id) => !allowed.some((q) => q.id === id))) {
+      return res.status(403).json({ error: "one of the extra queues is not in your teams' campaigns" });
+    }
   }
   await setAgentStatus(
     req.session.user.id,
@@ -36,6 +43,7 @@ router.post('/agent/status', requireCaller, async (req, res) => {
     status === 'break' ? reason : null,
     queueId,
     req.session.user.extensionName,
+    status === 'available' ? extraQueueIds : undefined,
   );
   res.json({ status: 'ok' });
 });
@@ -114,7 +122,7 @@ router.get('/agent/call-state/:callId', requireCaller, async (req, res) => {
 });
 
 router.get('/agent/campaign-info', requireCaller, async (req, res) => {
-  const c = await findCurrentCampaign(req.session.user.id);
+  const c = await findWorkingCampaign(req.session.user.id, req.session.user.extensionName);
   if (!c) return res.json(null);
   const auto =
     c.auto_dispo_sec > 0 && c.auto_dispo_code
@@ -133,7 +141,8 @@ router.get('/agent/campaign-info', requireCaller, async (req, res) => {
 
 // --- Agent: dispositions + callbacks for the campaign they're working ---
 router.get('/agent/dispositions', requireCaller, async (req, res) => {
-  const campaign = await findCurrentCampaign(req.session.user.id);
+  // The call's campaign (a blended agent's call can come from an extra queue), else the main one.
+  const campaign = await findWorkingCampaign(req.session.user.id, req.session.user.extensionName);
   res.json(await getDispositions(campaign ? campaign.id : null));
 });
 
@@ -197,6 +206,13 @@ router.get('/agent/stats', requireCaller, async (req, res) => {
     currentStatus: current ? current.status : null,
     currentReason: current ? current.reason : null,
     currentQueueName: current ? current.queue_name : null,
+    // Blended: the extra queues of this shift.
+    extraQueues: (
+      await pool.query(
+        'SELECT q.id, q.name FROM agent_extra_queues x JOIN queues q ON q.id = x.queue_id WHERE x.user_id = ? ORDER BY q.name',
+        [userId],
+      )
+    )[0],
   });
 });
 
