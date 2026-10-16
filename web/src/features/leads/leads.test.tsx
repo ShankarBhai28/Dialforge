@@ -266,6 +266,54 @@ describe('Leads & Lists - recycle', () => {
     });
   });
 
+  it('warns before recycling a success outcome; says why leads were skipped', async () => {
+    const withSuccess = {
+      body: {
+        ...RECYCLE.body,
+        statuses: RECYCLE.body.statuses.map((x) => (x.status === 'interested' ? { ...x, success: true } : x)),
+      },
+    };
+    fakeApi({
+      ...base,
+      'GET /admin/lists/7/recycle': withSuccess,
+      'POST /admin/lists/7/recycle': {
+        body: {
+          recycled: 40,
+          skippedDnc: 0,
+          skippedOnCall: 1,
+          skippedCallback: 2,
+          skippedUsedUp: 0,
+          notes: ['1 on a call or in wrap-up', '2 with a pending callback (kept for its time)'],
+        },
+      },
+    });
+    renderPage(<LeadsPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Recycle October cold' }));
+    const dialog = screen.getByRole('dialog');
+    await within(dialog).findByLabelText('Recycle No Answer');
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+    await userEvent.click(within(dialog).getByLabelText('Recycle Interested'));
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      /Interested is a success outcome: these customers already said yes/,
+    );
+    await userEvent.click(within(dialog).getByRole('button', { name: /^Recycle$/ }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Yes, recycle' }));
+    expect(await within(dialog).findByRole('status')).toHaveTextContent(
+      '40 lead(s) recycled (skipped: 1 on a call or in wrap-up; 2 with a pending callback (kept for its time)).',
+    );
+  });
+
+  it("a list's leads download as Excel from the Lists tab", async () => {
+    fakeApi(base);
+    renderPage(<LeadsPage />);
+    expect(await screen.findByRole('link', { name: 'Download October cold' })).toHaveAttribute(
+      'href',
+      '/admin/leads/export?listId=7',
+    );
+    // an empty list has nothing to download
+    expect(screen.queryByRole('link', { name: 'Download Referrals' })).not.toBeInTheDocument();
+  });
+
   it('asks for at least one status', async () => {
     const calls = fakeApi({ ...base, 'GET /admin/lists/7/recycle': RECYCLE });
     renderPage(<LeadsPage />);

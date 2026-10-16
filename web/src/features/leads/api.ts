@@ -132,6 +132,8 @@ export type RecycleInfo = {
     scheduled: number;
     done: number;
     recyclable: boolean;
+    /** A success outcome (sale, interested): recycling calls those customers again. */
+    success?: boolean;
   }[];
   history: {
     statuses: string;
@@ -142,7 +144,17 @@ export type RecycleInfo = {
   }[];
 };
 
-export type RecycleResult = { recycled: number; skippedDnc: number; skippedOnCall: number };
+export type RecycleResult = {
+  recycled: number;
+  skippedDnc: number;
+  skippedOnCall: number;
+  /** Kept for their callback time. */
+  skippedCallback?: number;
+  /** Out of attempts and "Reset attempt count" not ticked. */
+  skippedUsedUp?: number;
+  /** The skips in words (services/recycle.js). */
+  notes?: string[];
+};
 
 export const leadKeys = {
   lists: ['admin', 'lists'] as const,

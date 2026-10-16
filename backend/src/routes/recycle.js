@@ -1,8 +1,9 @@
 const express = require('express');
 const pool = require('../../db');
-const { normalizePhone, DEFAULT_RECYCLE_RULES, getRecycleRules } = require('../../dialer-common');
+const { DEFAULT_RECYCLE_RULES, getRecycleRules } = require('../../dialer-common');
 const { requirePermission } = require('../middleware/auth');
 const { getDispositions } = require('../services/dispositions');
+const { applyRecycle, planRecycle, skippedNotes } = require('../services/recycle');
 
 const { campaignInScope } = require('../services/access');
 
@@ -83,7 +84,9 @@ router.get('/admin/lists/:id/recycle', requirePermission('leads', 'view'), async
      FROM leads WHERE list_id = ? AND deleted_at IS NULL GROUP BY status ORDER BY total DESC`,
     [list.max_attempts, list.max_attempts, list.max_attempts, list.id],
   );
-  const labels = Object.fromEntries((await getDispositions(list.campaign_id)).map((d) => [d.code, d.label]));
+  const dispositions = await getDispositions(list.campaign_id);
+  const labels = Object.fromEntries(dispositions.map((d) => [d.code, d.label]));
+  const success = new Set(dispositions.filter((d) => d.is_success).map((d) => d.code));
   const [history] = await pool.query(
     `SELECT r.statuses, r.reset_attempts, r.leads_recycled, r.created_at, u.username
      FROM recycle_log r LEFT JOIN users u ON u.id = r.user_id
@@ -100,6 +103,8 @@ router.get('/admin/lists/:id/recycle', requirePermission('leads', 'view'), async
       scheduled: Number(s.scheduled),
       done: Number(s.done),
       recyclable: !NEVER_RECYCLE.includes(s.status),
+      // A success outcome (sale, interested): recycling it calls those customers again.
+      success: success.has(s.status),
     })),
     history,
   });
@@ -121,39 +126,27 @@ router.post('/admin/lists/:id/recycle', requirePermission('leads', 'recycle'), a
     return res.status(400).json({ error: 'Do Not Call leads can never be recycled' });
   }
   const [candidates] = await pool.query(
-    `SELECT l.id, l.phone,
-       EXISTS (SELECT 1 FROM dial_attempts da WHERE da.lead_id = l.id AND da.status <> 'ended') AS on_call
-     FROM leads l WHERE l.list_id = ? AND l.deleted_at IS NULL AND l.status IN (?)`,
+    'SELECT id, phone, status, attempts, campaign_id FROM leads WHERE list_id = ? AND deleted_at IS NULL AND status IN (?)',
     [list.id, statuses],
   );
-  const phones = [...new Set(candidates.map((c) => normalizePhone(c.phone)))];
-  const dnc = new Set();
-  for (let i = 0; i < phones.length; i += 1000) {
-    const [rows] = await pool.query('SELECT phone FROM dnc_numbers WHERE tenant_id = 1 AND phone IN (?)', [
-      phones.slice(i, i + 1000),
-    ]);
-    rows.forEach((r) => dnc.add(r.phone));
-  }
-  const ids = [];
-  let skippedDnc = 0;
-  let skippedOnCall = 0;
-  for (const c of candidates) {
-    if (Number(c.on_call)) skippedOnCall++;
-    else if (dnc.has(normalizePhone(c.phone))) skippedDnc++;
-    else ids.push(c.id);
-  }
-  for (let i = 0; i < ids.length; i += 1000) {
-    await pool.query(
-      `UPDATE leads SET is_final = 0, next_call_at = NULL, recycled_at = NOW(),
-         attempts = IF(?, 0, attempts) WHERE id IN (?)`,
-      [resetAttempts ? 1 : 0, ids.slice(i, i + 1000)],
-    );
-  }
+  // The same rules as bulk "Make dialable" (services/recycle.js).
+  const { ids, skipped } = await planRecycle(pool, candidates, {
+    resetAttempts: !!resetAttempts,
+    maxAttempts: () => Number(list.max_attempts),
+  });
+  await applyRecycle(pool, ids, { resetAttempts: !!resetAttempts, userId: req.session.user.id });
   await pool.query(
     'INSERT INTO recycle_log (list_id, user_id, statuses, reset_attempts, leads_recycled) VALUES (?, ?, ?, ?, ?)',
     [list.id, req.session.user.id, statuses.join(', ').slice(0, 500), resetAttempts ? 1 : 0, ids.length],
   );
-  res.json({ recycled: ids.length, skippedDnc, skippedOnCall });
+  res.json({
+    recycled: ids.length,
+    skippedDnc: skipped.dnc,
+    skippedOnCall: skipped.onCall,
+    skippedCallback: skipped.callback,
+    skippedUsedUp: skipped.usedUp,
+    notes: skippedNotes(skipped),
+  });
 });
 
 module.exports = router;

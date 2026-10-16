@@ -2,7 +2,7 @@
 // delete (its leads go with it; history kept), recycle, import.
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
-import { ListPlus, Pencil, Plus, RotateCcw, Trash2, Upload } from 'lucide-react';
+import { Download, ListPlus, Pencil, Plus, RotateCcw, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox, Select } from '@/components/ui/form-controls';
@@ -21,7 +21,7 @@ import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader, StatusPill 
 import { ErrorState } from '@/components/ErrorState';
 import { formatDateTime } from '@/lib/format';
 import { useCampaigns } from '@/features/campaigns/api';
-import { useDeleteList, useLists, useSaveList, type LeadList } from './api';
+import { NO_LEAD_FILTERS, leadsExportUrl, useDeleteList, useLists, useSaveList, type LeadList } from './api';
 import { RecycleDialog } from './RecycleDialog';
 import { DeletedLists } from './DeletedLists';
 import { useCan } from '@/features/auth/access';
@@ -193,6 +193,19 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
                       aria-label={`Import into ${l.name}`}
                     >
                       <Upload /> Import
+                    </Button>
+                  )}
+                  {can('export') && l.lead_count > 0 && (
+                    <Button variant="ghost" size="sm" asChild>
+                      {/* A plain link: the server sends this list's leads as Excel (same as Leads -> Export). */}
+                      <a
+                        href={leadsExportUrl({ ...NO_LEAD_FILTERS, listId: String(l.id) })}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Download ${l.name}`}
+                      >
+                        <Download /> Download
+                      </a>
                     </Button>
                   )}
                   {can('recycle') && (

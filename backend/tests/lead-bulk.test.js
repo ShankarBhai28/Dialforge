@@ -18,7 +18,16 @@ const ADMIN = { actions: () => ['view', 'create', 'edit', 'delete', 'import', 'r
 const only = (rights, scope = null) => ({ actions: (screen) => rights[screen] || [], scope });
 
 /** A database with these leads (and optional list / agents / dnc / open attempts). */
-function world({ leads, lists = [], agents = [], dnc = [], onCall = [] }) {
+function world({
+  leads,
+  lists = [],
+  agents = [],
+  dnc = [],
+  onCall = [],
+  manualCalls = [],
+  callbacks = [],
+  maxAttempts = 3,
+}) {
   const sql = [];
   const pool = {
     async query(q, p = []) {
@@ -31,6 +40,11 @@ function world({ leads, lists = [], agents = [], dnc = [], onCall = [] }) {
       if (s.startsWith('SELECT id, username FROM users')) return [agents.filter((a) => a.id === p[0])];
       if (s.startsWith('SELECT phone FROM dnc_numbers')) return [dnc.map((phone) => ({ phone }))];
       if (s.startsWith('SELECT DISTINCT lead_id FROM dial_attempts')) return [onCall.map((lead_id) => ({ lead_id }))];
+      if (s.startsWith('SELECT id, phone, status, attempts, campaign_id FROM leads WHERE id IN'))
+        return [leads.filter((l) => p[0].includes(l.id))];
+      if (s.startsWith('SELECT id, max_attempts FROM campaigns')) return [[{ id: 7, max_attempts: maxAttempts }]];
+      if (s.startsWith('SELECT DISTINCT lead_id FROM calls')) return [manualCalls.map((lead_id) => ({ lead_id }))];
+      if (s.startsWith('SELECT DISTINCT lead_id FROM callbacks')) return [callbacks.map((lead_id) => ({ lead_id }))];
       if (s.startsWith('UPDATE leads')) return [{ affectedRows: p[p.length - 1].length }];
       return [{ affectedRows: 0 }];
     },
@@ -118,15 +132,32 @@ test('assign: only an active agent in your teams; given leads leave the dialer, 
   assert.deepStrictEqual(r2.notes, ['shared with the campaign again']);
 });
 
-test('make dialable again: like Recycle - skips Do Not Call, DNC numbers and leads on a call', async () => {
-  const leads = [L(1), L(2, 7, { status: 'do_not_call' }), L(3), L(4)];
-  const w = world({ leads, dnc: [leads[2].phone], onCall: [4] });
-  const r = await runBulk({ action: 'reset', ids: [1, 2, 3, 4], resetAttempts: true }, ADMIN, 1, w.deps);
-  assert.strictEqual(r.changed, 1);
-  assert.strictEqual(r.skipped, 3);
+test('make dialable again: same rules as Recycle - never DNC, a lead on a call or in wrap-up, a pending callback, or out of attempts', async () => {
+  const leads = [
+    L(1),
+    L(2, 7, { status: 'do_not_call' }),
+    L(3),
+    L(4), // on a dialer call
+    L(5), // on a manual call / in wrap-up
+    L(6), // has a callback at 5 pm
+    L(7, 7, { attempts: 3 }), // used the campaign's 3 attempts
+  ];
+  const w = world({ leads, dnc: [leads[2].phone], onCall: [4], manualCalls: [5], callbacks: [6] });
+  const r = await runBulk({ action: 'reset', ids: [1, 2, 3, 4, 5, 6, 7], resetAttempts: false }, ADMIN, 1, w.deps);
+  assert.deepStrictEqual([r.changed, r.skipped], [1, 6]);
   const [s, p] = updates(w.sql)[0];
   assert.match(s, /is_final = 0, next_call_at = NULL, recycled_at = NOW\(\), attempts = IF\(\?, 0, attempts\)/);
   assert.deepStrictEqual(p.at(-1), [1]);
+  assert.deepStrictEqual(r.notes, [
+    '2 Do Not Call / on the DNC list',
+    '2 on a call or in wrap-up',
+    '1 with a pending callback (kept for its time)',
+    '1 used all attempts - tick "Reset attempt count" to include them',
+  ]);
+  // Resetting attempts brings the lead that ran out of attempts back.
+  const w2 = world({ leads: [L(7, 7, { attempts: 3 })] });
+  const r2 = await runBulk({ action: 'reset', ids: [7], resetAttempts: true }, ADMIN, 1, w2.deps);
+  assert.strictEqual(r2.changed, 1);
 });
 
 test('DNC: numbers added, leads marked Do Not Call and out of the dialer; delete keeps history', async () => {

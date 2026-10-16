@@ -25,9 +25,11 @@ const defaultPicks = (info: RecycleInfo) =>
   info.statuses.filter((s) => s.recyclable && RECYCLE_DEFAULT_TICK.includes(s.status)).map((s) => s.status);
 
 function resultMessage(r: RecycleResult) {
-  const skipped = [r.skippedDnc ? `${r.skippedDnc} on DNC` : '', r.skippedOnCall ? `${r.skippedOnCall} on a call` : '']
+  const skipped = (
+    r.notes ?? [r.skippedDnc ? `${r.skippedDnc} on DNC` : '', r.skippedOnCall ? `${r.skippedOnCall} on a call` : '']
+  )
     .filter(Boolean)
-    .join(', ');
+    .join('; ');
   return `${r.recycled} lead(s) recycled${skipped ? ` (skipped: ${skipped})` : ''}. A running campaign dials them within seconds.`;
 }
 
@@ -45,6 +47,8 @@ export function RecycleDialog({ list, onOpenChange }: { list: LeadList; onOpenCh
   const ticks = picked ?? (data ? defaultPicks(data) : []);
   // Only statuses still in the list and allowed to recycle are sent.
   const chosen = data ? data.statuses.filter((s) => s.recyclable && ticks.includes(s.status)).map((s) => s.status) : [];
+  // Ticked success outcomes (sale, interested): recycling calls those customers again.
+  const successTicked = data ? data.statuses.filter((s) => s.success && s.recyclable && ticks.includes(s.status)) : [];
 
   function toggle(status: string, on: boolean) {
     setPicked(on ? [...ticks, status] : ticks.filter((s) => s !== status));
@@ -156,6 +160,14 @@ export function RecycleDialog({ list, onOpenChange }: { list: LeadList; onOpenCh
                 Reset attempt count to 0 (needed for leads that used all {info.data.list.maxAttempts} attempts)
               </label>
 
+              {/* Recycling a success outcome calls customers who already said yes: a conscious choice. */}
+              {successTicked.length > 0 && (
+                <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  <b>{successTicked.map((s) => s.label ?? s.status).join(', ')}</b>{' '}
+                  {successTicked.length === 1 ? 'is a success outcome' : 'are success outcomes'}: these customers
+                  already said yes, and recycling calls them again. Only do this on purpose (e.g. an upsell).
+                </p>
+              )}
               {confirming && (
                 <div className="rounded-md bg-status-break/12 px-3 py-2 text-sm">
                   Make all leads with status <b>{chosen.join(', ')}</b> dialable again now?

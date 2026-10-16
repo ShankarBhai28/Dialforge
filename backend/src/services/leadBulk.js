@@ -10,6 +10,7 @@ const { campaignInScope, can } = require('./access');
 const { leadWhere } = require('./leadFilters');
 const { deleteLeads } = require('./softDelete');
 const { applyStatus, statusEffect } = require('./leadStatus');
+const { applyRecycle, planRecycle, skippedNotes } = require('./recycle');
 
 const MAX_LEADS = 50000;
 const CHUNK = 1000;
@@ -155,34 +156,26 @@ async function runBulk(body, access, userId, deps = { pool, addDnc, deleteLeads,
   }
 
   if (action === 'reset') {
-    // Same as Recycle: dialable again now; never Do Not Call, DNC numbers or a lead on a call.
-    const onCall = new Set();
+    // Same rules as Recycle (services/recycle.js): never DNC / Do Not Call, a
+    // lead on a call or in wrap-up, one with a pending callback, or one out of
+    // attempts unless they are reset.
+    const campaignIds = [...new Set(leads.map((l) => l.campaign_id).filter(Boolean))];
+    const [caps] = campaignIds.length
+      ? await db.query('SELECT id, max_attempts FROM campaigns WHERE id IN (?)', [campaignIds])
+      : [[]];
+    const cap = new Map(caps.map((c) => [c.id, Number(c.max_attempts)]));
+    const full = [];
     for (const part of chunks(ids)) {
-      const [r] = await db.query(
-        "SELECT DISTINCT lead_id FROM dial_attempts WHERE lead_id IN (?) AND status <> 'ended'",
-        [part],
-      );
-      r.forEach((x) => onCall.add(x.lead_id));
+      const [r] = await db.query('SELECT id, phone, status, attempts, campaign_id FROM leads WHERE id IN (?)', [part]);
+      full.push(...r);
     }
-    const phones = [...new Set(leads.map((l) => normalizePhone(l.phone)).filter(Boolean))];
-    const dnc = new Set();
-    for (const part of chunks(phones)) {
-      const [r] = await db.query('SELECT phone FROM dnc_numbers WHERE tenant_id = 1 AND phone IN (?)', [part]);
-      r.forEach((x) => dnc.add(x.phone));
-    }
-    const ok = leads.filter(
-      (l) => l.status !== 'do_not_call' && !dnc.has(normalizePhone(l.phone)) && !onCall.has(l.id),
-    );
-    const changed = ok.length
-      ? await updateIds(
-          db,
-          'UPDATE leads SET is_final = 0, next_call_at = NULL, recycled_at = NOW(), attempts = IF(?, 0, attempts), updated_by = ?',
-          [body.resetAttempts ? 1 : 0, userId],
-          ok.map((l) => l.id),
-        )
-      : 0;
-    const skipped = leads.length - ok.length;
-    if (skipped) notes.push(`${plural(skipped, 'lead')} skipped (Do Not Call, on the DNC list, or on a call now)`);
+    const plan = await planRecycle(db, full, {
+      resetAttempts: !!body.resetAttempts,
+      maxAttempts: (cid) => cap.get(cid) ?? 3,
+    });
+    const changed = await applyRecycle(db, plan.ids, { resetAttempts: !!body.resetAttempts, userId });
+    const skipped = leads.length - plan.ids.length;
+    notes.push(...skippedNotes(plan.skipped));
     return { action, changed, skipped, notes };
   }
 
