@@ -165,12 +165,16 @@ const post = (p, body) =>
     req.end(data);
   });
 
-test('an agent not logged into a queue cannot call; on Available / break they can', async () => {
+test('an agent not logged into a queue cannot call, nor on a break; Available / wrap-up can', async () => {
   agentStatus = null;
   const r = await post('/calls/click2call', { toNumber: '9840012345' });
   assert.strictEqual(r.status, 403);
   assert.strictEqual(r.body.code, 'not_logged_into_queue');
-  for (const st of ['available', 'break']) {
+  agentStatus = 'break';
+  const onBreak = await post('/calls/click2call', { toNumber: '9840012345' });
+  assert.strictEqual(onBreak.status, 403);
+  assert.strictEqual(onBreak.body.code, 'on_break');
+  for (const st of ['available', 'acw']) {
     agentStatus = st;
     const ok = await post('/calls/click2call', { toNumber: '9840012345' });
     assert.notStrictEqual(ok.status, 403, st); // goes on to ring the line (502 here: fake Asterisk)

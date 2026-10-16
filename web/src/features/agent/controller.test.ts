@@ -5,7 +5,7 @@ import { fakeApi, type FakeApi } from '@/test/render';
 import { AgentController } from './controller';
 import { Softphone } from './softphone/softphone';
 import { FakeSession, fakeUAFactory } from './softphone/fakes';
-import type { ActiveCall } from './api';
+import type { ActiveCall, AgentStats } from './api';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 async function settle() {
@@ -421,5 +421,15 @@ describe('wrap-up off', () => {
     await new Promise((r) => setTimeout(r, 1200));
     expect(t.calls.some((c) => c.key === 'POST /agent/status')).toBe(false);
     expect(t.state().message?.text).toMatch(/choose Available when you are ready/);
+  });
+});
+
+describe('on a break', () => {
+  it('a call is refused on the screen with what to do; nothing is dialled', async () => {
+    const t = setup({ 'POST /calls/click2call': { status: 202, body: { callId: 42, status: 'ringing_agent' } } });
+    await t.controller.onStats({ currentStatus: 'break' } as AgentStats);
+    await t.controller.callLead(null, '9840012345');
+    expect(t.calls.some((c) => c.key === 'POST /calls/click2call')).toBe(false);
+    expect(t.state().message).toEqual({ text: "You're on Break - choose Available to make calls.", error: true });
   });
 });

@@ -10,6 +10,22 @@ import { stopRealtime, subscribe } from '@/lib/realtime';
 import { routes } from '@/app/routes';
 import './index.css';
 
+// After an update the old screen files are gone, so a page opened before it
+// can't load the parts it hadn't opened yet: it reloads once to get the new
+// version (not more than once a minute, so a real outage can't loop).
+window.addEventListener('vite:preloadError', (event) => {
+  const KEY = 'viztex.reloadedForUpdate';
+  try {
+    const last = Number(sessionStorage.getItem(KEY) || 0);
+    if (Date.now() - last < 60_000) return;
+    sessionStorage.setItem(KEY, String(Date.now()));
+  } catch {
+    /* storage blocked: reload anyway */
+  }
+  event.preventDefault();
+  window.location.reload();
+});
+
 // A 401 anywhere means the login expired: forget the user, which sends
 // every protected screen back to the login page.
 function onError(err: Error) {

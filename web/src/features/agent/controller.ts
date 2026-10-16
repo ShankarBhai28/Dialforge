@@ -261,6 +261,8 @@ export class AgentController {
    */
   async callLead(lead: Lead | null, phone: string) {
     if (this.phone.getSnapshot().call) return this.say('Finish the current call first.', true);
+    // The server refuses it too; saying it here saves a round trip.
+    if (this.lastStatus === 'break') return this.say("You're on Break - choose Available to make calls.", true);
     this.say(`Calling ${phone}...`);
     this.expectingOwnLeg = true;
     this.outcomeTarget = { leadId: lead?.id ?? null, callId: null, name: lead?.name ?? null, phone };

@@ -160,13 +160,19 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
     return res.status(400).json({ error: 'fromExtension and toNumber are required' });
   }
 
-  // Agents call only once they're logged into a queue (Available, or on a
-  // break / wrap-up of that shift) - not straight after connecting the line.
-  if (req.session.user.role === 'agent' && (await currentAgentStatus(req.session.user.id)) === 'offline') {
+  // Agents call only once they're logged into a queue (Available, or in
+  // wrap-up of that shift) - not straight after connecting the line, not on a break.
+  const agentStatus = req.session.user.role === 'agent' ? await currentAgentStatus(req.session.user.id) : null;
+  if (agentStatus === 'offline') {
     return res.status(403).json({
       error: 'Pick your queue and go Available first - then you can make calls.',
       code: 'not_logged_into_queue',
     });
+  }
+  // On a break an agent takes no calls - not even ones they start themselves
+  // (the queue already pauses them for inbound and the dialer). Wrap-up may call.
+  if (agentStatus === 'break') {
+    return res.status(403).json({ error: "You're on Break - choose Available to make calls.", code: 'on_break' });
   }
 
   // Do Not Call is enforced here, not just a label an agent can override -
