@@ -319,7 +319,7 @@ export function CampaignSettingsForm({ campaign, onDone }: { campaign: Campaign 
             <NumberField
               id="c-wrapup"
               label="Wrap-up (sec)"
-              hint="0-600. After the disposition, the agent is Available again after this many seconds."
+              hint="0 = off (the agent chooses Available themselves). 1-600: after the disposition, Available again after this many seconds."
               value={form.wrapupSec}
               onChange={(v) => set('wrapupSec', v)}
               min={0}

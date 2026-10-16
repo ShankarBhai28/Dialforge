@@ -557,8 +557,9 @@ export class AgentController {
 
   /**
    * After the disposition: Available again once the campaign's wrap-up
-   * seconds pass (0 = at once) - in every dial mode, so the next call (dialer,
-   * preview lead or queue) can come.
+   * seconds pass - in every dial mode, so the next call (dialer, preview lead
+   * or queue) can come. 0 = off: the agent stays in wrap-up until they choose
+   * Available themselves.
    */
   private async scheduleAutoAvailable() {
     this.clearWrapup();
@@ -570,7 +571,9 @@ export class AgentController {
     }
     if (!info) return;
     const wrapupSec = Math.max(0, Number(info.wrapupSec) || 0);
-    if (wrapupSec > 0) this.say(`Back to Available in ${wrapupSec}s…`);
+    // 0 = off: the agent stays in wrap-up and goes Available themselves.
+    if (wrapupSec === 0) return this.say('Disposition saved - choose Available when you are ready.');
+    this.say(`Back to Available in ${wrapupSec}s…`);
     this.set({ autoAvailableAt: Date.now() + wrapupSec * 1000 });
     this.wrapupTimer = setTimeout(async () => {
       this.wrapupTimer = null;

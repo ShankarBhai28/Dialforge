@@ -61,7 +61,7 @@ describe('click-to-call', () => {
       'GET /agent/call-state/42': () => ({ body: { answered, ended: false } }),
       'POST /leads/7/disposition': { body: { status: 'ok' } },
       'GET /agent/campaign-info': {
-        body: { id: 1, name: 'P', dialMode: 'progressive', wrapupSec: 0, dialerState: 'running' },
+        body: { id: 1, name: 'P', dialMode: 'progressive', wrapupSec: 1, dialerState: 'running' },
       },
       'GET /agent/stats': { body: { currentStatus: 'acw' } },
       'POST /agent/status': { body: { status: 'ok' } },
@@ -97,7 +97,8 @@ describe('click-to-call', () => {
       callId: 42,
     });
     await settle();
-    // Progressive campaign: back to Available by itself after wrap-up (here 0 s).
+    // Back to Available by itself after the wrap-up (here 1 s; 0 would be off).
+    await vi.waitFor(() => expect(t.calls.some((c) => c.key === 'POST /agent/status')).toBe(true), { timeout: 3000 });
     expect(t.calls.find((c) => c.key === 'POST /agent/status')?.body).toEqual({
       status: 'available',
       reason: null,
@@ -400,5 +401,25 @@ describe('calling a number of a deleted lead', () => {
     expect(t.calls.some((c) => c.key.startsWith('GET /agent/number-check'))).toBe(false);
     // The lead area knows the number - its "earlier lead" line asks the server.
     expect(t.state().workspace).toMatchObject({ lead: null, phone: '8608688838' });
+  });
+});
+
+describe('wrap-up off', () => {
+  it('wrap-up 0 = off: after the disposition the agent stays in wrap-up until they choose Available', async () => {
+    const t = setup({
+      'POST /calls/click2call': { status: 202, body: { callId: 42, status: 'ringing_agent' } },
+      'GET /agent/call-state/42': { body: { answered: true, ended: false } },
+      'POST /leads/7/disposition': { body: { status: 'ok' } },
+      'GET /agent/campaign-info': {
+        body: { id: 1, name: 'P', dialMode: 'preview', wrapupSec: 0, dialerState: 'running' },
+      },
+      'GET /agent/stats': { body: { currentStatus: 'acw' } },
+      'POST /agent/status': { body: { status: 'ok' } },
+    });
+    await t.controller.saveOutcome({ leadId: 7, callId: 42, name: 'Ravi', phone: '9840012345' }, 'interested');
+    await settle();
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(t.calls.some((c) => c.key === 'POST /agent/status')).toBe(false);
+    expect(t.state().message?.text).toMatch(/choose Available when you are ready/);
   });
 });

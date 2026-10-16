@@ -1553,6 +1553,7 @@ Reported by the user after trying the agent panel:
 
 ## Wrap-up fix, auto disposition, "Disposition" wording (2026-10-17)
 - Bug: wrap-up only ran after the disposition AND only in progressive/predictive, so a preview (or manual) campaign's agent stayed in Wrap-up. Now in every mode: after the disposition, Available again after the campaign's wrap-up seconds (0 = at once).
+- Wrap-up 0 = off (same as auto disposition): after the disposition the agent stays in Wrap-up until they choose Available; 1-600 = back to Available after that many seconds.
 - Auto disposition (migration 0015 `campaigns.auto_dispo_sec`, `auto_dispo_code`; 0 = off): the disposition popup counts down ("Auto disposition in 12s: No Disposition", paused while a callback is being filled in) and saves the campaign's chosen disposition (note "Auto disposition (none given in time)"). Server safety net services/autoDispo.js (every 30 s): answered calls with no disposition after auto seconds + 60 s get it (status effect like an agent's choice, calls.outcome, audit `leads.outcome` by system). Callback dispositions can't be chosen (need a time).
 - Every campaign got a **No Disposition** disposition (not final, retry 60 min) - the recommended auto choice; new campaigns get it in the defaults.
 - Agent panel says "Disposition" instead of "Outcome" (popup title, call log "Needs disposition" / "Give disposition", lead "Last disposition").
