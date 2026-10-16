@@ -65,7 +65,12 @@ function StatusMenu({ stats }: { stats: AgentStats | undefined }) {
   return (
     <div className="relative flex items-center gap-2" ref={ref}>
       {canBeReady && (
-        <Button size="sm" variant="secondary" onClick={() => void controller.setStatus('available')}>
+        <Button
+          size="sm"
+          variant="outline"
+          className="text-foreground"
+          onClick={() => void controller.setStatus('available')}
+        >
           Ready
         </Button>
       )}
