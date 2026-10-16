@@ -609,6 +609,23 @@ router.post('/admin/leads/import', requirePermission('leads', 'import'), receive
   }
   if (dryRun) summary.imported = 0;
   if (!dryRun) summary.updated = updateAudits.length;
+  if (!dryRun) {
+    await pool.query(
+      `INSERT INTO list_imports (list_id, user_id, file_name, total, imported, updated, skipped, duplicate_check, on_duplicate)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        list.id,
+        req.session.user.id,
+        fileName,
+        summary.total,
+        toInsert.length,
+        summary.updated,
+        skipped.length,
+        scope,
+        onDuplicate,
+      ],
+    );
+  }
   const reportId = skipped.length
     ? saveReport(req.session.user.id, {
         headers,

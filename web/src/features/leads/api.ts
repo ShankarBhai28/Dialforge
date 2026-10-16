@@ -10,6 +10,8 @@ export type LeadList = {
   name: string;
   is_active: 0 | 1;
   priority: number;
+  /** Where its leads came from (e.g. "Vendor X, Oct batch, Rs 2/lead"). */
+  source?: string | null;
   created_at: string;
   lead_count: number;
   dialable_count: number;
@@ -172,15 +174,65 @@ export function useLists() {
   return useQuery({ queryKey: leadKeys.lists, queryFn: () => get<LeadList[]>('/admin/lists') });
 }
 
-export type ListInput = { name: string; campaignId: number; priority: number; isActive: boolean };
+export type ListInput = { name: string; campaignId: number; priority: number; isActive: boolean; source?: string };
+
+/** GET /admin/lists/:id/stats - one list in numbers, and its uploads. */
+export type ListStats = {
+  list: {
+    id: number;
+    name: string;
+    source: string | null;
+    campaign: string | null;
+    active: boolean;
+    createdAt: string;
+    maxAttempts: number;
+  };
+  leads: {
+    total: number;
+    /** Never called. */
+    fresh: number;
+    called: number;
+    /** Talked to an agent at least once. */
+    reached: number;
+    success: number;
+    dialable: number;
+    scheduled: number;
+    done: number;
+    dnc: number;
+  };
+  calls: { total: number; connected: number; talkSeconds: number; lastCallAt: string | null };
+  byStatus: { status: string; label: string | null; count: number; success: boolean }[];
+  imports: {
+    id: number;
+    fileName: string | null;
+    total: number;
+    imported: number;
+    updated: number;
+    skipped: number;
+    duplicateCheck: string | null;
+    onDuplicate: string | null;
+    at: string;
+    by: string | null;
+  }[];
+};
+
+export function useListStats(id: number) {
+  return useQuery({
+    queryKey: [...leadKeys.lists, id, 'stats'],
+    queryFn: () => get<ListStats>(`/admin/lists/${id}/stats`),
+  });
+}
 
 export function useSaveList() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...body }: ListInput & { id?: number }) =>
-      id ? put(`/admin/lists/${id}`, body) : post('/admin/lists', body),
+      id ? put<{ notes?: string[] }>(`/admin/lists/${id}`, body) : post<{ notes?: string[] }>('/admin/lists', body),
     meta: { errorInline: true },
-    onSuccess: () => qc.invalidateQueries({ queryKey: leadKeys.lists }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: leadKeys.lists });
+      qc.invalidateQueries({ queryKey: leadKeys.leads }); // a list moved to another campaign moves its leads
+    },
   });
 }
 

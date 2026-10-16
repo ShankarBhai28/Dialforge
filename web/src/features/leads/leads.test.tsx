@@ -120,6 +120,7 @@ describe('Leads & Lists - lists', () => {
       campaignId: 4,
       priority: -5,
       isActive: false,
+      source: '',
     });
   });
 
@@ -139,7 +140,89 @@ describe('Leads & Lists - lists', () => {
       campaignId: 1,
       priority: 10,
       isActive: false,
+      source: '',
     });
+  });
+
+  it('moving a list to another campaign says its leads move too; the source note is saved', async () => {
+    const calls = fakeApi({
+      ...base,
+      'PUT /admin/lists/7': { body: { notes: ['120 leads moved to the new campaign with the list'] } },
+    });
+    renderPage(<LeadsPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit October cold' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+    await userEvent.selectOptions(within(dialog).getByLabelText('Campaign'), 'Support');
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(/also moves its 120 leads to the new campaign/);
+    await userEvent.type(within(dialog).getByLabelText('Source / note (optional)'), 'Vendor X');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(calls.find((c) => c.key === 'PUT /admin/lists/7')?.body).toMatchObject({
+      campaignId: 4,
+      source: 'Vendor X',
+    });
+  });
+
+  it("a list's details: progress, status breakdown and its uploads", async () => {
+    fakeApi({
+      ...base,
+      'GET /admin/lists/7/stats': {
+        body: {
+          list: {
+            id: 7,
+            name: 'October cold',
+            source: 'Vendor X',
+            campaign: 'Predictive_Test',
+            active: true,
+            createdAt: '2026-10-01T10:00:00Z',
+            maxAttempts: 3,
+          },
+          leads: {
+            total: 120,
+            fresh: 20,
+            called: 100,
+            reached: 40,
+            success: 10,
+            dialable: 37,
+            scheduled: 13,
+            done: 50,
+            dnc: 1,
+          },
+          calls: { total: 180, connected: 45, talkSeconds: 5400, lastCallAt: '2026-10-15T10:00:00Z' },
+          byStatus: [
+            { status: 'no_answer', label: 'No Answer', count: 60, success: false },
+            { status: 'sale', label: 'Sale', count: 10, success: true },
+          ],
+          imports: [
+            {
+              id: 1,
+              fileName: 'oct.xlsx',
+              total: 125,
+              imported: 120,
+              updated: 0,
+              skipped: 5,
+              duplicateCheck: 'campaign',
+              onDuplicate: 'skip',
+              at: '2026-10-01T10:00:00Z',
+              by: 'admin',
+            },
+          ],
+        },
+      },
+    });
+    renderPage(<LeadsPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Open October cold' }));
+    const dialog = screen.getByRole('dialog');
+    const progress = await within(dialog).findByRole('region', { name: 'Progress' });
+    expect(within(progress).getByText('83%')).toBeInTheDocument(); // 100 of 120 called
+    expect(within(progress).getByText('40%')).toBeInTheDocument(); // 40 of 100 reached
+    expect(within(progress).getByText('25%')).toBeInTheDocument(); // 10 of 40 reached said yes
+    expect(within(dialog).getByText('Sale · 10')).toBeInTheDocument();
+    const uploads = within(dialog).getByRole('region', { name: 'Uploads' });
+    expect(within(uploads).getByText('oct.xlsx')).toBeInTheDocument();
+    expect(within(uploads).getByText('within the campaign')).toBeInTheDocument();
+    expect(within(dialog).getByText(/Source: Vendor X/)).toBeInTheDocument();
   });
 
   it("shows the server's reason when a list delete fails", async () => {

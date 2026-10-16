@@ -1537,3 +1537,9 @@ Reported by the user after trying the agent panel:
 - List Recycle and bulk "Make dialable" share services/recycle.js. Besides Do Not Call / DNC numbers / a lead on a dialer call, they now also skip: a lead on a **manual** call or in wrap-up (answered call in the last 30 min without an outcome); a lead with a **pending callback** (kept for its time - before, it was dialled at once and called again at the callback); and, without "Reset attempt count", a lead out of the campaign's attempts (before, counted as recycled but the dialer still skipped it). The result lists each reason.
 - Recycle dialog warns when a **success** outcome (campaign outcome marked success, e.g. Sale / Interested) is ticked: those customers already said yes.
 - Lists tab: **Download** per list (Leads -> Export right) = Excel of that list's leads, same file as Leads -> Export with the list filter.
+
+## Lists: move fix, performance, upload history, source (2026-10-16)
+- Bug: changing a list's campaign moved only the list; its leads stayed in the old campaign (dialled there with its caller ID / outcomes). Now PUT /admin/lists/:id moves the list's leads (status + history kept) and their pending callbacks to the new campaign and drops the old campaign's waiting hopper rows, in one transaction; the editor warns "This also moves its N leads".
+- List details (Lists -> click a list name, `GET /admin/lists/:id/stats`): leads, called %, reached % (talked to an agent), success % (of reached; campaign outcomes marked success), dialable / waiting / done, calls + talk time, last call, by-status chips, and the upload history.
+- Upload history: migration 0014 `list_imports` - every real import (not "Check file") records who, file name, rows, added, updated, skipped, duplicate check, update mode. `db:reset-test-data` clears it with the lists.
+- Source / note on a list (migration 0014 `lists.source`, max 200): e.g. vendor, batch, cost; shown under the list name.

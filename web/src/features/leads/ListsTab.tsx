@@ -23,6 +23,7 @@ import { formatDateTime } from '@/lib/format';
 import { useCampaigns } from '@/features/campaigns/api';
 import { NO_LEAD_FILTERS, leadsExportUrl, useDeleteList, useLists, useSaveList, type LeadList } from './api';
 import { RecycleDialog } from './RecycleDialog';
+import { ListDetails } from './ListDetails';
 import { DeletedLists } from './DeletedLists';
 import { useCan } from '@/features/auth/access';
 import { toastDeleted } from '@/lib/deleted';
@@ -34,6 +35,7 @@ function ListDialog({ list, onOpenChange }: { list: LeadList | null; onOpenChang
   const [campaignId, setCampaignId] = useState(list ? String(list.campaign_id) : '');
   const [priority, setPriority] = useState(list ? String(list.priority) : '');
   const [isActive, setIsActive] = useState(list ? !!list.is_active : true);
+  const [source, setSource] = useState(list?.source ?? '');
   const [localError, setLocalError] = useState<string | null>(null);
 
   // A new list defaults to the first campaign, like the classic dropdown.
@@ -48,10 +50,20 @@ function ListDialog({ list, onOpenChange }: { list: LeadList | null; onOpenChang
     if (!Number.isInteger(p) || p < -100 || p > 100) return setLocalError('priority must be a whole number -100..100');
     setLocalError(null);
     save.mutate(
-      { id: list?.id, name: name.trim(), campaignId: Number(effectiveCampaign), priority: p, isActive },
       {
-        onSuccess: () => {
-          toast.success(list ? 'List saved' : `Created list: ${name.trim()}`);
+        id: list?.id,
+        name: name.trim(),
+        campaignId: Number(effectiveCampaign),
+        priority: p,
+        isActive,
+        source: source.trim(),
+      },
+      {
+        onSuccess: (r) => {
+          toast.success(
+            list ? 'List saved' : `Created list: ${name.trim()}`,
+            r?.notes?.length ? { description: r.notes.join(' · ') } : undefined,
+          );
           onOpenChange(false);
         },
       },
@@ -82,6 +94,20 @@ function ListDialog({ list, onOpenChange }: { list: LeadList | null; onOpenChang
                   </option>
                 ))}
               </Select>
+            </Field>
+            {/* Moving a list moves its leads too (they're dialled by the list's campaign). */}
+            {list && Number(effectiveCampaign) !== list.campaign_id && list.lead_count > 0 && (
+              <p role="alert" className="-mt-2 rounded-md bg-status-break/12 px-3 py-2 text-sm text-status-break">
+                This also moves its <b>{list.lead_count}</b> lead{list.lead_count === 1 ? '' : 's'} to the new campaign
+                - their status and history stay; from then on that campaign's dialer, caller ID and outcomes apply.
+              </p>
+            )}
+            <Field
+              id="list-source"
+              label="Source / note (optional)"
+              hint='Where the leads came from, e.g. "Vendor X, Oct batch, Rs 2/lead".'
+            >
+              <Input id="list-source" value={source} maxLength={200} onChange={(e) => setSource(e.target.value)} />
             </Field>
             <Field id="list-priority" label="Priority" hint="-100 to 100. Higher priority lists are dialed first.">
               <Input
@@ -121,6 +147,7 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
   const [editing, setEditing] = useState<LeadList | 'new' | null>(null);
   const [deleting, setDeleting] = useState<LeadList | null>(null);
   const [recycling, setRecycling] = useState<LeadList | null>(null);
+  const [viewing, setViewing] = useState<LeadList | null>(null);
 
   return (
     <>
@@ -166,7 +193,17 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
           <TableBody>
             {lists.data.map((l) => (
               <TableRow key={l.id}>
-                <TableCell className="font-semibold">{l.name}</TableCell>
+                <TableCell>
+                  <button
+                    type="button"
+                    className="text-left font-semibold hover:text-primary hover:underline"
+                    onClick={() => setViewing(l)}
+                    aria-label={`Open ${l.name}`}
+                  >
+                    {l.name}
+                  </button>
+                  {l.source && <div className="max-w-56 truncate text-xs text-muted-foreground">{l.source}</div>}
+                </TableCell>
                 <TableCell>{l.campaign_name ?? <span className="text-muted-foreground">—</span>}</TableCell>
                 <TableCell className="tabular-nums">{l.lead_count}</TableCell>
                 <TableCell className="tabular-nums">{l.dialable_count}</TableCell>
@@ -239,6 +276,7 @@ export function ListsTab({ onImport }: { onImport: (listId: number) => void }) {
         />
       )}
       <DeletedLists />
+      {viewing && <ListDetails list={viewing} onOpenChange={(v) => !v && setViewing(null)} />}
       {recycling && (
         <RecycleDialog key={recycling.id} list={recycling} onOpenChange={(v) => !v && setRecycling(null)} />
       )}

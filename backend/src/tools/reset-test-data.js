@@ -2,7 +2,7 @@
 // keeping its setup. Never on a client's server.
 //   cd ~/dialforge-backend && npm run db:reset-test-data -- --yes
 //
-// Cleared: leads, lists (incl. deleted ones), calls + call events, dialer
+// Cleared: leads, lists (incl. deleted ones) and their upload history, calls + call events, dialer
 // attempts / hopper / status, callbacks, form answers, recycle log, agent
 // status history, live_agents, audit log, login sessions; the recordings on
 // this server (S3 copies are kept).
@@ -30,6 +30,7 @@ const CLEAR = [
   'dial_attempts',
   'calls',
   'recycle_log',
+  'list_imports',
   'leads',
   'lists',
   'dialer_status',
