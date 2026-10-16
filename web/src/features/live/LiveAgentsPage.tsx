@@ -165,6 +165,7 @@ function AgentsTable({
             <TableHead>Extension</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Campaign</TableHead>
+            <TableHead>Queue</TableHead>
             <TableHead>Current call</TableHead>
             <TableHead>Today</TableHead>
             <TableHead>Logged in</TableHead>
@@ -228,10 +229,8 @@ function AgentsTable({
                     </div>
                   )}
                 </TableCell>
-                <TableCell>
-                  <div>{a.campaign_name ?? '—'}</div>
-                  {a.queue_name && <div className="text-xs text-muted-foreground">{a.queue_name}</div>}
-                </TableCell>
+                <TableCell>{a.campaign_name ?? '—'}</TableCell>
+                <TableCell>{a.queue_name ?? '—'}</TableCell>
                 <TableCell className="whitespace-nowrap">
                   {call ? (
                     <>
