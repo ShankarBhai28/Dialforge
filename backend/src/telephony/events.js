@@ -4,7 +4,7 @@ const ami = require('../../ami');
 const callControl = require('../../call-control');
 const { finishAttempt, holdLeadForOutcome } = require('../../dialer-common');
 const { APP_NAME, TRUNK_ENDPOINT } = require('../config');
-const { findAgentIdByExtension, setAgentStatus } = require('../services/agents');
+const { findAgentIdByExtension, findCurrentCampaign, setAgentStatus } = require('../services/agents');
 const { logEvent, resolveDestination } = require('../services/calls');
 const { activeCalls, queueCallChannels } = require('../state');
 const { startRecording } = require('../services/recording');
@@ -65,20 +65,24 @@ function start() {
             return;
           }
 
-          // Which campaign owns the number that was actually dialed? This is
-          // the real routing decision - falls back to "first active campaign
-          // with a queue" only if the DID genuinely isn't mapped yet, and
-          // that fallback is logged loudly since it means a misconfiguration
-          // (a live DID nobody assigned to a campaign), not normal operation.
+          // Which queue (line) does the dialed number go to? This is the real
+          // routing decision - falls back to "first active campaign with a
+          // queue" only if the DID genuinely isn't mapped yet, and that
+          // fallback is logged loudly since it means a misconfiguration (a
+          // live DID nobody assigned to a queue), not normal operation.
+          // The call is filed under a campaign that takes the queue (its main
+          // queue first) until an agent answers: then it's the agent's campaign.
           let campaign = null;
           let didMatched = false;
           if (dialedNumber) {
             const [didRows] = await pool.query(
               `SELECT c.id, c.auto_answer, q.asterisk_name
              FROM dids d
-             JOIN campaigns c ON c.id = d.campaign_id
-             JOIN queues q ON q.id = c.queue_id
-             WHERE d.number = ? AND c.status = 'active' AND q.status = 'active'
+             JOIN queues q ON q.id = COALESCE(d.queue_id, (SELECT lc.queue_id FROM campaigns lc WHERE lc.id = d.campaign_id))
+             JOIN campaigns c ON c.status = 'active' AND c.deleted_at IS NULL
+               AND (c.queue_id = q.id OR EXISTS (SELECT 1 FROM campaign_queues cq WHERE cq.campaign_id = c.id AND cq.queue_id = q.id))
+             WHERE d.number = ? AND q.status = 'active' AND q.deleted_at IS NULL
+             ORDER BY (c.queue_id = q.id) DESC, c.id
              LIMIT 1`,
               [dialedNumber],
             );
@@ -100,7 +104,7 @@ function start() {
             campaign = campaignRows[0] || null;
             if (campaign) {
               console.error(
-                `[DID routing] "${dialedNumber}" has no campaign mapping - falling back to campaign ${campaign.id}. Add it under Admin > Campaigns > DID Numbers.`,
+                `[DID routing] "${dialedNumber}" has no queue a campaign takes - falling back to campaign ${campaign.id}. Map it under Admin > DID Numbers.`,
               );
             }
           }
@@ -310,6 +314,34 @@ function start() {
     return rows[0] ? { callId: rows[0].id, attemptId: rows[0].dial_attempt_id } : null;
   }
 
+  /**
+   * An inbound call's queue can be in several campaigns: the first agent to
+   * answer decides - the call (and the caller's lead) move to their campaign,
+   * so the form, dispositions and reports are that campaign's.
+   */
+  async function adoptCampaignOfAgent(callId, agentUserId) {
+    if (!agentUserId) return;
+    const [[call]] = await pool.query(
+      'SELECT direction, campaign_id, to_number, agent_user_id FROM calls WHERE id = ?',
+      [callId],
+    );
+    if (!call || call.direction !== 'inbound' || call.agent_user_id) return; // a transfer keeps its campaign
+    const campaign = await findCurrentCampaign(agentUserId);
+    if (!campaign || campaign.id === call.campaign_id) return;
+    // Only a lead of that campaign (its dispositions must fit); none - the
+    // agent's disposition creates it there (/agent/calls/:id/disposition).
+    const leadId = await findLeadByPhone(call.to_number, campaign.id).catch(() => null);
+    const [[own]] = leadId
+      ? await pool.query('SELECT id FROM leads WHERE id = ? AND campaign_id = ?', [leadId, campaign.id])
+      : [[]];
+    await pool.query('UPDATE calls SET campaign_id = ?, lead_id = ? WHERE id = ?', [
+      campaign.id,
+      own ? own.id : null,
+      callId,
+    ]);
+    await logEvent(callId, 'campaign', { from: call.campaign_id, to: campaign.id });
+  }
+
   ami.on('AgentConnect', async (fields) => {
     try {
       const found = await findQueueCall(fields.Channel);
@@ -319,6 +351,7 @@ function start() {
       const extensionName = match ? match[1] : null;
       if (!extensionName) return;
       const agentUserId = await findAgentIdByExtension(extensionName);
+      await adoptCampaignOfAgent(callId, agentUserId);
       // Dialer calls already have answer_time (when the customer picked up).
       // The first agent to take the call stays its agent (reports); a
       // transfer is in transfer_ext / call events.

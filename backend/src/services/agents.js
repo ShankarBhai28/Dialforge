@@ -49,16 +49,16 @@ async function syncQueueMembership(userId, extensionName, newStatus, explicitQue
   } else {
     main = await findCurrentQueueAsteriskName(userId);
   }
-  // Blended agents: the extra queues of their shift follow the same status
-  // (Available = ringing, Break / wrap-up = paused, logout = removed),
-  // joining with penalty 1 so a queue's own agents get its calls first.
+  // The campaign's other queues the agent took for this shift follow the
+  // same status (Available = ringing, Break / wrap-up = paused, logout =
+  // removed). All rung alike (penalty 0).
   const extras = (await extraQueueNames(userId)).filter((q) => q !== main);
-  const targets = [...(main ? [[main, 0]] : []), ...extras.map((q) => [q, 1])];
+  const targets = [...(main ? [main] : []), ...extras];
   const iface = `PJSIP/${extensionName}`;
-  for (const [queue, penalty] of targets) {
+  for (const queue of targets) {
     try {
       if (newStatus === 'available') {
-        await ami.queueAdd(queue, iface, penalty).catch(() => {}); // already a member - fine
+        await ami.queueAdd(queue, iface).catch(() => {}); // already a member - fine
         await ami.queuePause(queue, iface, false);
       } else if (newStatus === 'break' || newStatus === 'acw') {
         await ami.queuePause(queue, iface, true);
@@ -72,11 +72,11 @@ async function syncQueueMembership(userId, extensionName, newStatus, explicitQue
       console.error('[AMI queue sync failed]', err.message);
     }
   }
-  // Logged out: the next shift picks its extra queues again.
+  // Logged out: the next shift picks its queues again.
   if (newStatus === 'offline') await pool.query('DELETE FROM agent_extra_queues WHERE user_id = ?', [userId]);
 }
 
-/** The asterisk names of an agent's extra queues for this shift. */
+/** The asterisk names of the campaign queues an agent took for this shift (besides the main one). */
 async function extraQueueNames(userId) {
   const [rows] = await pool.query(
     `SELECT q.asterisk_name FROM agent_extra_queues x JOIN queues q ON q.id = x.queue_id
@@ -105,7 +105,7 @@ async function setExtraQueues(userId, extensionName, queueIds) {
     await pool.query('INSERT INTO agent_extra_queues (user_id, queue_id) VALUES ?', [queueIds.map((q) => [userId, q])]);
 }
 
-/** extraQueueIds: blended agents' extra queues (only when going Available; undefined = keep the shift's). */
+/** extraQueueIds: the campaign's other queues the agent takes (only when going Available; undefined = keep the shift's). */
 async function setAgentStatus(userId, status, reason, queueId, extensionName, extraQueueIds) {
   require('./presence').presenceChanged();
   let keepCampaignId = null;
@@ -116,7 +116,7 @@ async function setAgentStatus(userId, status, reason, queueId, extensionName, ex
   await releasePreviewLocks(userId, keepCampaignId).catch((err) =>
     console.error('[preview release failed]', err.message),
   );
-  // A different main queue: leave the old one (re-joined below at penalty 1 if it's now an extra).
+  // A different main queue (another campaign): leave the old one (re-joined below if it's one of the new campaign's).
   if (status === 'available' && queueId && extensionName) {
     const before = await findCurrentQueueAsteriskName(userId);
     const [now] = await pool.query('SELECT asterisk_name FROM queues WHERE id = ?', [queueId]);
@@ -153,11 +153,14 @@ async function findAgentIdByExtension(extensionName) {
 
 // Queues this agent may work, via team membership -> team's campaigns.
 // DISTINCT because an agent in two teams sharing a campaign would
-// otherwise see that queue twice.
+// otherwise see that queue twice. Each row is a campaign's main queue, with
+// the campaign's other queues (extra_queues) the agent may also take and
+// whether they must take them all (take_all).
 async function findAgentQueues(userId) {
   const [rows] = await pool.query(
     `
-    SELECT DISTINCT q.id, q.name, c.name AS campaign_name
+    SELECT DISTINCT q.id, q.name, c.name AS campaign_name, c.id AS campaign_id, c.dial_mode,
+      c.agents_take_all_queues AS take_all
     FROM team_members tm
     JOIN teams t ON t.id = tm.team_id AND t.status = 'active'
     JOIN team_campaigns tc ON tc.team_id = t.id
@@ -168,37 +171,46 @@ async function findAgentQueues(userId) {
   `,
     [userId],
   );
-  return rows;
+  const extras = rows.length
+    ? (
+        await pool.query(
+          `SELECT cq.campaign_id, q.id, q.name FROM campaign_queues cq
+           JOIN queues q ON q.id = cq.queue_id AND q.status = 'active' AND q.deleted_at IS NULL
+           WHERE cq.campaign_id IN (?) ORDER BY q.name`,
+          [rows.map((r) => r.campaign_id)],
+        )
+      )[0]
+    : [];
+  return rows.map((r) => ({
+    ...r,
+    take_all: !!Number(r.take_all),
+    extra_queues: extras
+      .filter((x) => x.campaign_id === r.campaign_id && x.id !== r.id)
+      .map(({ id, name }) => ({ id, name })),
+  }));
 }
 
 /**
- * The campaign an agent is working RIGHT NOW: the campaign of the call
- * they're on, or of the one they're wrapping up (a blended agent's call can
- * come from an extra queue) - otherwise their main campaign. The form,
- * dispositions, auto disposition and wrap-up follow it.
+ * A campaign's queue list changed: agents working it leave the queues it no
+ * longer has (their Asterisk membership and their shift choice). Agents pick
+ * up newly added queues at their next Available.
  */
-async function findWorkingCampaign(userId, extensionName) {
-  if (extensionName) {
-    const [[call]] = await pool.query(
-      `SELECT c.* FROM calls ca JOIN campaigns c ON c.id = ca.campaign_id
-       WHERE (ca.from_extension = ? OR ca.transfer_ext = ? OR ca.agent_user_id = ?)
-         AND ca.start_time > NOW() - INTERVAL 3 HOUR
-         AND (ca.end_time IS NULL OR ca.end_time > NOW() - INTERVAL 30 MINUTE)
-       ORDER BY ca.id DESC LIMIT 1`,
-      [extensionName, extensionName, userId],
-    );
-    if (call && (await currentAgentStatus(userId)) !== 'available') return call;
-    if (call) {
-      // Available again: only a call still going on counts.
-      const [[live]] = await pool.query(
-        `SELECT 1 AS live FROM calls WHERE id = (SELECT MAX(id) FROM calls WHERE (from_extension = ? OR transfer_ext = ? OR agent_user_id = ?))
-         AND end_time IS NULL`,
-        [extensionName, extensionName, userId],
-      );
-      if (live) return call;
-    }
+async function leaveRemovedCampaignQueues(campaignId, removedQueueIds) {
+  if (!removedQueueIds.length) return;
+  const [rows] = await pool.query(
+    `SELECT x.user_id, x.queue_id, q.asterisk_name,
+       (SELECT s.extension_name FROM agent_status_log s WHERE s.user_id = x.user_id ORDER BY s.id DESC LIMIT 1) AS ext,
+       (SELECT s.queue_id FROM agent_status_log s WHERE s.user_id = x.user_id AND s.queue_id IS NOT NULL ORDER BY s.id DESC LIMIT 1) AS main_queue
+     FROM agent_extra_queues x JOIN queues q ON q.id = x.queue_id
+     WHERE x.queue_id IN (?)`,
+    [removedQueueIds],
+  );
+  const [[c]] = await pool.query('SELECT queue_id FROM campaigns WHERE id = ?', [campaignId]);
+  for (const r of rows) {
+    if (!c || r.main_queue !== c.queue_id) continue; // working another campaign that still has it
+    if (r.ext) await ami.queueRemove(r.asterisk_name, `PJSIP/${r.ext}`).catch(() => {});
+    await pool.query('DELETE FROM agent_extra_queues WHERE user_id = ? AND queue_id = ?', [r.user_id, r.queue_id]);
   }
-  return findCurrentCampaign(userId);
 }
 
 async function currentAgentStatus(userId) {
@@ -211,7 +223,7 @@ async function currentAgentStatus(userId) {
 
 module.exports = {
   extraQueueNames,
-  findWorkingCampaign,
+  leaveRemovedCampaignQueues,
   setExtraQueues,
   closeOpenStatus,
   currentAgentStatus,

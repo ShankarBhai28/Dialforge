@@ -451,7 +451,8 @@ describe('agent screen', () => {
     expect(screen.queryByRole('heading', { name: 'Start your shift' })).not.toBeInTheDocument();
   });
 
-  it('blended: ticking "Also take calls from" sends the extra queues with Available; the pill shows how many', async () => {
+  it('a campaign\'s other queues: all ticked by default, untick what you don\'t want; "take all" is fixed; the pill shows how many', async () => {
+    sessionStorage.clear(); // a fresh shift: nothing chosen yet
     let status = 'offline';
     const calls = fakeApi(
       backend({
@@ -465,13 +466,28 @@ describe('agent screen', () => {
             currentStatus: status,
             currentReason: null,
             currentQueueName: status === 'available' ? 'Support Queue' : null,
-            extraQueues: status === 'available' ? [{ id: 5, name: 'Sales Queue' }] : [],
+            extraQueues: status === 'available' ? [{ id: 5, name: 'Tamil Queue' }] : [],
           },
         }),
         'GET /queues': {
           body: [
-            { id: 4, name: 'Support Queue', campaign_name: 'Support' },
-            { id: 5, name: 'Sales Queue', campaign_name: 'Sales' },
+            {
+              id: 4,
+              name: 'Support Queue',
+              campaign_name: 'Care',
+              extra_queues: [
+                { id: 5, name: 'Tamil Queue' },
+                { id: 6, name: 'English Queue' },
+              ],
+              take_all: false,
+            },
+            {
+              id: 7,
+              name: 'Sales Queue',
+              campaign_name: 'Sales',
+              extra_queues: [{ id: 8, name: 'Billing Queue' }],
+              take_all: true,
+            },
           ],
         },
         'POST /agent/status': () => {
@@ -486,8 +502,13 @@ describe('agent screen', () => {
     await waitFor(() => expect(uas.made.length).toBe(1));
     act(() => uas.last().register());
 
-    const extras = await screen.findByRole('group', { name: 'Also take calls from' });
-    await userEvent.click(within(extras).getByLabelText('Sales Queue'));
+    const extras = await screen.findByRole('group', { name: 'Also take with Support Queue' });
+    expect(within(extras).getByLabelText('Tamil Queue')).toBeChecked();
+    expect(within(extras).getByLabelText('English Queue')).toBeChecked();
+    await userEvent.click(within(extras).getByLabelText('English Queue'));
+    // "Agents take all queues": shown, not tickable.
+    expect(screen.getByText('Also takes: Billing Queue')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Also take with Sales Queue' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Go Available on Support Queue' }));
     expect(calls.find((c) => c.key === 'POST /agent/status')?.body).toEqual({
       status: 'available',

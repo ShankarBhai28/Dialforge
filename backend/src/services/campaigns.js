@@ -1,7 +1,7 @@
 const pool = require('../../db');
 const { localTimeIn } = require('../../dialer-common');
 
-const DIAL_MODES = ['manual', 'preview', 'progressive', 'predictive'];
+const DIAL_MODES = ['manual', 'preview', 'progressive', 'predictive', 'inbound'];
 
 // Parses and range-checks the dial settings block of a campaign form.
 // Returns { error } or { settings } with DB column names.

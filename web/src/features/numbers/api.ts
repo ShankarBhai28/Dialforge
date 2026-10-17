@@ -4,8 +4,11 @@ import { del, get, post, put } from '@/lib/api';
 export type Did = {
   id: number;
   number: string;
-  campaign_id: number | null;
-  campaign_name: string | null;
+  /** The queue (line) calls to this number wait in. */
+  queue_id: number | null;
+  queue_name: string | null;
+  /** Campaigns that take that queue (main or one of their queues), comma separated. */
+  campaign_names: string | null;
 };
 
 export const didKeys = { all: ['admin', 'dids'] as const };
@@ -18,8 +21,8 @@ export function useDids() {
 export function useSaveDid() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { id?: number; number: string; campaignId: number | null }) =>
-      v.id ? put(`/admin/dids/${v.id}`, { campaignId: v.campaignId }) : post('/admin/dids', v),
+    mutationFn: (v: { id?: number; number: string; queueId: number | null }) =>
+      v.id ? put(`/admin/dids/${v.id}`, { queueId: v.queueId }) : post('/admin/dids', v),
     meta: { errorInline: true },
     onSuccess: () => qc.invalidateQueries({ queryKey: didKeys.all }),
   });

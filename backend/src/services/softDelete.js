@@ -59,7 +59,17 @@ function deleteCampaign(id, userId, deps) {
       "UPDATE campaigns SET deleted_at = NOW(), deleted_by = ?, dialer_state = 'stopped', status = 'paused' WHERE id = ?",
       [userId, id],
     );
-    const dids = affected(await conn.query('UPDATE dids SET campaign_id = NULL WHERE campaign_id = ?', [id]));
+    // Numbers route to queues: those whose queue no other campaign takes now reach nobody.
+    const [[orphan]] = await conn.query(
+      `SELECT COUNT(*) AS n FROM dids d
+       WHERE d.queue_id IN (SELECT queue_id FROM campaigns WHERE id = ? UNION SELECT queue_id FROM campaign_queues WHERE campaign_id = ?)
+         AND NOT EXISTS (SELECT 1 FROM campaigns o LEFT JOIN campaign_queues ocq ON ocq.campaign_id = o.id
+           WHERE o.id <> ? AND o.deleted_at IS NULL AND (o.queue_id = d.queue_id OR ocq.queue_id = d.queue_id))`,
+      [id, id, id],
+    );
+    await conn.query('UPDATE dids SET campaign_id = NULL WHERE campaign_id = ?', [id]); // legacy mapping
+    await conn.query('DELETE FROM campaign_queues WHERE campaign_id = ?', [id]);
+    const dids = orphan ? Number(orphan.n) : 0;
     const teams = affected(await conn.query('DELETE FROM team_campaigns WHERE campaign_id = ?', [id]));
     await conn.query('DELETE FROM dialer_status WHERE campaign_id = ?', [id]);
     const lists = affected(
@@ -71,7 +81,8 @@ function deleteCampaign(id, userId, deps) {
     const { leads, cancelled } = await retireLeads(conn, 'campaign_id = ?', [id], userId);
     const notes = [];
     if (lists || leads) notes.push(`${plural(lists, 'list')} and ${plural(leads, 'lead')} removed with it`);
-    if (dids) notes.push(`${plural(dids, 'DID number')} no longer route to it`);
+    if (dids)
+      notes.push(`${plural(dids, 'DID number')} now reach a queue no campaign takes - map them to another queue`);
     if (teams) notes.push(`taken off ${plural(teams, 'team')}`);
     if (cancelled) notes.push(`${plural(cancelled, 'pending callback')} cancelled`);
     return notes;
@@ -86,7 +97,9 @@ function deleteQueue(id, userId, deps) {
     // A campaign without a queue can't dial: stop its dialer too.
     await conn.query("UPDATE campaigns SET queue_id = NULL, dialer_state = 'stopped' WHERE queue_id = ?", [id]);
     await conn.query('UPDATE queues SET deleted_at = NOW(), deleted_by = ? WHERE id = ?', [userId, id]);
-    await conn.query('DELETE FROM agent_extra_queues WHERE queue_id = ?', [id]); // no longer an extra queue for anyone
+    await conn.query('DELETE FROM agent_extra_queues WHERE queue_id = ?', [id]); // no longer taken by anyone
+    await conn.query('DELETE FROM campaign_queues WHERE queue_id = ?', [id]); // nor in any campaign
+    await conn.query('UPDATE dids SET queue_id = NULL WHERE queue_id = ?', [id]); // its numbers need a new queue
     return using.length
       ? [`${using.map((c) => c.name).join(', ')} no longer ${using.length === 1 ? 'has' : 'have'} a queue`]
       : [];

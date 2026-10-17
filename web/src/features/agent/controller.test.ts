@@ -103,7 +103,6 @@ describe('click-to-call', () => {
       status: 'available',
       reason: null,
       queueId: 4,
-      extraQueueIds: [],
     });
   });
 
@@ -300,11 +299,10 @@ describe('status and queue', () => {
       status: 'available',
       reason: null,
       queueId: 5,
-      extraQueueIds: [],
     });
   });
 
-  it('blended: extra queues go with Available, are remembered for the shift, never the main queue itself', async () => {
+  it("the campaign's other queues go with Available, are remembered for the shift, never the main queue itself", async () => {
     const t = setup({ 'POST /agent/status': { body: { status: 'ok' } } }, { queue: null });
     await t.controller.selectQueue({ id: 5, name: 'Sales' }, [6, 5, 7]);
     expect(t.calls.find((c) => c.key === 'POST /agent/status')?.body).toMatchObject({

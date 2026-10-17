@@ -1,4 +1,4 @@
-// DID Numbers: which campaign an inbound number routes to.
+// DID Numbers: which queue (line) an inbound number routes to.
 // Reference screen for Stage 3 - list, create, edit in a dialog, delete with confirm.
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/dialog';
 import { ConfirmDialog, EmptyState, Field, FormError, SectionHeader, StatusPill } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
-import { useCampaigns } from '@/features/campaigns/api';
+import { useQueues } from '@/features/queues/api';
 import { useDeleteDid, useDids, useSaveDid, type Did } from './api';
 import { useCan } from '@/features/auth/access';
 
@@ -33,15 +33,15 @@ function DidDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const campaigns = useCampaigns();
+  const queues = useQueues();
   const save = useSaveDid();
   const [number, setNumber] = useState(did?.number ?? '');
-  const [campaignId, setCampaignId] = useState(did?.campaign_id ? String(did.campaign_id) : '');
+  const [queueId, setQueueId] = useState(did?.queue_id ? String(did.queue_id) : '');
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     save.mutate(
-      { id: did?.id, number: number.trim(), campaignId: campaignId ? Number(campaignId) : null },
+      { id: did?.id, number: number.trim(), queueId: queueId ? Number(queueId) : null },
       {
         onSuccess: () => {
           toast.success(did ? 'Number updated' : 'Number added');
@@ -57,7 +57,9 @@ function DidDialog({
         <form onSubmit={onSubmit} className="contents">
           <DialogHeader>
             <DialogTitle>{did ? `Edit ${did.number}` : 'Add DID number'}</DialogTitle>
-            <DialogDescription>Inbound calls to this number go to the campaign's queue.</DialogDescription>
+            <DialogDescription>
+              Inbound calls to this number wait in this queue. Agents of every campaign that has the queue take them.
+            </DialogDescription>
           </DialogHeader>
           <DialogBody className="grid gap-4">
             <Field id="did-number" label="Number" hint="Exactly as the trunk sends it, e.g. 8065098690.">
@@ -71,12 +73,14 @@ function DidDialog({
                 inputMode="tel"
               />
             </Field>
-            <Field id="did-campaign" label="Campaign">
-              <Select id="did-campaign" value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
+            <Field id="did-queue" label="Queue">
+              <Select id="did-queue" value={queueId} onChange={(e) => setQueueId(e.target.value)}>
                 <option value="">— Not mapped —</option>
-                {campaigns.data?.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
+                {/* keep the saved queue selectable while the list loads */}
+                {!queues.data && did?.queue_id && <option value={did.queue_id}>{did.queue_name}</option>}
+                {queues.data?.map((q) => (
+                  <option key={q.id} value={q.id}>
+                    {q.name}
                   </option>
                 ))}
               </Select>
@@ -110,7 +114,7 @@ export function NumbersPage() {
       <CardContent className="pt-5">
         <SectionHeader
           title="DID numbers"
-          description="Which campaign an inbound number routes to. A call only reaches the right queue if its number is mapped here."
+          description="Which queue an inbound number routes to. Campaigns that have the queue take its calls."
           actions={
             can('create') && (
               <Button onClick={() => setEditing('new')}>
@@ -130,14 +134,15 @@ export function NumbersPage() {
           <ErrorState message={dids.error.message} onRetry={() => dids.refetch()} />
         ) : dids.data.length === 0 ? (
           <EmptyState icon={Hash} title="No numbers yet">
-            Add the DID numbers your trunk delivers, and pick the campaign each one belongs to.
+            Add the DID numbers your trunk delivers, and pick the queue each one goes to.
           </EmptyState>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Number</TableHead>
-                <TableHead>Campaign</TableHead>
+                <TableHead>Queue</TableHead>
+                <TableHead>Campaigns</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -146,9 +151,11 @@ export function NumbersPage() {
                 <TableRow key={d.id}>
                   <TableCell className="font-semibold tabular-nums">{d.number}</TableCell>
                   <TableCell>
-                    {d.campaign_name ?? (
-                      <StatusPill tone="amber">Not mapped - calls use the fallback campaign</StatusPill>
-                    )}
+                    {d.queue_name ?? <StatusPill tone="amber">Not mapped - calls use the fallback campaign</StatusPill>}
+                  </TableCell>
+                  <TableCell>
+                    {d.campaign_names ??
+                      (d.queue_name ? <StatusPill tone="amber">No campaign takes this queue</StatusPill> : '—')}
                   </TableCell>
                   <TableCell className="text-right whitespace-nowrap">
                     {can('edit') && (
@@ -193,7 +200,7 @@ export function NumbersPage() {
           }
         }}
         title={`Delete ${deleting?.number}?`}
-        description="Inbound calls to this number will no longer be routed to a campaign."
+        description="Inbound calls to this number will no longer be routed to a queue."
         confirmLabel="Delete"
         destructive
         pending={remove.isPending}

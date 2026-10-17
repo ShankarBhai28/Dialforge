@@ -7,10 +7,10 @@ import { useNow } from '@/lib/hooks';
 import { agentKeys, useAgentQueues, useAgentStats } from './api';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ErrorState';
-import { cn } from '@/lib/utils';
 import { AgentProvider, useController, usePhone } from './AgentProvider';
 import { ConnectLine, useRememberLine } from './ConnectLine';
-import { ExtraQueuesPicker, IncomingCallDialog, OutcomeDialog, QueuePickerDialog } from './dialogs';
+import { IncomingCallDialog, OutcomeDialog, QueuePickerDialog } from './dialogs';
+import { QueueChoices, type QueueChoice } from './QueueChoices';
 import { callTimer, InCallPanel } from './InCallPanel';
 import { LeadsPanel } from './LeadsPanel';
 import { SidePanel } from './SidePanel';
@@ -20,7 +20,7 @@ import type { UAFactory } from './softphone/softphone';
 import { useSingleTab } from './singleTab';
 import { FullPageSpinner } from '@/components/FullPageSpinner';
 import { Button } from '@/components/ui/button';
-import { CircleCheck, LoaderCircle, MonitorSmartphone, Play } from 'lucide-react';
+import { CircleCheck, MonitorSmartphone } from 'lucide-react';
 import { APP_NAME } from '@/lib/brand';
 
 const PAGE_TITLE = `Agent · ${APP_NAME}`;
@@ -52,11 +52,10 @@ function StartShift() {
   const { line } = usePhone();
   const queues = useAgentQueues(true);
   const [busy, setBusy] = useState<number | null>(null);
-  const [extras, setExtras] = useState<number[]>(state.extraQueueIds);
-  async function start(q: { id: number; name: string }) {
-    setBusy(q.id);
+  async function start(c: QueueChoice) {
+    setBusy(c.queue.id);
     try {
-      await controller.selectQueue(q, extras);
+      await controller.selectQueue(c.queue, c.extraQueueIds);
     } finally {
       setBusy(null);
     }
@@ -87,40 +86,13 @@ function StartShift() {
             No campaign is assigned to your team yet - ask your admin to map one.
           </p>
         ) : (
-          <>
-            <ExtraQueuesPicker queues={queues.data} value={extras} onChange={setExtras} />
-            <ul className="space-y-2">
-              {queues.data.map((q) => {
-                const last = state.queue?.id === q.id;
-                return (
-                  <li key={q.id}>
-                    <button
-                      type="button"
-                      disabled={busy !== null}
-                      onClick={() => void start({ id: q.id, name: q.name })}
-                      aria-label={`Go Available on ${q.name}`}
-                      className={cn(
-                        'flex w-full cursor-pointer items-center justify-between gap-3 rounded-md border px-4 py-3 text-left hover:border-primary hover:bg-accent/40 disabled:opacity-60',
-                        last && 'border-primary bg-accent/30',
-                      )}
-                    >
-                      <span>
-                        <span className="block font-semibold">{q.name}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {q.campaign_name}
-                          {last && ' · your last queue'}
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-1 text-sm font-semibold text-status-available">
-                        {busy === q.id ? <LoaderCircle className="size-4 animate-spin" /> : <Play className="size-4" />}
-                        Go Available
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </>
+          <QueueChoices
+            queues={queues.data}
+            lastQueueId={state.queue?.id ?? null}
+            lastExtraIds={state.extraQueueIds}
+            busyId={busy}
+            onGo={(c) => void start(c)}
+          />
         )}
       </section>
     </div>

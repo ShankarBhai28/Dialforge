@@ -30,10 +30,10 @@ function fakePool(answers) {
 }
 const ran = (log, re) => log.some(([s]) => re.test(s));
 
-test('campaign: dialer stopped, DIDs / teams unlinked, its lists + leads go with it, callbacks cancelled', async () => {
+test('campaign: dialer stopped, its queues + teams unlinked (numbers left with no campaign reported), its lists + leads go with it, callbacks cancelled', async () => {
   const { log, deps } = fakePool((s) => {
     if (s.startsWith('SELECT id FROM campaigns')) return [{ id: 5 }];
-    if (s.startsWith('UPDATE dids')) return { affectedRows: 2 };
+    if (s.startsWith('SELECT COUNT(*) AS n FROM dids')) return [{ n: 2 }];
     if (s.startsWith('DELETE FROM team_campaigns')) return { affectedRows: 1 };
     if (s.startsWith('UPDATE lists')) return { affectedRows: 3 };
     if (s.startsWith('UPDATE callbacks')) return { affectedRows: 1 };
@@ -43,7 +43,7 @@ test('campaign: dialer stopped, DIDs / teams unlinked, its lists + leads go with
   const notes = await deleteCampaign(5, 1, deps);
   assert.deepStrictEqual(notes, [
     '3 lists and 120 leads removed with it',
-    '2 DID numbers no longer route to it',
+    '2 DID numbers now reach a queue no campaign takes - map them to another queue',
     'taken off 1 team',
     '1 pending callback cancelled',
   ]);
@@ -51,6 +51,7 @@ test('campaign: dialer stopped, DIDs / teams unlinked, its lists + leads go with
     ran(log, /UPDATE campaigns SET deleted_at = NOW\(\), deleted_by = \?, dialer_state = 'stopped', status = 'paused'/),
   );
   assert.ok(ran(log, /DELETE FROM dial_hopper/));
+  assert.ok(ran(log, /DELETE FROM campaign_queues WHERE campaign_id = \?/));
   assert.ok(!ran(log, /^DELETE FROM campaigns/)); // the row stays for history
   assert.deepStrictEqual(log[0], ['BEGIN']);
   assert.deepStrictEqual(log.at(-1), ['COMMIT']);

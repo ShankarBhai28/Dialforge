@@ -108,6 +108,7 @@ export function CampaignSettingsForm({ campaign, onDone }: { campaign: Campaign 
   const set = <K extends keyof CampaignForm>(key: K, value: CampaignForm[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
   const show = modeFields(form.dialMode);
+  const otherQueues = (queues.data ?? []).filter((q) => String(q.id) !== form.queueId);
   // The campaign's own dispositions (a new campaign gets the defaults); not callbacks - they need a time.
   const dispositions = useDispositions(campaign?.id ?? null);
   const autoChoices = (campaign ? (dispositions.data ?? []) : DEFAULT_DISPOSITIONS).filter(
@@ -142,7 +143,11 @@ export function CampaignSettingsForm({ campaign, onDone }: { campaign: Campaign 
           <Field id="c-name" label="Campaign name">
             <Input id="c-name" value={form.name} onChange={(e) => set('name', e.target.value)} autoFocus={!campaign} />
           </Field>
-          <Field id="c-queue" label="Queue" hint="Whose agents take this campaign's calls.">
+          <Field
+            id="c-queue"
+            label="Main queue"
+            hint="Agents working this campaign always take it; the dialer sends its calls here."
+          >
             <Select id="c-queue" value={form.queueId} onChange={(e) => set('queueId', e.target.value)}>
               <option value="">No queue</option>
               {/* keep the saved queue selectable while the list loads */}
@@ -195,6 +200,48 @@ export function CampaignSettingsForm({ campaign, onDone }: { campaign: Campaign 
           />
         </div>
 
+        <fieldset className="grid gap-3 rounded-lg border p-4">
+          <legend className="px-1 text-sm font-bold">More queues</legend>
+          <p className="-mt-1 text-xs text-muted-foreground">
+            Other lines this campaign&apos;s agents answer (e.g. a Tamil and an English queue). Agents get this
+            campaign&apos;s form and dispositions whichever queue the call came from. Point DID numbers at queues under
+            DID Numbers.
+          </p>
+          {!form.queueId || otherQueues.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {form.queueId ? 'No other queues yet - add them under Queues.' : 'Pick the main queue first.'}
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-x-5 gap-y-2">
+              {otherQueues.map((q) => (
+                <label key={q.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={form.extraQueueIds.includes(q.id)}
+                    onChange={(e) =>
+                      set(
+                        'extraQueueIds',
+                        e.target.checked
+                          ? [...form.extraQueueIds, q.id]
+                          : form.extraQueueIds.filter((id) => id !== q.id),
+                      )
+                    }
+                  />
+                  {q.name}
+                </label>
+              ))}
+            </div>
+          )}
+          {form.extraQueueIds.some((id) => String(id) !== form.queueId) && (
+            <CheckField
+              id="c-takeall"
+              label="Agents must take all queues"
+              hint="Off: agents untick the queues they don't want when they go Available."
+              checked={form.takeAllQueues}
+              onChange={(v) => set('takeAllQueues', v)}
+            />
+          )}
+        </fieldset>
+
         <fieldset className="grid gap-4 rounded-lg border p-4">
           <legend className="px-1 text-sm font-bold">Dialer settings</legend>
           <p className="-mt-2 text-xs text-muted-foreground">
@@ -203,7 +250,11 @@ export function CampaignSettingsForm({ campaign, onDone }: { campaign: Campaign 
           <Field
             id="c-mode"
             label="Dial mode"
-            hint={form.dialMode === 'manual' ? 'Saving in Manual mode stops the dialer for this campaign.' : undefined}
+            hint={
+              form.dialMode === 'manual' || form.dialMode === 'inbound'
+                ? `Saving in ${form.dialMode === 'manual' ? 'Manual' : 'Inbound'} mode stops the dialer for this campaign.`
+                : undefined
+            }
           >
             <Select id="c-mode" value={form.dialMode} onChange={(e) => set('dialMode', e.target.value as DialMode)}>
               {DIAL_MODES.map((m) => (
@@ -305,7 +356,7 @@ export function CampaignSettingsForm({ campaign, onDone }: { campaign: Campaign 
               min={1}
               max={200}
             />
-            {form.dialMode !== 'manual' && (
+            {form.dialMode !== 'manual' && form.dialMode !== 'inbound' && (
               <NumberField
                 id="c-gap"
                 label="Spacing across campaigns (hours)"

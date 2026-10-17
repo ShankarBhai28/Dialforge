@@ -56,8 +56,11 @@ export type Workspace = {
 export type ControllerState = {
   queue: { id: number; name: string } | null;
   queuePickerOpen: boolean;
-  /** Blended: also take calls from these queues (the shift's choice). */
-  extraQueueIds: number[];
+  /**
+   * The campaign's other queues the agent ticked for this shift (null = not
+   * chosen yet: the server keeps what it has).
+   */
+  extraQueueIds: number[] | null;
   /** Ringing call waiting for Accept / Reject. */
   incoming: { number: string; name: string } | null;
   call: CallInfo | null;
@@ -80,7 +83,7 @@ type Deps = {
 };
 
 const QUEUE_KEY = 'dialforge.agent.queue';
-/** Blended: the extra queues (ids) chosen for the shift. */
+/** The campaign's other queues (ids) ticked for the shift. */
 const EXTRA_KEY = 'dialforge.agent.extraQueues';
 /** How long a notice under the status bar stays (the agent asked for 2 s). */
 export const MESSAGE_MS = 2000;
@@ -507,14 +510,14 @@ export class AgentController {
         status,
         reason,
         queueId: this.state.queue?.id ?? null,
-        ...(status === 'available' ? { extraQueueIds: this.state.extraQueueIds } : {}),
+        ...(status === 'available' && this.state.extraQueueIds ? { extraQueueIds: this.state.extraQueueIds } : {}),
       });
     } catch (err) {
       if (err instanceof ApiError && err.status === 403 && status === 'available') {
         // The queue's campaign was unmapped from the agent's team mid-session.
         this.say(err.message || 'This queue is no longer available to you.', true);
         this.saveQueue(null);
-        this.saveExtras([]);
+        this.saveExtras(null);
         this.set({ queuePickerOpen: true });
         return;
       }
@@ -532,7 +535,7 @@ export class AgentController {
     this.set({ queuePickerOpen: true });
   }
 
-  /** extraQueueIds: blended - also take calls from these queues (left out = keep the shift's choice). */
+  /** extraQueueIds: the campaign's other queues to take too (left out = keep the shift's choice). */
   async selectQueue(queue: { id: number; name: string }, extraQueueIds?: number[]) {
     this.saveQueue(queue);
     if (extraQueueIds) this.saveExtras(extraQueueIds.filter((id) => id !== queue.id));
@@ -550,18 +553,18 @@ export class AgentController {
       return null;
     }
   }
-  private loadExtras(): number[] {
+  private loadExtras(): number[] | null {
     try {
       const v = this.storage?.getItem(EXTRA_KEY);
-      const ids = v ? JSON.parse(v) : [];
-      return Array.isArray(ids) ? ids.filter((x) => Number.isInteger(x)) : [];
+      const ids = v ? JSON.parse(v) : null;
+      return Array.isArray(ids) ? ids.filter((x) => Number.isInteger(x)) : null;
     } catch {
-      return [];
+      return null;
     }
   }
-  private saveExtras(ids: number[]) {
+  private saveExtras(ids: number[] | null) {
     try {
-      if (ids.length) this.storage?.setItem(EXTRA_KEY, JSON.stringify(ids));
+      if (ids) this.storage?.setItem(EXTRA_KEY, JSON.stringify(ids));
       else this.storage?.removeItem(EXTRA_KEY);
     } catch {
       /* private mode */

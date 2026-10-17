@@ -184,15 +184,17 @@ async function resolveTarget(st, { targetType, target }, mode, me) {
   }
   if (targetType === 'queue') {
     const [[q]] = await d.pool.query(
+      // Any queue a campaign takes (main or one of its queues); its main campaign first.
       `SELECT q.id, q.name, q.asterisk_name, c.id AS campaign_id FROM queues q
-       JOIN campaigns c ON c.queue_id = q.id
-       WHERE q.id = ? AND q.status = 'active' LIMIT 1`,
+       JOIN campaigns c ON c.deleted_at IS NULL
+         AND (c.queue_id = q.id OR EXISTS (SELECT 1 FROM campaign_queues cq WHERE cq.campaign_id = c.id AND cq.queue_id = q.id))
+       WHERE q.id = ? AND q.status = 'active' ORDER BY (c.queue_id = q.id) DESC, c.id LIMIT 1`,
       [Number(target)],
     );
     if (!q) throw httpError(404, 'queue not found');
     if (mode === 'blind') return { kind: 'queue', queue: q, label: q.name };
     // Warm / conference need someone to talk to now: pick a free agent in it.
-    const free = (await listAgents(me)).filter((a) => a.queueId === q.id && !a.busy && a.status === 'available');
+    const free = (await listAgents(me)).filter((a) => a.queueIds.includes(q.id) && !a.busy && a.status === 'available');
     for (const a of free) {
       if (await d.ari.isEndpointOnline(`PJSIP/${a.ext}`)) return agentTarget(st, a, `${a.username} (${q.name})`);
     }
@@ -229,6 +231,7 @@ function agentTarget(st, agent, label) {
 async function listAgents(excludeExt) {
   const [rows] = await d.pool.query(
     `SELECT u.id AS userId, u.username, asl.extension_name AS ext, asl.status, asl.queue_id AS queueId,
+       (SELECT GROUP_CONCAT(x.queue_id) FROM agent_extra_queues x WHERE x.user_id = u.id) AS extraQueueIds,
        EXISTS (SELECT 1 FROM calls c WHERE (c.from_extension = asl.extension_name OR c.transfer_ext = asl.extension_name)
                AND c.end_time IS NULL AND c.start_time > NOW() - INTERVAL 3 HOUR) AS busy
      FROM agent_status_log asl JOIN users u ON u.id = asl.user_id
@@ -237,7 +240,12 @@ async function listAgents(excludeExt) {
      ORDER BY u.username`,
     [excludeExt || ''],
   );
-  return rows.map((r) => ({ ...r, busy: !!Number(r.busy) }));
+  return rows.map((r) => ({
+    ...r,
+    busy: !!Number(r.busy),
+    // The queues the agent takes calls from: their campaign's main one + the others they took.
+    queueIds: [r.queueId, ...(r.extraQueueIds ? String(r.extraQueueIds).split(',').map(Number) : [])],
+  }));
 }
 
 async function agentByUserId(userId) {
@@ -653,8 +661,10 @@ function viewFor(me) {
 async function transferTargets(me) {
   const agents = await listAgents(me);
   const [queues] = await d.pool.query(
-    `SELECT q.id, q.name, c.name AS campaign_name FROM queues q JOIN campaigns c ON c.queue_id = q.id
-     WHERE q.status = 'active' AND c.status = 'active' ORDER BY q.name`,
+    `SELECT q.id, q.name, MIN(c.name) AS campaign_name FROM queues q
+     JOIN campaigns c ON c.status = 'active' AND c.deleted_at IS NULL
+       AND (c.queue_id = q.id OR EXISTS (SELECT 1 FROM campaign_queues cq WHERE cq.campaign_id = c.id AND cq.queue_id = q.id))
+     WHERE q.status = 'active' GROUP BY q.id, q.name ORDER BY q.name`,
   );
   return {
     agents: agents.map((a) => ({
@@ -667,7 +677,7 @@ async function transferTargets(me) {
       id: q.id,
       name: q.name,
       campaign: q.campaign_name,
-      freeAgents: agents.filter((a) => a.queueId === q.id && !a.busy && a.status === 'available').length,
+      freeAgents: agents.filter((a) => a.queueIds.includes(q.id) && !a.busy && a.status === 'available').length,
     })),
   };
 }

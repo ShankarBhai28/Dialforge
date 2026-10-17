@@ -3,6 +3,7 @@ const { deleteCampaign } = require('../services/softDelete');
 const pool = require('../../db');
 const { requirePermission, requireAdminSide, requireAllScope } = require('../middleware/auth');
 const { checkCampaignForm, parseCampaignSettings } = require('../services/campaigns');
+const { leaveRemovedCampaignQueues } = require('../services/agents');
 const {
   DEFAULT_DISPOSITIONS,
   getDispositions,
@@ -28,7 +29,10 @@ router.get('/admin/campaigns', requireAdminSide, async (req, res) => {
   const [cond, params] = scopeCondition(req.access.scope, 'campaigns', 'c.id');
   const [rows] = await pool.query(
     `
-    SELECT c.*, q.name AS queue_name, q.ring_strategy, q.wait_timeout, f.name AS form_name
+    SELECT c.*, q.name AS queue_name, q.ring_strategy, q.wait_timeout, f.name AS form_name,
+      (SELECT GROUP_CONCAT(cq.queue_id ORDER BY cq.queue_id) FROM campaign_queues cq WHERE cq.campaign_id = c.id) AS extra_queue_ids,
+      (SELECT GROUP_CONCAT(xq.name ORDER BY xq.name SEPARATOR ', ') FROM campaign_queues cq JOIN queues xq ON xq.id = cq.queue_id
+        WHERE cq.campaign_id = c.id) AS extra_queue_names
     FROM campaigns c
     LEFT JOIN queues q ON q.id = c.queue_id
     LEFT JOIN forms f ON f.id = c.form_id
@@ -37,8 +41,36 @@ router.get('/admin/campaigns', requireAdminSide, async (req, res) => {
   `,
     params,
   );
-  res.json(rows);
+  res.json(
+    rows.map((r) => ({
+      ...r,
+      extra_queue_ids: r.extra_queue_ids ? String(r.extra_queue_ids).split(',').map(Number) : [],
+    })),
+  );
 });
+
+/**
+ * The campaign's queues besides the main one (body.extraQueueIds): existing
+ * queues, never the main one. Returns { ids } or { error }.
+ */
+async function parseExtraQueues(body, db = pool) {
+  if (body.extraQueueIds === undefined) return { ids: undefined }; // not sent: keep
+  if (!Array.isArray(body.extraQueueIds)) return { error: 'extraQueueIds must be a list' };
+  const ids = [...new Set(body.extraQueueIds.map(Number))].filter((id) => id !== Number(body.queueId));
+  if (ids.some((id) => !Number.isInteger(id) || id <= 0)) return { error: 'extraQueueIds must be queue ids' };
+  if (ids.length && !body.queueId) return { error: 'pick the main queue first' };
+  if (ids.length) {
+    const [found] = await db.query('SELECT id FROM queues WHERE id IN (?) AND deleted_at IS NULL', [ids]);
+    if (found.length !== ids.length) return { error: 'one of the queues does not exist' };
+  }
+  return { ids };
+}
+
+async function saveExtraQueues(conn, campaignId, ids) {
+  await conn.query('DELETE FROM campaign_queues WHERE campaign_id = ?', [campaignId]);
+  if (ids.length)
+    await conn.query('INSERT INTO campaign_queues (campaign_id, queue_id) VALUES ?', [ids.map((q) => [campaignId, q])]);
+}
 
 // A campaign is active or paused. Edit also accepts the status it already
 // has, so an older value doesn't block saving other changes.
@@ -63,6 +95,8 @@ router.post(
     if (error) return res.status(400).json({ error });
     const autoError = checkAutoDispo(settings, DEFAULT_DISPOSITIONS);
     if (autoError) return res.status(400).json({ error: autoError });
+    const extra = await parseExtraQueues(req.body);
+    if (extra.error) return res.status(400).json({ error: extra.error });
     const conn = await pool.getConnection();
     let result;
     try {
@@ -76,10 +110,12 @@ router.post(
           auto_answer: autoAnswer ? 1 : 0,
           status: status || 'active',
           form_id: formId || null,
+          agents_take_all_queues: req.body.takeAllQueues ? 1 : 0,
           ...settings,
         },
       ]);
       await replaceDispositions(conn, result.insertId, DEFAULT_DISPOSITIONS);
+      await saveExtraQueues(conn, result.insertId, extra.ids || []);
       await conn.commit();
     } catch (err) {
       await conn.rollback();
@@ -108,6 +144,11 @@ router.put('/admin/campaigns/:id', requirePermission('campaigns', 'edit'), async
   if (error) return res.status(400).json({ error });
   const autoError = checkAutoDispo(settings, await getDispositions(rows[0].id));
   if (autoError) return res.status(400).json({ error: autoError });
+  const extra = await parseExtraQueues(req.body);
+  if (extra.error) return res.status(400).json({ error: extra.error });
+  const [before] = extra.ids
+    ? await pool.query('SELECT queue_id FROM campaign_queues WHERE campaign_id = ?', [rows[0].id])
+    : [[]];
 
   await pool.query('UPDATE campaigns SET ? WHERE id = ?', [
     {
@@ -117,11 +158,20 @@ router.put('/admin/campaigns/:id', requirePermission('campaigns', 'edit'), async
       auto_answer: autoAnswer ? 1 : 0,
       status: status || rows[0].status,
       form_id: formId || null,
+      ...(req.body.takeAllQueues !== undefined ? { agents_take_all_queues: req.body.takeAllQueues ? 1 : 0 } : {}),
       ...settings,
     },
     req.params.id,
   ]);
-  if (settings.dial_mode === 'manual') {
+  if (extra.ids) {
+    await saveExtraQueues(pool, rows[0].id, extra.ids);
+    const removed = before.map((b) => b.queue_id).filter((id) => !extra.ids.includes(id));
+    await leaveRemovedCampaignQueues(rows[0].id, removed).catch((err) =>
+      console.error('[campaign queues: leaving removed queues failed]', err.message),
+    );
+  }
+  // Manual and Inbound don't use the dialer.
+  if (settings.dial_mode === 'manual' || settings.dial_mode === 'inbound') {
     await pool.query("UPDATE campaigns SET dialer_state = 'stopped' WHERE id = ? AND dialer_state <> 'stopped'", [
       req.params.id,
     ]);

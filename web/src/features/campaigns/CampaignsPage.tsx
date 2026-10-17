@@ -138,7 +138,12 @@ export function CampaignsPage() {
               {campaigns.data.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell className="font-semibold">{c.name}</TableCell>
-                  <TableCell>{c.queue_name ?? dash}</TableCell>
+                  <TableCell>
+                    {c.queue_name ?? dash}
+                    {c.extra_queue_names && (
+                      <div className="text-xs text-muted-foreground">+ {c.extra_queue_names}</div>
+                    )}
+                  </TableCell>
                   <TableCell className="tabular-nums">{c.outbound_caller_id || dash}</TableCell>
                   <TableCell>{c.auto_answer ? 'Yes' : 'No'}</TableCell>
                   <TableCell>{c.form_name ?? dash}</TableCell>

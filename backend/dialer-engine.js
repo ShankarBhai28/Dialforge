@@ -383,6 +383,7 @@ async function processCampaign(c) {
   if (licence.isExpired()) note = 'the VIZTEX subscription has ended - contact your provider';
   else if (c.status !== 'active') note = 'campaign status is not active - not filling';
   else if (c.dial_mode === 'manual') note = 'manual mode - the dialer is not used';
+  else if (c.dial_mode === 'inbound') note = 'inbound mode - the dialer is not used';
   else if (!c.queue_id) note = 'campaign has no queue';
   else if (c.dialer_state === 'paused') note = 'paused by admin';
   else if (!isWithinCallWindow(c))

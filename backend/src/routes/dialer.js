@@ -20,8 +20,10 @@ router.post('/admin/campaigns/:id/dialer', requirePermission('dialer', 'control'
   const next = { start: 'running', pause: 'paused', stop: 'stopped' }[action];
   if (!next) return res.status(400).json({ error: 'action must be start, pause or stop' });
   if (action === 'start') {
-    if (c.dial_mode === 'manual')
-      return res.status(400).json({ error: 'set a dial mode other than Manual first (Campaigns → Edit)' });
+    if (c.dial_mode === 'manual' || c.dial_mode === 'inbound')
+      return res.status(400).json({
+        error: `${c.dial_mode === 'inbound' ? 'an Inbound' : 'a Manual'} campaign doesn't use the dialer - set Preview, Progressive or Predictive first (Campaigns → Edit)`,
+      });
     if (c.status !== 'active') return res.status(400).json({ error: 'campaign status must be Active' });
     if (!c.queue_id) return res.status(400).json({ error: 'campaign needs a queue' });
   }

@@ -99,8 +99,8 @@ describe('Campaigns', () => {
     // paste: one event instead of one per key keeps this big form test quick
     await userEvent.click(within(dialog).getByLabelText('Campaign name'));
     await userEvent.paste(' Sales ');
-    await within(within(dialog).getByLabelText('Queue')).findByRole('option', { name: 'sales_q' });
-    await userEvent.selectOptions(within(dialog).getByLabelText('Queue'), 'sales_q');
+    await within(within(dialog).getByLabelText('Main queue')).findByRole('option', { name: 'sales_q' });
+    await userEvent.selectOptions(within(dialog).getByLabelText('Main queue'), 'sales_q');
     const formSelect = within(dialog).getByLabelText('Form');
     await within(formSelect).findByRole('option', { name: 'Survey' });
     // inactive forms can't be attached
@@ -124,6 +124,8 @@ describe('Campaigns', () => {
     expect(calls.find((c) => c.key === 'POST /admin/campaigns')?.body).toEqual({
       name: 'Sales',
       queueId: 3,
+      extraQueueIds: [],
+      takeAllQueues: false,
       formId: 7,
       outboundCallerId: '8065098690',
       autoAnswer: false,
@@ -167,6 +169,8 @@ describe('Campaigns', () => {
     expect(calls.find((c) => c.key === 'PUT /admin/campaigns/5')?.body).toEqual({
       name: 'Predictive_Test',
       queueId: 3,
+      extraQueueIds: [],
+      takeAllQueues: false,
       formId: 7,
       outboundCallerId: '8065098690',
       autoAnswer: true,
@@ -342,5 +346,45 @@ describe('Campaigns', () => {
     await within(dialog).findByLabelText('Busy: auto redial');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save recycle rules' }));
     expect(await within(dialog).findByText('campaign not found')).toBeInTheDocument();
+  });
+  it('an Inbound campaign with more queues: ticks go in the body, "take all" shows once a queue is ticked', async () => {
+    const calls = fakeApi({
+      ...base,
+      'GET /admin/queues': {
+        body: [
+          { id: 3, name: 'sales_q', asterisk_name: 'sales_q', ring_strategy: 'ringall' },
+          { id: 4, name: 'tamil_q', asterisk_name: 'tamil_q', ring_strategy: 'ringall' },
+          { id: 6, name: 'english_q', asterisk_name: 'english_q', ring_strategy: 'ringall' },
+        ],
+      },
+      'GET /admin/campaigns': { body: [] },
+      'POST /admin/campaigns': { status: 201, body: { id: 9, name: 'Care' } },
+    });
+    renderPage(<CampaignsPage />);
+    await userEvent.click(await screen.findByRole('button', { name: /create campaign/i }));
+    const dialog = screen.getByRole('dialog');
+    await userEvent.click(within(dialog).getByLabelText('Campaign name'));
+    await userEvent.paste('Care');
+    expect(within(dialog).getByText('Pick the main queue first.')).toBeInTheDocument();
+    await within(within(dialog).getByLabelText('Main queue')).findByRole('option', { name: 'sales_q' });
+    await userEvent.selectOptions(within(dialog).getByLabelText('Main queue'), 'sales_q');
+    // The main queue isn't offered again.
+    const more = within(dialog).getByRole('group', { name: 'More queues' });
+    expect(within(more).queryByLabelText('sales_q')).not.toBeInTheDocument();
+    expect(within(more).queryByLabelText('Agents must take all queues')).not.toBeInTheDocument();
+    await userEvent.click(within(more).getByLabelText('tamil_q'));
+    await userEvent.click(within(more).getByLabelText('english_q'));
+    await userEvent.click(within(more).getByLabelText('Agents must take all queues'));
+    await userEvent.selectOptions(within(dialog).getByLabelText('Dial mode'), 'inbound');
+    expect(within(dialog).getByText('Saving in Inbound mode stops the dialer for this campaign.')).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('Spacing across campaigns (hours)')).not.toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Create campaign' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(calls.find((c) => c.key === 'POST /admin/campaigns')?.body).toMatchObject({
+      queueId: 3,
+      extraQueueIds: [4, 6],
+      takeAllQueues: true,
+      dialMode: 'inbound',
+    });
   });
 });

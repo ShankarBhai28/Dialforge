@@ -171,7 +171,7 @@ const CHECKS = [
   },
   {
     title: 'Dialer marked running on a manual / paused / deleted campaign (stop it in Dialer)',
-    sql: `SELECT id, name, dial_mode, status, dialer_state FROM campaigns WHERE dialer_state = 'running' AND (dial_mode = 'manual' OR status <> 'active' OR deleted_at IS NOT NULL)`,
+    sql: `SELECT id, name, dial_mode, status, dialer_state FROM campaigns WHERE dialer_state = 'running' AND (dial_mode IN ('manual', 'inbound') OR status <> 'active' OR deleted_at IS NOT NULL)`,
   },
   // --- leads, lists, callbacks ---
   {
@@ -235,7 +235,7 @@ const CHECKS = [
   },
   {
     title: 'DID pointing at a missing / deleted campaign',
-    sql: `SELECT d.id, d.number FROM dids d LEFT JOIN campaigns c ON c.id = d.campaign_id WHERE d.campaign_id IS NOT NULL AND (c.id IS NULL OR c.deleted_at IS NOT NULL)`,
+    sql: `SELECT d.id, d.number FROM dids d LEFT JOIN queues q ON q.id = d.queue_id WHERE d.queue_id IS NOT NULL AND (q.id IS NULL OR q.deleted_at IS NOT NULL)`,
   },
   {
     title: 'Extension without a SIP password',

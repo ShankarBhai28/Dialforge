@@ -8,6 +8,7 @@ export const DIAL_MODES: { value: DialMode; label: string }[] = [
   { value: 'preview', label: 'Preview - lead shown, agent clicks dial' },
   { value: 'progressive', label: 'Progressive - auto-dial at fixed ratio' },
   { value: 'predictive', label: 'Predictive - adaptive ratio' },
+  { value: 'inbound', label: 'Inbound - calls come from the queues only' },
 ];
 
 /** Which mode-specific knobs to show (same rules as the classic screen). */
@@ -20,6 +21,9 @@ export function modeFields(mode: DialMode) {
 export type CampaignForm = {
   name: string;
   queueId: string;
+  /** The campaign's other queues (ids). */
+  extraQueueIds: number[];
+  takeAllQueues: boolean;
   formId: string;
   outboundCallerId: string;
   status: string;
@@ -64,6 +68,8 @@ export function campaignForm(c: Campaign | null): CampaignForm {
   return {
     name: c?.name ?? '',
     queueId: c?.queue_id ? String(c.queue_id) : '',
+    extraQueueIds: c?.extra_queue_ids ?? [],
+    takeAllQueues: !!c?.agents_take_all_queues,
     formId: c?.form_id ? String(c.form_id) : '',
     outboundCallerId: c?.outbound_caller_id ?? '',
     status: c?.status ?? 'active',
@@ -95,6 +101,8 @@ export function campaignBody(f: CampaignForm): CampaignBody {
   return {
     name: f.name.trim(),
     queueId: f.queueId ? Number(f.queueId) : null,
+    extraQueueIds: f.extraQueueIds.filter((id) => String(id) !== f.queueId),
+    takeAllQueues: f.takeAllQueues,
     formId: f.formId ? Number(f.formId) : null,
     outboundCallerId: f.outboundCallerId.trim() || null,
     autoAnswer: f.autoAnswer,
@@ -135,6 +143,7 @@ export function checkCampaign(b: CampaignBody): string | null {
   const inRange = (v: number, lo: number, hi: number) => Number.isFinite(v) && v >= lo && v <= hi;
   const whole = (v: number, lo: number, hi: number) => inRange(v, lo, hi) && Number.isInteger(v);
   if (!b.name) return 'Campaign name is required';
+  if (b.extraQueueIds.length && !b.queueId) return 'pick the main queue first';
   if (!inRange(b.dialRatio, 1, 5)) return 'dial ratio must be between 1 and 5';
   if (!inRange(b.maxDialRatio, b.dialRatio, 5)) return 'max dial ratio must be between the dial ratio and 5';
   if (!inRange(b.targetAbandonPct, 0, 10)) return 'target abandon % must be between 0 and 10';

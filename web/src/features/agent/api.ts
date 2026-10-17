@@ -17,12 +17,23 @@ export type AgentStats = {
   currentStatus: AgentStatus | 'offline' | null;
   currentReason: string | null;
   currentQueueName: string | null;
-  /** Blended: the extra queues the agent also takes calls from this shift. */
+  /** The campaign's other queues the agent takes calls from this shift. */
   extraQueues?: { id: number; name: string }[];
 };
 
 /** GET /queues (agent): queues of campaigns mapped to the agent's teams. */
-export type AgentQueue = { id: number; name: string; campaign_name: string };
+export type AgentQueue = {
+  /** The campaign's main queue (always taken). */
+  id: number;
+  name: string;
+  campaign_name: string;
+  campaign_id?: number;
+  dial_mode?: string;
+  /** The campaign's other queues the agent may take too. */
+  extra_queues?: { id: number; name: string }[];
+  /** The campaign says agents take all its queues (no unticking). */
+  take_all?: boolean;
+};
 
 /** A lead as GET /leads returns it to an agent (leads.*), or a screen-popped/preview lead. */
 export type Lead = {

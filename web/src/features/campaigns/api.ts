@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, post, put } from '@/lib/api';
 
-export type DialMode = 'manual' | 'preview' | 'progressive' | 'predictive';
+export type DialMode = 'manual' | 'preview' | 'progressive' | 'predictive' | 'inbound';
 
 // One row of GET /admin/campaigns (campaigns.* + joined names).
 // MySQL DECIMAL columns arrive as strings, TIME as "HH:MM:SS".
@@ -12,6 +12,11 @@ export type Campaign = {
   created_at: string;
   queue_id: number | null;
   queue_name: string | null;
+  /** The campaign's queues besides the main one (agents may take them too). */
+  extra_queue_ids?: number[];
+  extra_queue_names?: string | null;
+  /** 1 = agents working it take all its queues (can't untick). */
+  agents_take_all_queues?: 0 | 1;
   ring_strategy: string | null;
   wait_timeout: number | null;
   outbound_caller_id: string | null;
@@ -44,6 +49,8 @@ export type Campaign = {
 export type CampaignBody = {
   name: string;
   queueId: number | null;
+  extraQueueIds: number[];
+  takeAllQueues: boolean;
   formId: number | null;
   outboundCallerId: string | null;
   autoAnswer: boolean;
