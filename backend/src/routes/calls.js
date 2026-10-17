@@ -5,7 +5,7 @@ const { holdLeadForOutcome, isWithinCallWindow, normalizePhone } = require('../.
 const { APP_NAME, TRUNK_ENDPOINT } = require('../config');
 const { requirePermission, requireCaller } = require('../middleware/auth');
 const { currentAgentStatus, findCurrentCampaign } = require('../services/agents');
-const { logEvent } = require('../services/calls');
+const { agentCallCondition, logEvent } = require('../services/calls');
 const { isDnc } = require('../services/dnc');
 const { lineRefusal } = require('../services/licence');
 const { previewLockOwner } = require('../services/preview');
@@ -28,10 +28,10 @@ router.get('/calls', requireCaller, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM calls ORDER BY id DESC LIMIT 100');
     return res.json(rows);
   }
-  // The agent's own calls (taken by them, or on their extension), with the
+  // The agent's own calls (from every campaign they worked), with the
   // outcome they gave, talk time and whether there's a recording (never its
   // path). ?period=today|yesterday|7d|30d (the center's days; default 7d).
-  const ext = req.session.user.extensionName || '';
+  const [mine, mineParams] = agentCallCondition(req.session.user.id);
   const days = { today: [0, 0], yesterday: [1, 1], '7d': [6, 0], '30d': [29, 0] }[req.query.period] || [6, 0];
   const today = localToday();
   const day = (back) => new Date(Date.parse(today) - back * 86400000).toISOString().slice(0, 10);
@@ -39,15 +39,17 @@ router.get('/calls', requireCaller, async (req, res) => {
   const [rows] = await pool.query(
     `SELECT ca.id, ca.lead_id, ca.direction, ca.to_number, ca.disposition, ca.start_time, ca.answer_time,
             ca.end_time, ca.agent_connect_time, ca.campaign_id, ca.outcome, cd.label AS outcome_label,
-            cd.is_callback, l.name AS lead_name, ca.recording_path IS NOT NULL AS has_recording,
+            cd.is_callback, l.name AS lead_name, cmp.name AS campaign_name,
+            ca.recording_path IS NOT NULL AS has_recording,
             IF(ca.agent_connect_time IS NULL, NULL,
                GREATEST(TIMESTAMPDIFF(SECOND, ca.agent_connect_time, COALESCE(ca.end_time, NOW())), 0)) AS talk_seconds
      FROM calls ca
      LEFT JOIN leads l ON l.id = ca.lead_id
      LEFT JOIN campaign_dispositions cd ON cd.campaign_id = ca.campaign_id AND cd.code = ca.outcome
-     WHERE (ca.agent_user_id = ? OR ca.from_extension = ?) AND ca.start_time >= ? AND ca.start_time < ?
+     LEFT JOIN campaigns cmp ON cmp.id = ca.campaign_id
+     WHERE ${mine} AND ca.start_time >= ? AND ca.start_time < ?
      ORDER BY ca.id DESC LIMIT 300`,
-    [req.session.user.id, ext, range.start, range.end],
+    [...mineParams, range.start, range.end],
   );
   res.json(
     rows.map(({ is_callback: cb, ...r }) => ({

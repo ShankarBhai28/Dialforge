@@ -348,7 +348,14 @@ describe('agent screen', () => {
               disposition: 'ended',
               outcome: null,
               talk_seconds: 55,
+              campaign_name: 'Old Campaign',
             },
+          ],
+        },
+        // A call of a campaign the agent worked before: that campaign's dispositions.
+        'GET /agent/dispositions?callId=59': {
+          body: [
+            { code: 'old_sale', label: 'Old Sale', is_final: 1, retry_after_min: null, marks_dnc: 0, is_callback: 0 },
           ],
         },
         'GET /agent/leads/7': {
@@ -391,6 +398,8 @@ describe('agent screen', () => {
     expect(within(log).getByText('Needs disposition')).toBeInTheDocument();
     await userEvent.click(within(log).getByRole('button', { name: 'Give disposition for 9000000002' }));
     const late = await screen.findByRole('dialog', { name: /^disposition$/i });
+    expect(within(log).getByText('Old Campaign')).toBeInTheDocument();
+    expect(await within(late).findByRole('button', { name: /Old Sale/ })).toBeInTheDocument();
     await userEvent.click(within(late).getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog', { name: /^disposition$/i })).not.toBeInTheDocument();
 

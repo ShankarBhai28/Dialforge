@@ -5,6 +5,7 @@ const pool = require('../../db');
 const { normalizePhone } = require('../../dialer-common');
 const { requirePermission, requireCaller } = require('../middleware/auth');
 const { findCurrentCampaign } = require('../services/agents');
+const { agentCallCondition, findAgentCall } = require('../services/calls');
 const { getDispositions } = require('../services/dispositions');
 const { addDnc, isDnc } = require('../services/dnc');
 const { audit } = require('../services/audit');
@@ -183,7 +184,17 @@ router.post('/leads/:id/disposition', requireCaller, async (req, res) => {
   if (!lead) return res.status(404).json({ error: 'lead not found' });
   if (req.session.user.role === 'agent') {
     const campaign = await findCurrentCampaign(req.session.user.id);
-    if (lead.campaign_id && (!campaign || campaign.id !== lead.campaign_id)) {
+    // Another campaign's lead: only for a call of that lead this agent had
+    // (a disposition given later from the call log, after changing campaign).
+    const ownCall =
+      lead.campaign_id && (!campaign || campaign.id !== lead.campaign_id) && req.body.callId
+        ? await findAgentCall(req.session.user.id, req.body.callId)
+        : null;
+    if (
+      lead.campaign_id &&
+      (!campaign || campaign.id !== lead.campaign_id) &&
+      !(ownCall && ownCall.lead_id === lead.id)
+    ) {
       return res.status(403).json({ error: 'that lead is not in your current campaign' });
     }
   }
@@ -196,10 +207,11 @@ router.post('/leads/:id/disposition', requireCaller, async (req, res) => {
 // is used - the call is linked to it, and the outcome is saved on it like
 // any lead's. Only the agent who had the call may do this.
 router.post('/agent/calls/:callId/disposition', requireCaller, async (req, res) => {
-  const ext = req.session.user.extensionName;
+  // This agent's call - also one from an earlier shift on another device.
+  const [mine, mineParams] = agentCallCondition(req.session.user.id);
   const [callRows] = await pool.query(
-    'SELECT id, lead_id, to_number, campaign_id FROM calls WHERE id = ? AND (from_extension = ? OR transfer_ext = ?)',
-    [req.params.callId, ext, ext],
+    `SELECT ca.id, ca.lead_id, ca.to_number, ca.campaign_id FROM calls ca WHERE ca.id = ? AND ${mine}`,
+    [req.params.callId, ...mineParams],
   );
   const call = callRows[0];
   if (!call) return res.status(404).json({ error: 'call not found' });

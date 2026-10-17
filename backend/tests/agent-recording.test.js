@@ -112,7 +112,7 @@ test('own call plays; a colleague call on a lead of my campaign plays; others ar
   assert.strictEqual((await get('/agent/calls/404/recording')).status, 404);
 });
 
-test('agent call log: own calls by agent or extension, outcome label, recording flag only', async () => {
+test('agent call log: own calls (by agent, or an extension they were on then), outcome label, recording flag only', async () => {
   const r = await get('/calls');
   const rows = JSON.parse(r.text);
   assert.deepStrictEqual(
@@ -128,8 +128,11 @@ test('agent call log: own calls by agent or extension, outcome label, recording 
     [false, false],
   );
   const [q, params] = sql.find(([s]) => s.startsWith('SELECT ca.id, ca.lead_id'));
-  assert.match(q, /WHERE \(ca\.agent_user_id = \? OR ca\.from_extension = \?\) AND ca\.start_time >= \?/);
-  assert.deepStrictEqual(params.slice(0, 2), [5, '1003']);
+  assert.match(
+    q,
+    /WHERE \(ca\.agent_user_id = \? OR EXISTS \( SELECT 1 FROM agent_status_log mine WHERE mine\.user_id = \?/,
+  );
+  assert.deepStrictEqual(params.slice(0, 2), [5, 5]);
 });
 
 test('agent call log period: today = one local day; default 7 days', async () => {

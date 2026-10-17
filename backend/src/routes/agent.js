@@ -8,6 +8,7 @@ const {
   setAgentStatus,
 } = require('../services/agents');
 const { getDispositions } = require('../services/dispositions');
+const { findAgentCall } = require('../services/calls');
 const { findOtherActiveHolder } = require('../services/extensionGuard');
 const { buildWebrtcConfig } = require('../services/webrtc');
 
@@ -147,6 +148,13 @@ router.get('/agent/campaign-info', requireCaller, async (req, res) => {
 
 // --- Agent: dispositions + callbacks for the campaign they're working ---
 router.get('/agent/dispositions', requireCaller, async (req, res) => {
+  // ?callId: a disposition given later (call log) for a call of another
+  // campaign the agent worked - that campaign's dispositions.
+  if (req.query.callId) {
+    const call = await findAgentCall(req.session.user.id, req.query.callId);
+    if (!call) return res.status(404).json({ error: 'call not found' });
+    if (call.campaign_id) return res.json(await getDispositions(call.campaign_id));
+  }
   const campaign = await findCurrentCampaign(req.session.user.id);
   res.json(await getDispositions(campaign ? campaign.id : null));
 });

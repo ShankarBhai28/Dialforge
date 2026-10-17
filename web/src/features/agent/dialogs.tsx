@@ -126,7 +126,8 @@ const oneHourFromNow = () => toDateTimeLocal(Date.now() + 60 * 60 * 1000);
 export function OutcomeDialog() {
   const { controller, state } = useController();
   const target = state.outcomeFor;
-  const dispositions = useAgentDispositions();
+  // Given later from the call log: that call's campaign (the agent may have changed campaign since).
+  const dispositions = useAgentDispositions(target?.late ? target.callId : null);
   const [callbackFor, setCallbackFor] = useState<Disposition | null>(null);
   const [at, setAt] = useState('');
   const [note, setNote] = useState('');

@@ -165,6 +165,14 @@ function CallItem({ c, playing, onPlay }: { c: CallRow; playing: boolean; onPlay
             {c.lead_name && <span className="tabular-nums">{c.to_number}</span>}
             {c.lead_name && c.talk_seconds ? <span aria-hidden>·</span> : null}
             {c.talk_seconds ? <span>talked {formatSeconds(c.talk_seconds)}</span> : null}
+            {c.campaign_name && (
+              <>
+                {c.lead_name || c.talk_seconds ? <span aria-hidden>·</span> : null}
+                <span className="truncate" title="Campaign">
+                  {c.campaign_name}
+                </span>
+              </>
+            )}
           </div>
           <div className="mt-1.5 flex items-center gap-1">
             <span className={cn('truncate rounded-full px-2 py-0.5 text-[11px] font-semibold', TONE[chip.tone])}>
@@ -258,6 +266,7 @@ export function CallLog() {
         test(c) &&
         (!q ||
           (c.lead_name ?? '').toLowerCase().includes(q) ||
+          (c.campaign_name ?? '').toLowerCase().includes(q) ||
           (digits.length > 0 && c.to_number.replace(/\D/g, '').includes(digits))),
     );
   }, [all, filter, search]);

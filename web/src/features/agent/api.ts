@@ -109,6 +109,8 @@ export type CallRow = {
   id: number;
   lead_id?: number | null;
   lead_name?: string | null;
+  /** The call's campaign (the log shows calls of every campaign the agent worked). */
+  campaign_name?: string | null;
   direction: string;
   to_number: string;
   start_time: string;
@@ -216,8 +218,12 @@ export const useAgentCallbacks = () =>
 /** The campaign being worked: wrap-up and auto disposition (for the disposition popup). */
 export const useCampaignInfo = (enabled = true) =>
   useQuery({ queryKey: agentKeys.campaignInfo, queryFn: () => get<CampaignInfo>('/agent/campaign-info'), enabled });
-export const useAgentDispositions = () =>
-  useQuery({ queryKey: agentKeys.dispositions, queryFn: () => get<Disposition[]>('/agent/dispositions') });
+/** callId: the dispositions of that call's campaign (a call of an earlier campaign, from the call log). */
+export const useAgentDispositions = (callId?: number | null) =>
+  useQuery({
+    queryKey: callId ? [...agentKeys.dispositions, callId] : agentKeys.dispositions,
+    queryFn: () => get<Disposition[]>(callId ? `/agent/dispositions?callId=${callId}` : '/agent/dispositions'),
+  });
 export const useAgentForm = () =>
   useQuery({ queryKey: agentKeys.form, queryFn: () => get<AgentForm | null>('/agent/form') });
 export type CallPeriod = 'today' | 'yesterday' | '7d' | '30d';
