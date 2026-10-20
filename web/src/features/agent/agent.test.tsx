@@ -296,40 +296,65 @@ describe('agent screen', () => {
     );
   });
 
-  it('form draft: closed by mistake after typing -> kept on the server; reopening restores it; Discard goes back', async () => {
+  it('form auto-save: closed after typing -> saved to the lead by itself; nothing typed -> nothing saved', async () => {
+    const { calls } = await connect(
+      backend({
+        'GET /agent/form-draft?leadId=7': { body: null },
+        'PUT /agent/form-draft': { body: { status: 'ok' } },
+        'POST /agent/form-responses': { status: 201, body: { id: 1, changes: [] } },
+      }),
+    );
+    // Opened and closed without typing: nothing is saved.
+    await userEvent.click(await screen.findByText('Ravi'));
+    await screen.findByLabelText('Amount *');
+    await userEvent.click(screen.getByRole('button', { name: 'Close lead' }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls.some((c) => c.key === 'POST /agent/form-responses')).toBe(false);
+
+    // Typed, then closed (by mistake): saved like Save Form - only what changed.
+    await userEvent.click(screen.getByText('Ravi'));
+    await userEvent.type(await screen.findByLabelText('Amount *'), '4500');
+    await userEvent.click(screen.getByRole('button', { name: 'Close lead' }));
+    await waitFor(() => expect(calls.some((c) => c.key === 'POST /agent/form-responses')).toBe(true));
+    expect(calls.find((c) => c.key === 'POST /agent/form-responses')?.body).toEqual({
+      leadId: 7,
+      callId: null,
+      data: { amount: '4500', plan: '' },
+      changed: ['amount'],
+    });
+    expect(await screen.findByText('Form saved automatically.')).toBeInTheDocument();
+    expect(screen.queryByText(/Restored what you typed/)).not.toBeInTheDocument();
+  });
+
+  it("form auto-save that can't go through: kept as a draft, says why, and comes back pre-filled without a note", async () => {
     let draft: unknown = null;
     const { calls } = await connect(
       backend({
         'GET /agent/form-draft?leadId=7': () => ({ body: draft }),
         'PUT /agent/form-draft': { body: { status: 'ok' } },
-        'DELETE /agent/form-draft?leadId=7': { body: { status: 'ok' } },
+        'POST /agent/form-responses': { status: 400, body: { error: 'Amount is required' } },
       }),
     );
     await userEvent.click(await screen.findByText('Ravi'));
-    const amount = await screen.findByLabelText('Amount *');
-    expect(calls.some((c) => c.key === 'PUT /agent/form-draft')).toBe(false); // nothing typed, nothing kept
-    await userEvent.type(amount, '4500');
-    // Closed by mistake: what was typed goes to the server at once.
+    await userEvent.selectOptions(await screen.findByLabelText('Plan'), 'Gold');
     await userEvent.click(screen.getByRole('button', { name: 'Close lead' }));
-    await waitFor(() => expect(calls.some((c) => c.key === 'PUT /agent/form-draft')).toBe(true));
-    const sent = calls.filter((c) => c.key === 'PUT /agent/form-draft').at(-1)?.body as {
-      leadId: number;
-      data: Record<string, unknown>;
-    };
-    expect(sent.leadId).toBe(7);
-    expect(String(sent.data.amount)).toBe('4500');
-
-    // Opening the lead again: the draft is back, marked as not saved.
-    draft = { data: { amount: 4500, plan: 'Gold' }, updatedAt: '2026-10-20T09:32:00Z' };
+    expect(
+      await screen.findByText(
+        'Form not saved: Amount is required - what you typed is kept for when you open this customer again.',
+      ),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(calls.filter((c) => c.key === 'PUT /agent/form-draft').at(-1)?.body).toMatchObject({
+        leadId: 7,
+        data: { plan: 'Gold' },
+      }),
+    );
+    // Opening the customer again: what was typed is back, quietly.
+    draft = { data: { amount: '', plan: 'Gold' }, updatedAt: '2026-10-20T09:32:00Z' };
     await userEvent.click(screen.getByText('Ravi'));
-    expect(await screen.findByText(/Restored what you typed at .* - not saved yet/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Amount *')).toHaveValue(4500);
-    expect(screen.getByLabelText('Plan')).toHaveValue('Gold');
-    // Discard: back to the lead's own details, the draft dropped.
-    await userEvent.click(screen.getByRole('button', { name: 'Discard' }));
-    await waitFor(() => expect(calls.some((c) => c.key === 'DELETE /agent/form-draft?leadId=7')).toBe(true));
-    expect(screen.getByLabelText('Amount *')).toHaveValue(null);
+    await waitFor(() => expect(screen.getByLabelText('Plan')).toHaveValue('Gold'));
     expect(screen.queryByText(/Restored what you typed/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument();
   });
 
   it('clicking a lead opens it; Call starts click-to-call', async () => {

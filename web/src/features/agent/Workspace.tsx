@@ -6,7 +6,7 @@ import { ClipboardList, Phone, SkipForward, UserRound, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FormError } from '@/components/common';
-import { api, del, get, post, put } from '@/lib/api';
+import { api, get, post, put } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
   dispositionLabel,
@@ -23,7 +23,7 @@ import { LeadStatusChip } from './LeadsPanel';
 import { CustomerHistory } from '@/features/history/CustomerHistory';
 import { useLeadHistory } from '@/features/history/api';
 import { Skeleton } from '@/components/ui/skeleton';
-import { formatDateTime, formatTime } from '@/lib/format';
+import { formatDateTime } from '@/lib/format';
 
 const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : String(v));
 
@@ -274,79 +274,97 @@ const draftQuery = (leadId: number | null, callId: number | null) =>
   new URLSearchParams({ ...(leadId ? { leadId: String(leadId) } : {}), ...(callId ? { callId: String(callId) } : {}) });
 
 /**
- * The form as typed is kept on the server automatically (about a second after
- * each change, and at once when the form closes or the page unloads), so a
- * closed lead, Clear, another lead or a reload loses nothing. Save Form
- * applies it to the lead; Discard starts again from the lead's details.
+ * Whatever the agent fills in is saved by itself: when the form closes (X,
+ * Clear, another lead) or the page goes away, the changes are saved to the
+ * lead like Save Form. Meanwhile the form as typed is also kept quietly as a
+ * draft (about a second after each change), so a save that can't go through
+ * (a required field empty, no connection) is back, pre-filled, next time.
  */
-function useFormDraft(values: FieldValues, initial: FieldValues, enabled: boolean) {
-  const { state } = useController();
+function useFormAutoSave(opts: {
+  fields: AgentForm['fields'];
+  opened: FieldValues;
+  initial: FieldValues;
+  values: FieldValues;
+  enabled: boolean;
+}) {
+  const { controller, state } = useController();
   const ws = state.workspace;
-  const lastSent = useRef(JSON.stringify(initial));
-  const latest = useRef({ values, leadId: ws.lead?.id ?? null, callId: ws.callId, enabled });
+  const lastSent = useRef(JSON.stringify(opts.initial));
+  const latest = useRef({ ...opts, leadId: ws.lead?.id ?? null, callId: ws.callId });
   // The latest screen state for sends from timers / unmount / page close.
   useLayoutEffect(() => {
-    latest.current = { values, leadId: ws.lead?.id ?? null, callId: ws.callId, enabled };
+    latest.current = { ...opts, leadId: ws.lead?.id ?? null, callId: ws.callId };
   });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inflight = useRef<Promise<unknown>>(Promise.resolve());
   const done = useRef(false);
-  const [keptAt, setKeptAt] = useState<Date | null>(null);
 
-  function send(keepalive = false) {
+  function stopTimer() {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
-    const { values: v, leadId, callId, enabled: on } = latest.current;
-    const json = JSON.stringify(v);
-    if (done.current || !on || json === lastSent.current) return;
+  }
+  function keepDraft(keepalive = false) {
+    stopTimer();
+    const { values, leadId, callId, enabled } = latest.current;
+    const json = JSON.stringify(values);
+    if (done.current || !enabled || json === lastSent.current) return;
     lastSent.current = json;
-    const body = { leadId, callId, data: v };
+    const body = { leadId, callId, data: values };
     inflight.current = (
       keepalive ? api('/agent/form-draft', { method: 'PUT', body, keepalive: true }) : put('/agent/form-draft', body)
-    )
-      .then(() => setKeptAt(new Date()))
-      .catch(() => {
-        lastSent.current = ''; // not kept: try again with the next change
+    ).catch(() => {
+      lastSent.current = ''; // not kept: try again with the next change
+    });
+  }
+  /** Closing: save what changed to the lead; if it can't be saved, keep it as a draft. */
+  async function saveOnClose(pageClosing: boolean) {
+    stopTimer();
+    if (done.current) return;
+    const { fields, opened, values, leadId, callId, enabled } = latest.current;
+    const changed = changedKeys(fields, opened, values);
+    if (!enabled || changed.length === 0) return;
+    done.current = true;
+    if (!pageClosing) await inflight.current;
+    try {
+      await api('/agent/form-responses', {
+        method: 'POST',
+        body: { leadId, callId, data: values, changed },
+        keepalive: true,
       });
+      if (!pageClosing) controller.formSavedAutomatically();
+    } catch (err) {
+      done.current = false;
+      lastSent.current = '';
+      keepDraft(true);
+      if (!pageClosing) controller.formSavedAutomatically((err as Error).message);
+    }
   }
 
-  // About a second after the agent stops typing.
+  // About a second after the agent stops typing: the quiet draft.
   useEffect(() => {
-    if (JSON.stringify(values) === lastSent.current) return;
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => send(), 800);
-  }, [values]);
+    if (JSON.stringify(opts.values) === lastSent.current) return;
+    stopTimer();
+    timer.current = setTimeout(() => keepDraft(), 800);
+  }, [opts.values]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Closing the form (X, Clear, another lead) or the page: keep what's typed now.
+  // The form closes (X, Clear, another lead) or the page goes away: save.
   useEffect(() => {
-    const onHide = () => send(true);
+    const onHide = () => void saveOnClose(true);
     window.addEventListener('pagehide', onHide);
     return () => {
       window.removeEventListener('pagehide', onHide);
-      send(true);
+      void saveOnClose(false);
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
-    keptAt,
     /** Before Save Form: no draft write may land after the save. */
     async beforeSave() {
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = null;
+      stopTimer();
       await inflight.current;
     },
     saved() {
       done.current = true;
-    },
-    /** Discard: the draft is dropped; the form goes back to the lead's details. */
-    async discard(to: FieldValues) {
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = null;
-      await inflight.current;
-      lastSent.current = JSON.stringify(to);
-      const { leadId, callId } = latest.current;
-      await del(`/agent/form-draft?${draftQuery(leadId, callId)}`).catch(() => {});
-      setKeptAt(null);
     },
   };
 }
@@ -368,11 +386,10 @@ function AgentFormCard({
   const { controller, state } = useController();
   const ws = state.workspace;
   const [opened] = useState<FieldValues>(() => fieldValues(form.fields, current ?? ws.lead?.custom_data ?? {}));
-  // A draft left unsaved earlier is restored over the lead's details.
+  // What the agent typed earlier and couldn't be saved comes back, pre-filled.
   const [initial] = useState<FieldValues>(() => (draft ? { ...opened, ...draft.data } : opened));
   const [values, setValues] = useState<FieldValues>(initial);
-  const [restoredAt, setRestoredAt] = useState<string | null>(draft ? draft.updatedAt : null);
-  const kept = useFormDraft(values, initial, !ws.lead?.deleted_at);
+  const kept = useFormAutoSave({ fields: form.fields, opened, initial, values, enabled: !ws.lead?.deleted_at });
   // Only what this agent changed is sent: someone else's change made meanwhile stays.
   const save = useMutation({
     mutationFn: async () => {
@@ -407,31 +424,12 @@ function AgentFormCard({
         </p>
         {ws.lead && (
           <p className="text-xs text-muted-foreground">
-            The lead's current details - change what's new and save. Every change is kept in the history.
+            The lead's current details - change what's new. Saved when you close it (or Save Form); every change is kept
+            in the history.
           </p>
         )}
       </CardHeader>
       <CardContent>
-        {restoredAt && (
-          <div
-            role="note"
-            className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md bg-status-break/10 px-3 py-2 text-sm"
-          >
-            <span>Restored what you typed at {formatTime(restoredAt)} - not saved yet. Save Form to keep it.</span>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={async () => {
-                await kept.discard(opened);
-                setValues(opened);
-                setRestoredAt(null);
-              }}
-            >
-              Discard
-            </Button>
-          </div>
-        )}
         <form onSubmit={onSubmit} className="grid gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
             {form.fields.map((f) => (
@@ -455,11 +453,6 @@ function AgentFormCard({
             <Button type="button" variant="outline" onClick={() => controller.closeWorkspace()}>
               Clear
             </Button>
-            {kept.keptAt && (
-              <span className="self-center text-xs text-muted-foreground" role="status">
-                Draft kept {formatTime(kept.keptAt)}
-              </span>
-            )}
           </div>
         </form>
       </CardContent>

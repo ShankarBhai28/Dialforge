@@ -492,6 +492,16 @@ export class AgentController {
     this.say('Form saved.');
   }
 
+  /** The form was closed with changes and saved by itself (error: it couldn't be - kept for next time). */
+  formSavedAutomatically(error?: string) {
+    if (error) {
+      this.say(`Form not saved: ${error} - what you typed is kept for when you open this customer again.`, true);
+      return;
+    }
+    this.refresh('history', 'leads');
+    this.say('Form saved automatically.');
+  }
+
   // --- Status + queue ---
   async setStatus(status: 'available' | 'break', reason?: string) {
     this.clearWrapup();
