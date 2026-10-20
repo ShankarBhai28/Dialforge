@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { get, post } from '@/lib/api';
+import { get, post, put } from '@/lib/api';
 import type { Paged } from '@/components/common';
 
 // One row of GET /admin/callbacks (pending first, then by time).
@@ -9,6 +9,8 @@ export type Callback = {
   status: 'pending' | 'done' | 'cancelled' | string;
   note: string | null;
   campaign_id: number | null;
+  /** Who takes it (null = anyone in the campaign). */
+  user_id?: number | null;
   name: string | null;
   phone: string;
   campaign_name: string | null;
@@ -53,6 +55,26 @@ export function useCallbacks(f: CallbackFilters, page: number) {
     queryFn: () => get<Paged<Callback>>(callbacksPath(f, page)),
     // Keep the current page on screen while the next one loads.
     placeholderData: keepPreviousData,
+  });
+}
+
+/** Change a pending callback: time, note, who takes it (userId null = anyone in the campaign). */
+export function useEditCallback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: number; callbackAt: string; note: string; userId: number | null }) =>
+      put(`/admin/callbacks/${v.id}`, { callbackAt: v.callbackAt, note: v.note, userId: v.userId }),
+    meta: { errorInline: true },
+    onSuccess: () => qc.invalidateQueries({ queryKey: callbackKeys.all }),
+  });
+}
+
+/** Agents a callback can be given to: active agents of the teams working its campaign. */
+export function useCallbackAgents(id: number | null) {
+  return useQuery({
+    queryKey: ['admin', 'callbacks', 'agents', id],
+    queryFn: () => get<{ id: number; username: string }[]>(`/admin/callbacks/${id}/agents`),
+    enabled: id !== null,
   });
 }
 

@@ -43,7 +43,7 @@ const SCREENS = [
   { key: 'campaigns', label: 'Campaigns', actions: CRUD },
   { key: 'leads', label: 'Leads & Lists', actions: [...CRUD, 'import', 'recycle', 'export'] },
   { key: 'forms', label: 'Forms', actions: CRUD },
-  { key: 'callbacks', label: 'Callbacks', actions: ['view', 'cancel'] },
+  { key: 'callbacks', label: 'Callbacks', actions: ['view', 'edit', 'cancel'] },
   { key: 'dnc', label: 'DNC List', actions: ['view', 'create', 'delete'] },
   { key: 'queues', label: 'Queues', actions: CRUD },
   { key: 'numbers', label: 'DID Numbers', actions: CRUD },

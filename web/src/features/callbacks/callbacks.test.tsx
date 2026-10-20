@@ -129,6 +129,54 @@ describe('Callbacks', () => {
     await waitFor(() => expect(calls.filter((c) => c.key === FIRST)).toHaveLength(2));
   });
 
+  it('edits a pending callback: new time, note and agent of the campaign; done ones have no Edit', async () => {
+    const calls = fakeApi({
+      ...CAMPAIGNS,
+      [FIRST]: paged([{ ...ROWS[1], user_id: 5 }, ROWS[2]]),
+      'GET /admin/callbacks/2/agents': {
+        body: [
+          { id: 5, username: 'agent05' },
+          { id: 6, username: 'agent06' },
+        ],
+      },
+      'PUT /admin/callbacks/2': { body: { status: 'ok' } },
+    });
+    renderPage(<CallbacksPage />);
+    expect(await screen.findByText('Meena')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit callback for 9000000003' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Edit callback for 9000000002' }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit callback' });
+    expect(within(dialog).getByLabelText('Note')).toHaveValue('after lunch');
+    await within(within(dialog).getByLabelText('Who calls back')).findByRole('option', { name: 'agent06' });
+    expect(within(dialog).getByLabelText('Who calls back')).toHaveValue('5');
+    await userEvent.selectOptions(within(dialog).getByLabelText('Who calls back'), 'agent06');
+    await userEvent.clear(within(dialog).getByLabelText('Call back at'));
+    await userEvent.type(within(dialog).getByLabelText('Call back at'), '2099-02-03T15:30');
+    await userEvent.clear(within(dialog).getByLabelText('Note'));
+    await userEvent.type(within(dialog).getByLabelText('Note'), 'evening');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(calls.find((c) => c.key === 'PUT /admin/callbacks/2')?.body).toEqual({
+      callbackAt: new Date('2099-02-03T15:30').toISOString(),
+      note: 'evening',
+      userId: 6,
+    });
+  });
+
+  it("shows the server's reason when an edit is refused and keeps the dialog open", async () => {
+    fakeApi({
+      ...CAMPAIGNS,
+      [FIRST]: paged([ROWS[1]]),
+      'GET /admin/callbacks/2/agents': { body: [] },
+      'PUT /admin/callbacks/2': { status: 400, body: { error: 'callback time is in the past' } },
+    });
+    renderPage(<CallbacksPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit callback for 9000000002' }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit callback' });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('callback time is in the past');
+  });
+
   it("shows the server's reason when cancel fails", async () => {
     fakeApi({
       ...CAMPAIGNS,

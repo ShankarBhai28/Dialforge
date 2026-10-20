@@ -5,6 +5,7 @@ const pool = require('../../db');
 const { normalizePhone } = require('../../dialer-common');
 const { requirePermission, requireCaller } = require('../middleware/auth');
 const { findCurrentCampaign } = require('../services/agents');
+const { checkCallbackTime } = require('../services/callbacks');
 const { agentCallCondition, findAgentCall } = require('../services/calls');
 const { getDispositions } = require('../services/dispositions');
 const { addDnc, isDnc } = require('../services/dnc');
@@ -301,12 +302,9 @@ async function saveDisposition(req, res, lead) {
   let nextCallAt = null;
   let when = null;
   if (d.is_callback) {
-    when = new Date(callbackAt);
-    if (!callbackAt || Number.isNaN(when.getTime()))
-      return res.status(400).json({ error: 'pick a callback date and time' });
-    if (when < new Date(Date.now() - 60 * 1000)) return res.status(400).json({ error: 'callback time is in the past' });
-    if (when > new Date(Date.now() + 90 * 24 * 3600 * 1000))
-      return res.status(400).json({ error: 'callback must be within 90 days' });
+    const t = checkCallbackTime(callbackAt);
+    if (t.error) return res.status(400).json({ error: t.error });
+    when = t.when;
     nextCallAt = when;
   } else if (d.retry_after_min) {
     nextCallAt = new Date(Date.now() + d.retry_after_min * 60 * 1000);

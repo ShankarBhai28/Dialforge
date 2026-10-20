@@ -2,14 +2,14 @@
 // agent's callbacks.
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Phone, Plus } from 'lucide-react';
+import { Pencil, Phone, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FormError, StatusPill } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
-import { post } from '@/lib/api';
+import { post, put } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { useNow } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
@@ -20,8 +20,11 @@ import {
   useAgentCallbacks,
   useAgentDispositions,
   useAgentLeads,
+  type AgentCallback,
   type Lead,
 } from './api';
+import { useMe } from '@/features/auth/auth';
+import { EditCallbackDialog } from '@/features/callbacks/EditCallbackDialog';
 import { useController } from './AgentProvider';
 
 export function LeadStatusChip({ status }: { status: string }) {
@@ -163,44 +166,82 @@ function CallbacksList() {
   const callbacks = useAgentCallbacks();
   const { controller } = useController();
   const now = useNow(30_000);
+  const me = useMe().data?.id ?? null;
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState<AgentCallback | null>(null);
+  const editCb = useMutation({
+    mutationFn: (v: { id: number; callbackAt: string; note: string; mine: boolean }) =>
+      put(`/agent/callbacks/${v.id}`, { callbackAt: v.callbackAt, note: v.note, mine: v.mine }),
+    meta: { errorInline: true },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: agentKeys.callbacks });
+      setEditing(null);
+      controller.say('Callback updated.');
+    },
+  });
   if (callbacks.isPending) return <Skeleton className="h-20" />;
   if (callbacks.error) return <ErrorState message={callbacks.error.message} onRetry={() => callbacks.refetch()} />;
   if (!callbacks.data.length)
     return <p className="py-8 text-center text-sm text-muted-foreground">No callbacks scheduled.</p>;
   return (
-    <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
-      {callbacks.data.map((cb) => {
-        const due = new Date(cb.callback_at).getTime() <= now;
-        return (
-          <li key={cb.id} className="flex items-center gap-2 rounded-md border p-2.5">
-            <div className="min-w-0 flex-1 text-sm">
-              <div className={cn('text-xs', due ? 'font-bold text-destructive' : 'text-muted-foreground')}>
-                {formatDateTime(cb.callback_at)}
-                {due && ' (due)'}
-                {!cb.user_id && ' · anyone'}
+    <>
+      <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
+        {callbacks.data.map((cb) => {
+          const due = new Date(cb.callback_at).getTime() <= now;
+          return (
+            <li key={cb.id} className="flex items-center gap-2 rounded-md border p-2.5">
+              <div className="min-w-0 flex-1 text-sm">
+                <div className={cn('text-xs', due ? 'font-bold text-destructive' : 'text-muted-foreground')}>
+                  {formatDateTime(cb.callback_at)}
+                  {due && ' (due)'}
+                  {!cb.user_id && ' · anyone'}
+                </div>
+                <div className="truncate font-semibold">
+                  {cb.name} <span className="font-normal tabular-nums">{cb.phone}</span>
+                </div>
+                {cb.note && <div className="truncate text-xs text-muted-foreground">{cb.note}</div>}
               </div>
-              <div className="truncate font-semibold">
-                {cb.name} <span className="font-normal tabular-nums">{cb.phone}</span>
-              </div>
-              {cb.note && <div className="truncate text-xs text-muted-foreground">{cb.note}</div>}
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              aria-label={`Call back ${cb.name || cb.phone}`}
-              onClick={() =>
-                void controller.callLead(
-                  { id: cb.lead_id, name: cb.name, phone: cb.phone, status: 'callback' },
-                  cb.phone,
-                )
-              }
-            >
-              <Phone /> Call
-            </Button>
-          </li>
-        );
-      })}
-    </ul>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-8"
+                aria-label={`Edit callback for ${cb.name || cb.phone}`}
+                title="Edit callback"
+                onClick={() => {
+                  editCb.reset();
+                  setEditing(cb);
+                }}
+              >
+                <Pencil />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                aria-label={`Call back ${cb.name || cb.phone}`}
+                onClick={() =>
+                  void controller.callLead(
+                    { id: cb.lead_id, name: cb.name, phone: cb.phone, status: 'callback' },
+                    cb.phone,
+                  )
+                }
+              >
+                <Phone /> Call
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+      <EditCallbackDialog
+        callback={editing}
+        who={{ kind: 'mine', mine: editing ? editing.user_id === me : true }}
+        onOpenChange={(v) => !v && setEditing(null)}
+        pending={editCb.isPending}
+        error={editCb.error?.message}
+        onSave={(v) =>
+          editing && editCb.mutate({ id: editing.id, callbackAt: v.callbackAt, note: v.note, mine: v.mine ?? true })
+        }
+      />
+    </>
   );
 }
 

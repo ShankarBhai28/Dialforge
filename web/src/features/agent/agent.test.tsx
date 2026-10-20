@@ -357,6 +357,47 @@ describe('agent screen', () => {
     expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument();
   });
 
+  it('callbacks tab: edit a callback - new time, note, keep it for myself', async () => {
+    const { calls } = await connect(
+      backend({
+        'GET /agent/callbacks': {
+          body: [
+            {
+              id: 5,
+              lead_id: 9,
+              callback_at: '2099-01-01T10:00:00Z',
+              note: 'call after 6',
+              user_id: null,
+              name: 'Meena',
+              phone: '9876543210',
+              campaign_name: 'Sales',
+            },
+          ],
+        },
+        'PUT /agent/callbacks/5': { body: { status: 'ok' } },
+      }),
+    );
+    await userEvent.click(await screen.findByRole('tab', { name: /Callbacks/ }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit callback for Meena' }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit callback' });
+    // An "anyone" callback: Only me starts off.
+    const onlyMe = within(dialog).getByRole('checkbox', { name: /Only me/ });
+    expect(onlyMe).not.toBeChecked();
+    await userEvent.click(onlyMe);
+    await userEvent.clear(within(dialog).getByLabelText('Call back at'));
+    await userEvent.type(within(dialog).getByLabelText('Call back at'), '2099-01-02T18:15');
+    await userEvent.clear(within(dialog).getByLabelText('Note'));
+    await userEvent.type(within(dialog).getByLabelText('Note'), 'wants evening');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit callback' })).not.toBeInTheDocument());
+    expect(calls.find((c) => c.key === 'PUT /agent/callbacks/5')?.body).toEqual({
+      callbackAt: new Date('2099-01-02T18:15').toISOString(),
+      note: 'wants evening',
+      mine: true,
+    });
+    expect(await screen.findByText('Callback updated.')).toBeInTheDocument();
+  });
+
   it('clicking a lead opens it; Call starts click-to-call', async () => {
     const { calls } = await connect(backend({ 'POST /calls/click2call': { status: 202, body: { callId: 42 } } }));
     await userEvent.click(await screen.findByText('Ravi'));

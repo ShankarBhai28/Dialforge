@@ -2,7 +2,7 @@
 // Filters and paging run on the server (GET /admin/callbacks).
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { CalendarClock, RefreshCw, X } from 'lucide-react';
+import { CalendarClock, Pencil, RefreshCw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -15,7 +15,16 @@ import { formatDateTime } from '@/lib/format';
 import { useDebouncedValue } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import { useCampaigns } from '@/features/campaigns/api';
-import { useCallbacks, useCancelCallback, type Callback, type CallbackFilters, type StatusFilter } from './api';
+import {
+  useCallbackAgents,
+  useCallbacks,
+  useCancelCallback,
+  useEditCallback,
+  type Callback,
+  type CallbackFilters,
+  type StatusFilter,
+} from './api';
+import { EditCallbackDialog } from './EditCallbackDialog';
 import { useCan } from '@/features/auth/access';
 
 const isOverdue = (c: Callback, now: number) => c.status === 'pending' && new Date(c.callback_at).getTime() < now;
@@ -34,6 +43,9 @@ export function CallbacksPage() {
   const [campaign, setCampaign] = useState('');
   const [search, setSearch] = useState('');
   const [cancelling, setCancelling] = useState<Callback | null>(null);
+  const [editing, setEditing] = useState<Callback | null>(null);
+  const editCb = useEditCallback();
+  const editAgents = useCallbackAgents(editing ? editing.id : null);
 
   // Only the search box is debounced; the selects apply at once.
   const q = useDebouncedValue(search.trim(), 300);
@@ -162,6 +174,19 @@ export function CallbacksPage() {
                       </TableCell>
                       <TableCell>{c.created_by_name}</TableCell>
                       <TableCell className="text-right whitespace-nowrap">
+                        {can('edit') && c.status === 'pending' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              editCb.reset();
+                              setEditing(c);
+                            }}
+                            aria-label={`Edit callback for ${c.phone}`}
+                          >
+                            <Pencil /> Edit
+                          </Button>
+                        )}
                         {can('cancel') && c.status === 'pending' && (
                           <Button
                             variant="ghost"
@@ -183,6 +208,26 @@ export function CallbacksPage() {
           </>
         )}
       </CardContent>
+
+      <EditCallbackDialog
+        callback={editing}
+        who={{ kind: 'agent', userId: editing?.user_id ?? null, agents: editAgents.data }}
+        onOpenChange={(v) => !v && setEditing(null)}
+        pending={editCb.isPending}
+        error={editCb.error?.message}
+        onSave={(v) =>
+          editing &&
+          editCb.mutate(
+            { id: editing.id, callbackAt: v.callbackAt, note: v.note, userId: v.userId ?? null },
+            {
+              onSuccess: () => {
+                toast.success('Callback updated');
+                setEditing(null);
+              },
+            },
+          )
+        }
+      />
 
       <ConfirmDialog
         open={!!cancelling}
