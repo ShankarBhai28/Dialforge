@@ -1,12 +1,12 @@
 // Middle column: status line, the preview lead (preview campaigns), and the
 // open customer - details + the campaign's form.
-import { useEffect, useState, type FormEvent } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { ClipboardList, Phone, SkipForward, UserRound, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FormError } from '@/components/common';
-import { post } from '@/lib/api';
+import { api, del, get, post, put } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
   dispositionLabel,
@@ -23,7 +23,7 @@ import { LeadStatusChip } from './LeadsPanel';
 import { CustomerHistory } from '@/features/history/CustomerHistory';
 import { useLeadHistory } from '@/features/history/api';
 import { Skeleton } from '@/components/ui/skeleton';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatTime } from '@/lib/format';
 
 const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : String(v));
 
@@ -250,7 +250,14 @@ function LeadForm({ form }: { form: AgentForm }) {
   const leadId = state.workspace.lead?.id ?? null;
   const version = state.workspace.formVersion;
   const history = useLeadHistory('agent', leadId);
-  const settled = !leadId || (!history.isPending && !history.isFetching);
+  // What this agent typed here before and didn't save (closed by mistake, reload, ...).
+  const draft = useQuery({
+    queryKey: ['agent', 'form-draft', leadId, version],
+    queryFn: () => get<FormDraft>(`/agent/form-draft?${draftQuery(leadId, state.workspace.callId)}`).catch(() => null),
+    staleTime: 0,
+    gcTime: 0,
+  });
+  const settled = (!leadId || (!history.isPending && !history.isFetching)) && !draft.isPending;
   const [readyFor, setReadyFor] = useState<number | null>(null);
   // Ready for this opening once fresh data is in (set during render: no extra effect).
   if (settled && readyFor !== version) setReadyFor(version);
@@ -259,7 +266,89 @@ function LeadForm({ form }: { form: AgentForm }) {
   const lead = history.data?.lead;
   const base = lead?.customData ?? state.workspace.lead?.custom_data ?? {};
   const current = leadId && lead ? { ...base, ...(lead.name ? { name: lead.name } : {}) } : null;
-  return <AgentFormCard key={version} form={form} current={current} />;
+  return <AgentFormCard key={version} form={form} current={current} draft={draft.data ?? null} />;
+}
+
+type FormDraft = { data: FieldValues; updatedAt: string } | null;
+const draftQuery = (leadId: number | null, callId: number | null) =>
+  new URLSearchParams({ ...(leadId ? { leadId: String(leadId) } : {}), ...(callId ? { callId: String(callId) } : {}) });
+
+/**
+ * The form as typed is kept on the server automatically (about a second after
+ * each change, and at once when the form closes or the page unloads), so a
+ * closed lead, Clear, another lead or a reload loses nothing. Save Form
+ * applies it to the lead; Discard starts again from the lead's details.
+ */
+function useFormDraft(values: FieldValues, initial: FieldValues, enabled: boolean) {
+  const { state } = useController();
+  const ws = state.workspace;
+  const lastSent = useRef(JSON.stringify(initial));
+  const latest = useRef({ values, leadId: ws.lead?.id ?? null, callId: ws.callId, enabled });
+  // The latest screen state for sends from timers / unmount / page close.
+  useLayoutEffect(() => {
+    latest.current = { values, leadId: ws.lead?.id ?? null, callId: ws.callId, enabled };
+  });
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inflight = useRef<Promise<unknown>>(Promise.resolve());
+  const done = useRef(false);
+  const [keptAt, setKeptAt] = useState<Date | null>(null);
+
+  function send(keepalive = false) {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    const { values: v, leadId, callId, enabled: on } = latest.current;
+    const json = JSON.stringify(v);
+    if (done.current || !on || json === lastSent.current) return;
+    lastSent.current = json;
+    const body = { leadId, callId, data: v };
+    inflight.current = (
+      keepalive ? api('/agent/form-draft', { method: 'PUT', body, keepalive: true }) : put('/agent/form-draft', body)
+    )
+      .then(() => setKeptAt(new Date()))
+      .catch(() => {
+        lastSent.current = ''; // not kept: try again with the next change
+      });
+  }
+
+  // About a second after the agent stops typing.
+  useEffect(() => {
+    if (JSON.stringify(values) === lastSent.current) return;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => send(), 800);
+  }, [values]);
+
+  // Closing the form (X, Clear, another lead) or the page: keep what's typed now.
+  useEffect(() => {
+    const onHide = () => send(true);
+    window.addEventListener('pagehide', onHide);
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      send(true);
+    };
+  }, []);
+
+  return {
+    keptAt,
+    /** Before Save Form: no draft write may land after the save. */
+    async beforeSave() {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
+      await inflight.current;
+    },
+    saved() {
+      done.current = true;
+    },
+    /** Discard: the draft is dropped; the form goes back to the lead's details. */
+    async discard(to: FieldValues) {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
+      await inflight.current;
+      lastSent.current = JSON.stringify(to);
+      const { leadId, callId } = latest.current;
+      await del(`/agent/form-draft?${draftQuery(leadId, callId)}`).catch(() => {});
+      setKeptAt(null);
+    },
+  };
 }
 
 /** Only the fields that differ from what the form opened with. */
@@ -267,22 +356,39 @@ function changedKeys(fields: AgentForm['fields'], from: FieldValues, to: FieldVa
   return fields.map((f) => f.field_key).filter((k) => JSON.stringify(from[k] ?? '') !== JSON.stringify(to[k] ?? ''));
 }
 
-function AgentFormCard({ form, current }: { form: AgentForm; current: Record<string, unknown> | null }) {
+function AgentFormCard({
+  form,
+  current,
+  draft,
+}: {
+  form: AgentForm;
+  current: Record<string, unknown> | null;
+  draft: FormDraft;
+}) {
   const { controller, state } = useController();
   const ws = state.workspace;
   const [opened] = useState<FieldValues>(() => fieldValues(form.fields, current ?? ws.lead?.custom_data ?? {}));
-  const [values, setValues] = useState<FieldValues>(opened);
+  // A draft left unsaved earlier is restored over the lead's details.
+  const [initial] = useState<FieldValues>(() => (draft ? { ...opened, ...draft.data } : opened));
+  const [values, setValues] = useState<FieldValues>(initial);
+  const [restoredAt, setRestoredAt] = useState<string | null>(draft ? draft.updatedAt : null);
+  const kept = useFormDraft(values, initial, !ws.lead?.deleted_at);
   // Only what this agent changed is sent: someone else's change made meanwhile stays.
   const save = useMutation({
-    mutationFn: () =>
-      post('/agent/form-responses', {
+    mutationFn: async () => {
+      await kept.beforeSave();
+      return post('/agent/form-responses', {
         leadId: ws.lead?.id ?? null,
         callId: ws.callId,
         data: values,
         changed: changedKeys(form.fields, opened, values),
-      }),
+      });
+    },
     meta: { errorInline: true },
-    onSuccess: () => controller.formSaved(),
+    onSuccess: () => {
+      kept.saved();
+      controller.formSaved();
+    },
   });
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -306,6 +412,26 @@ function AgentFormCard({ form, current }: { form: AgentForm; current: Record<str
         )}
       </CardHeader>
       <CardContent>
+        {restoredAt && (
+          <div
+            role="note"
+            className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md bg-status-break/10 px-3 py-2 text-sm"
+          >
+            <span>Restored what you typed at {formatTime(restoredAt)} - not saved yet. Save Form to keep it.</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={async () => {
+                await kept.discard(opened);
+                setValues(opened);
+                setRestoredAt(null);
+              }}
+            >
+              Discard
+            </Button>
+          </div>
+        )}
         <form onSubmit={onSubmit} className="grid gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
             {form.fields.map((f) => (
@@ -329,6 +455,11 @@ function AgentFormCard({ form, current }: { form: AgentForm; current: Record<str
             <Button type="button" variant="outline" onClick={() => controller.closeWorkspace()}>
               Clear
             </Button>
+            {kept.keptAt && (
+              <span className="self-center text-xs text-muted-foreground" role="status">
+                Draft kept {formatTime(kept.keptAt)}
+              </span>
+            )}
           </div>
         </form>
       </CardContent>

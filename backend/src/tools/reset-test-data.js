@@ -37,6 +37,7 @@ const CLEAR = [
   'agent_status_log',
   'live_agents',
   'agent_extra_queues',
+  'form_drafts',
   'audit_log',
   'sessions',
 ];

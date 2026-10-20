@@ -131,15 +131,98 @@ router.get('/agent/form', requireCaller, async (req, res) => {
   res.json(form || null);
 });
 
-router.post('/agent/form-responses', requireCaller, async (req, res) => {
-  if (req.session.user.role !== 'agent') return res.status(403).json({ error: 'agents only' });
+// --- Agent: the form as typed, kept automatically (form_drafts) ---
+// One draft per agent per lead / call / blank form, restored when that form
+// opens again until it is saved or discarded.
+const draftKey = (leadId, callId) =>
+  Number(leadId) > 0 ? `lead:${Number(leadId)}` : Number(callId) > 0 ? `call:${Number(callId)}` : 'blank';
+const MAX_DRAFT_BYTES = 64 * 1024;
+
+async function agentForm(req, res) {
+  if (req.session.user.role !== 'agent') {
+    res.status(403).json({ error: 'agents only' });
+    return null;
+  }
   const campaign = await findCurrentCampaign(req.session.user.id);
-  if (!campaign || !campaign.form_id) return res.status(400).json({ error: 'your current campaign has no form' });
+  if (!campaign || !campaign.form_id) {
+    res.status(400).json({ error: 'your current campaign has no form' });
+    return null;
+  }
   const [form] = await loadFormsWithFields("WHERE id = ? AND status = 'active'", [campaign.form_id]);
-  if (!form) return res.status(400).json({ error: 'your current campaign has no active form' });
+  if (!form) {
+    res.status(400).json({ error: 'your current campaign has no active form' });
+    return null;
+  }
+  return { campaign, form };
+}
+
+router.get('/agent/form-draft', requireCaller, async (req, res) => {
+  const ctx = await agentForm(req, res);
+  if (!ctx) return;
+  const [[d]] = await pool.query(
+    `SELECT data, updated_at FROM form_drafts
+     WHERE user_id = ? AND draft_key = ? AND form_id = ? AND saved_at IS NULL AND discarded_at IS NULL`,
+    [req.session.user.id, draftKey(req.query.leadId, req.query.callId), ctx.form.id],
+  );
+  res.json(d ? { data: typeof d.data === 'string' ? JSON.parse(d.data) : d.data, updatedAt: d.updated_at } : null);
+});
+
+router.put('/agent/form-draft', requireCaller, async (req, res) => {
+  const ctx = await agentForm(req, res);
+  if (!ctx) return;
+  const { leadId, callId, data } = req.body;
+  if (!data || typeof data !== 'object' || Array.isArray(data))
+    return res.status(400).json({ error: 'data must be an object' });
+  // Only this form's fields.
+  const keys = ctx.form.fields.map((f) => f.field_key);
+  const json = JSON.stringify(pick(data, keys));
+  if (Buffer.byteLength(json) > MAX_DRAFT_BYTES)
+    return res.status(400).json({ error: 'the form is too large to keep' });
+  await pool.query(
+    `INSERT INTO form_drafts (user_id, draft_key, form_id, campaign_id, lead_id, call_id, data)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE form_id = VALUES(form_id), campaign_id = VALUES(campaign_id), lead_id = VALUES(lead_id),
+       call_id = VALUES(call_id), data = VALUES(data), updated_at = NOW(), saved_at = NULL, discarded_at = NULL`,
+    [
+      req.session.user.id,
+      draftKey(leadId, callId),
+      ctx.form.id,
+      ctx.campaign.id,
+      Number(leadId) > 0 ? Number(leadId) : null,
+      Number(callId) > 0 ? Number(callId) : null,
+      json,
+    ],
+  );
+  res.json({ status: 'ok' });
+});
+
+// Discard: the agent chose to start again from the lead's current details (kept for support).
+router.delete('/agent/form-draft', requireCaller, async (req, res) => {
+  await pool.query(
+    'UPDATE form_drafts SET discarded_at = NOW() WHERE user_id = ? AND draft_key = ? AND saved_at IS NULL AND discarded_at IS NULL',
+    [req.session.user.id, draftKey(req.query.leadId, req.query.callId)],
+  );
+  res.json({ status: 'ok' });
+});
+
+/** The form was saved: its draft is done (kept, marked saved). */
+async function draftSaved(userId, leadId, callId) {
+  await pool
+    .query('UPDATE form_drafts SET saved_at = NOW() WHERE user_id = ? AND draft_key = ? AND saved_at IS NULL', [
+      userId,
+      draftKey(leadId, callId),
+    ])
+    .catch((err) => console.error('[form draft: marking saved failed]', err.message));
+}
+
+router.post('/agent/form-responses', requireCaller, async (req, res) => {
+  const ctx = await agentForm(req, res);
+  if (!ctx) return;
+  const { campaign, form } = ctx;
 
   let { leadId } = req.body;
   const { callId } = req.body;
+  const screenLeadId = leadId; // the draft is kept under what the screen had
   // The lead must belong to the campaign being worked, and the call must
   // be one this agent placed/took - otherwise answers could be attached
   // to someone else's record.
@@ -180,6 +263,7 @@ router.post('/agent/form-responses', requireCaller, async (req, res) => {
       'INSERT INTO form_responses (tenant_id, form_id, campaign_id, lead_id, call_id, user_id, data) VALUES (1, ?, ?, NULL, ?, ?, ?)',
       [form.id, campaign.id, callId || null, req.session.user.id, JSON.stringify(data)],
     );
+    await draftSaved(req.session.user.id, screenLeadId, callId);
     return res.status(201).json({ id: result.insertId, changes: [] });
   }
 
@@ -219,6 +303,7 @@ router.post('/agent/form-responses', requireCaller, async (req, res) => {
       ],
     );
     await conn.commit();
+    await draftSaved(req.session.user.id, screenLeadId, callId);
     res.status(201).json({ id: result.insertId, changes });
   } catch (err) {
     await conn.rollback();

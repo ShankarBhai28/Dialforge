@@ -69,7 +69,7 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
       {/* "Saved" notices go after 2 s; errors stay longer (ERROR_TOAST) so they can be read. */}
-      <Toaster richColors position="top-right" duration={2000} />
+      <Toaster richColors position="bottom-right" duration={2000} />
     </QueryClientProvider>
   </StrictMode>,
 );

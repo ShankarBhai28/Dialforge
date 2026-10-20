@@ -16,8 +16,12 @@ export class ApiError extends Error {
 
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
-export async function api<T>(path: string, options: { method?: Method; body?: unknown } = {}): Promise<T> {
-  const { method = 'GET', body } = options;
+/** keepalive: the request still goes out while the page closes (small bodies only). */
+export async function api<T>(
+  path: string,
+  options: { method?: Method; body?: unknown; keepalive?: boolean } = {},
+): Promise<T> {
+  const { method = 'GET', body, keepalive } = options;
   let res: Response;
   // FormData (file uploads) goes as-is: the browser sets the multipart header.
   const isForm = body instanceof FormData;
@@ -25,6 +29,7 @@ export async function api<T>(path: string, options: { method?: Method; body?: un
     res = await fetch(path, {
       method,
       credentials: 'same-origin',
+      keepalive,
       headers: body === undefined || isForm ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
     });
