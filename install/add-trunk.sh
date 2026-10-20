@@ -19,7 +19,7 @@
 #   --channels N         concurrent calls the provider allows (dialer cap)
 #
 # Calls from the trunk enter the [from-trunk] dialplan -> the app routes them
-# by DID (Campaigns -> DID numbers). Outgoing calls use endpoint "trunk".
+# by DID (DID Numbers: each number -> a queue). Outgoing calls use endpoint "trunk".
 # A backup of pjsip.conf and .env is kept; nothing else is touched.
 set -euo pipefail
 
@@ -137,7 +137,7 @@ cat <<EOF
 Trunk added (endpoint "trunk", calls in -> [from-trunk]).
  - Give the provider this server's IP to allow: $PUBLIC_IP
  - Open UDP 5060 to the provider's IP ($MATCH) in the security group / firewall.
- - Map each DID to a campaign: Campaigns -> DID numbers.
+ - Map each DID to a queue: DID Numbers (the campaigns that have the queue take its calls).
  - Test: an agent calls a mobile number; then call a DID from a mobile.
 Undo: sudo cp $B/pjsip.conf $PJSIP && sudo cp $B/.env $ENV_FILE && sudo asterisk -rx 'pjsip reload' && sudo systemctl restart dialforge-backend dialforge-dialer
 EOF

@@ -1,6 +1,6 @@
 # Installing VIZTEX for a new client
 
-The whole client procedure (what to collect, AWS, setup, go-live, many servers) is [CLIENT_PLAYBOOK.md](CLIENT_PLAYBOOK.md); this page is the installer.
+The whole client procedure (what to collect, AWS, setup, go-live, many servers) is [CLIENT_PLAYBOOK.md](CLIENT_PLAYBOOK.md); this page is the installer. First time? [INSTALL_STEP_BY_STEP.md](INSTALL_STEP_BY_STEP.md) walks through it with what each step does and how to check it.
 
 One server per client: its own database, Asterisk and app. The installer does
 everything `DEPLOY.md` describes by hand; DEPLOY.md stays as the explanation
@@ -89,7 +89,7 @@ What it sets up:
    # username/password trunks: add --username U --password 'P' --register
    ```
    Then give the provider the Elastic IP, open UDP 5060 to their IP, and map
-   DIDs to campaigns (Campaigns -> DID numbers).
+   DIDs to queues (DID Numbers; campaigns that have the queue take its calls).
 4. Alerts and off-server backups: `ALERT_WEBHOOK_URL`, `BACKUP_S3_BUCKET` in
    `~/dialforge-backend/.env` (see `backend/ops/README.md`), then
    `sudo systemctl restart dialforge-backend`.
