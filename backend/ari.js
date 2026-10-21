@@ -115,6 +115,19 @@ async function isEndpointOnline(techResource) {
   }
 }
 
+/**
+ * Is Asterisk answering ARI at all? Not the endpoint list: with no extensions
+ * yet (a fresh install) Asterisk answers that with 404 "No Endpoints found".
+ */
+async function ping() {
+  try {
+    const r = await ariRequest('GET', '/asterisk/ping');
+    return Boolean(r && r.ping === 'pong');
+  } catch (err) {
+    return false;
+  }
+}
+
 /** { name: 'online' | 'offline' } for every PJSIP endpoint, or null when ARI couldn't be asked. */
 async function endpointStates(tech = 'PJSIP') {
   try {
@@ -189,6 +202,7 @@ module.exports = {
   isEndpointOnline,
   endpointState,
   endpointStates,
+  ping,
   endpointChannelCount,
   setChannelVar,
   continueInDialplan,

@@ -145,9 +145,10 @@ async function collectHealth(deps = defaultDeps) {
     checks.push(fail('db', 'Database', err.message));
   }
 
-  const states = await d.ari.endpointStates();
   checks.push(
-    states ? ok('asterisk', 'Asterisk (ARI)', 'answering') : fail('asterisk', 'Asterisk (ARI)', 'not answering'),
+    (await d.ari.ping())
+      ? ok('asterisk', 'Asterisk (ARI)', 'answering')
+      : fail('asterisk', 'Asterisk (ARI)', 'not answering'),
   );
   checks.push(
     d.ami.isReady()

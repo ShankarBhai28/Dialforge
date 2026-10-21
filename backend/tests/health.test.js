@@ -15,7 +15,7 @@ const NOW = Date.parse('2026-10-13T10:00:00Z');
 function deps(over = {}) {
   return {
     pool: { query: async (sql) => (/dialer_status/.test(sql) ? [[{ age: 3 }]] : [[{ 1: 1 }]]) },
-    ari: { endpointStates: async () => ({ 1001: 'online' }), endpointState: async () => 'online' },
+    ari: { ping: async () => true, endpointState: async () => 'online' },
     ami: { isReady: () => true },
     systemctlActive: async () => 'active',
     systemctlInstalled: async () => true,
@@ -47,7 +47,7 @@ test('problems are named: Asterisk down, AMI gone, dialer silent, a stopped serv
   const h = byKey(
     await collectHealth(
       deps({
-        ari: { endpointStates: async () => null, endpointState: async () => null },
+        ari: { ping: async () => false, endpointState: async () => null },
         ami: { isReady: () => false },
         pool: { query: async (sql) => (/dialer_status/.test(sql) ? [[{ age: 400 }]] : [[{ 1: 1 }]]) },
         systemctlActive: async (u) => (u === 'asterisk' ? 'failed' : 'active'),
@@ -61,6 +61,15 @@ test('problems are named: Asterisk down, AMI gone, dialer silent, a stopped serv
   assert.match(h.dialer.detail, /no tick for 400s/);
   assert.strictEqual(h['svc:asterisk'].status, 'fail');
   assert.strictEqual(h.disk.status, 'fail');
+});
+
+test('fresh install, no extensions yet: Asterisk answering ping is ok (the endpoint list would 404)', async () => {
+  const h = byKey(
+    await collectHealth(
+      deps({ ari: { ping: async () => true, endpointStates: async () => null, endpointState: async () => null } }),
+    ),
+  );
+  assert.strictEqual(h.asterisk.status, 'ok');
 });
 
 test('a service not installed on this server is skipped; installed but stopped still fails', async () => {
