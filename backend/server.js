@@ -36,6 +36,7 @@ const sessions = require('./src/services/sessions');
 const { startStaleAgentCleanup } = require('./src/services/agentLogout');
 const { startAutoDispoSweeper } = require('./src/services/autoDispo');
 const { startHealthWatch } = require('./src/services/health');
+const { redirectFromPort, redirectHandler } = require('./src/portRedirect');
 const { startPresenceSync } = require('./src/services/presence');
 const dialerFeed = require('./src/realtime/dialerFeed');
 
@@ -64,3 +65,10 @@ startAutoDispoSweeper();
 startHealthWatch();
 startPresenceSync(); // live_agents table
 server.listen(PORT, () => console.log(`VIZTEX backend listening on port ${PORT} (HTTPS)`));
+
+// Old links (e.g. :3000 after moving to 443) are sent on to the main port.
+const oldPort = redirectFromPort();
+if (oldPort)
+  https
+    .createServer(tlsOptions, redirectHandler)
+    .listen(oldPort, () => console.log(`redirecting port ${oldPort} to port ${PORT}`));

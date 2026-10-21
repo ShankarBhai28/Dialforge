@@ -9,7 +9,7 @@
 //
 // Each check: { key, label, status: 'ok' | 'warn' | 'fail', detail }.
 // This can't report the backend itself being down - for that, point an
-// external uptime monitor at https://<host>:3000/health (see ops/README.md).
+// external uptime monitor at https://<host>/health (see ops/README.md).
 const fs = require('fs');
 const os = require('os');
 const tls = require('tls');

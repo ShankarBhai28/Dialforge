@@ -169,8 +169,8 @@ chown -R asterisk:asterisk "$REC_DIR"
 
 say "5/5 Start and check"
 systemctl start dialforge-backend dialforge-dialer
-for i in $(seq 1 20); do curl -sk https://localhost:3000/health | grep -q '"connected"' && break; sleep 1; done
-curl -sk https://localhost:3000/health && echo
+for i in $(seq 1 20); do curl -sk "https://localhost:${PORT:-3000}/health" | grep -q '"connected"' && break; sleep 1; done
+curl -sk "https://localhost:${PORT:-3000}/health" && echo
 sudo -u "$APP_USER" npm run -s db:check | tail -3 || true
 if [ -f /etc/viztex/licence.json ]; then
   if sudo -u "$APP_USER" cat /etc/viztex/licence.json >/dev/null 2>&1; then info "licence readable by the app"

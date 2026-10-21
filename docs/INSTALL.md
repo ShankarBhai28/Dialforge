@@ -19,8 +19,9 @@ of each piece.
    |---|---|---|---|
    | 22 | TCP | your office IP only | SSH |
    | 80 | TCP | anywhere | certificate (Let's Encrypt) |
-   | 3000 | TCP | anywhere (or the client's offices) | the app |
-   | 8089 | TCP | same as 3000 | agents' browser phones (WebSocket) |
+   | 443 | TCP | anywhere (or the client's offices) | the app (`https://<domain>`, no port in the address) |
+   | 3000 | TCP | same as 443 | old `:3000` links - redirected to 443 |
+   | 8089 | TCP | same as 443 | agents' browser phones (WebSocket) |
    | 3478 | TCP + UDP | anywhere | TURN |
    | 10000-20000 | UDP | anywhere | call audio |
    | 49152-49300 | UDP | anywhere | TURN relay |
@@ -93,7 +94,7 @@ What it sets up:
 4. Alerts (Telegram: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`, test with `npm run alert:test`) and off-server backups (`BACKUP_S3_BUCKET`) in
    `~/dialforge-backend/.env` (see `backend/ops/README.md`), then
    `sudo systemctl restart dialforge-backend`.
-5. An external uptime check on `https://<domain>:3000/health`.
+5. An external uptime check on `https://<domain>/health` (steps: `backend/ops/README.md`).
 
 ## 5. Updates later
 

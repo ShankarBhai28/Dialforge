@@ -45,7 +45,7 @@ One bot can serve every customer server (same token and chat id on each); each m
 ## Uptime from outside (the whole server down)
 The checks above run inside the backend, so they can't report the backend or the whole server being down. Add a free external monitor:
 1. **uptimerobot.com** -> sign up (free) -> **Add New Monitor** -> type **HTTP(s)**.
-2. URL: `https://<domain>:3000/health` (or `https://<domain>/health` once the app runs on 443); interval 5 minutes.
+2. URL: `https://<domain>/health` (servers installed before 21 Oct 2026: `https://<domain>:3000/health`); interval 5 minutes.
 3. Alert contacts: your email, and Telegram (UptimeRobot -> My Settings -> Alert Contacts -> Telegram).
 4. Test it: `sudo systemctl stop dialforge-backend` for 6 minutes on a test server -> you get "down", then start it -> "up".
 

@@ -14,7 +14,7 @@ amounts. Delete everything at the end (step 12) unless you keep it.
 ```
 What you are building - everything on ONE server:
 
-  Agents' browsers ──https:3000──► VIZTEX app (screens, API)  ─┐
+  Agents' browsers ──https:443───► VIZTEX app (screens, API)  ─┐
          │                         Dialer engine                │ MySQL (data)
          └──wss:8089 + audio────► Asterisk (calls, queues) ─────┘
                                   coturn (TURN: audio through office NAT)
@@ -61,7 +61,8 @@ EC2 → Security groups → `viztex-practice-sg` → **Edit inbound rules**:
 |---|---|---|---|
 | SSH | 22 | **My IP** | you, to log in (never "anywhere") |
 | Custom TCP | 80 | 0.0.0.0/0 | Let's Encrypt checks the domain on port 80 (certificate + renewals) |
-| Custom TCP | 3000 | 0.0.0.0/0 | the VIZTEX app (admin + agent screens) |
+| HTTPS | 443 | 0.0.0.0/0 | the VIZTEX app (admin + agent screens) - the address needs no port |
+| Custom TCP | 3000 | 0.0.0.0/0 | old `:3000` links, redirected to 443 |
 | Custom TCP | 8089 | 0.0.0.0/0 | agents' browser phones (WebSocket to Asterisk) |
 | Custom TCP | 3478 | 0.0.0.0/0 | TURN (audio for agents behind NAT/firewalls) |
 | Custom UDP | 3478 | 0.0.0.0/0 | TURN |
@@ -147,7 +148,7 @@ sudo bash viztex/install/install.sh --domain dialforgetest.ddnsfree.com --admin 
 | **4 App** | Copies the app to `~/dialforge-backend`, writes `.env` (settings + generated secrets), installs Node packages, **runs the database migrations** (creates every table), gives `asterisk_rt` read access to 4 views, creates your Super Admin | the app is now ready, with an empty database | `cd ~/dialforge-backend && ls`, `npm run db:check` |
 | **5 Asterisk config** | Writes `pjsip.conf` (WSS for browsers + UDP for the trunk, **NAT: tells the world the public IP**), `extensions.conf` (dialplan: `[internal]`, `[from-trunk]` → the app, `[queue-dispatch]`), `rtp.conf` (audio ports 10000-20000), `http.conf` (WSS on 8089), `ari.conf` + `manager.conf` (how the app controls Asterisk, AMI only on 127.0.0.1), ODBC + realtime (`res_odbc`, `extconfig`, `sorcery`), a systemd service | this is the wiring between Asterisk, MySQL and the app | `sudo ls /etc/asterisk/*.viztex-orig` (the originals it replaced are kept) |
 | **6 TURN** | coturn on 3478 with a shared secret the app also knows | agents behind office firewalls still get audio | `systemctl status coturn` |
-| **7 Certificate** | Let's Encrypt certificate for your domain (port 80), copied for Asterisk (8089) and the app (3000); renews itself | https + wss are required by browsers | `sudo certbot certificates` |
+| **7 Certificate** | Let's Encrypt certificate for your domain (port 80), copied for Asterisk (8089) and the app (443); renews itself | https + wss are required by browsers | `sudo certbot certificates` |
 | **8 Services** | systemd services: `asterisk`, `dialforge-backend` (app), `dialforge-dialer` (dialer engine), nightly backup timer, recording conversion, log rotation; starts them | they start on boot and restart if they crash | `systemctl status dialforge-backend` |
 | **9 Checks** | Tests each piece (next table) | proves it all works together | - |
 
@@ -177,7 +178,7 @@ Leave tmux with `exit` when done.
 
 ## 8. First login
 
-Browser: `https://dialforgetest.ddnsfree.com:3000` → log in as `boss` with the one-time password → **change the password**.
+Browser: `https://dialforgetest.ddnsfree.com` (no port; `:3000` also works and redirects) → log in as `boss` with the one-time password → **change the password**.
 
 - [ ] Logged in, password changed.
 
@@ -271,7 +272,7 @@ breaks, reminds you every 2 hours while it stays broken, and sends an
 | Certificate step fails | port 80 closed, or DNS wrong | step 2 rule for 80; step 4 |
 | Asterisk compile fails | ran out of memory/disk (t3.micro, 8 GB disk) | bigger instance / 30 GB disk, run again |
 | "Asterisk reads MySQL (ODBC)" FAIL | ODBC/realtime config | `sudo asterisk -rx "odbc show"`; send me the log lines |
-| App page doesn't open | port 3000 closed or app down | security group; `systemctl status dialforge-backend`; `tail ~/dialforge-backend/server.log` |
+| App page doesn't open | port 443 closed or app down | security group; `systemctl status dialforge-backend`; `tail ~/dialforge-backend/server.log` |
 | Agent phone won't connect | 8089 closed, or certificate | security group; open `https://<domain>:8089/ws` in the browser once |
 | Call connects but no audio / one-way audio | UDP 10000-20000 or TURN ports closed | step 2 UDP rules |
 | SSH "Permission denied (publickey)" | wrong key / user | `-i ...viztex-practice.pem`, user `ubuntu` |

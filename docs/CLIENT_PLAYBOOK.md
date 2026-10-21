@@ -23,7 +23,7 @@ backups). Section 9 says when and how to move beyond that.
 | Number of agents (now / in 6 months), supervisors / TLs | server size (section 2), roles |
 | Working days and hours, time zone | campaign calling hours, report days (`--timezone`) |
 | Hostname they want | `acme.viztex.in` (your domain) or their own subdomain - you need control of its DNS |
-| Where agents work from | office IPs (to restrict port 3000 / 8089 later) or anywhere |
+| Where agents work from | office IPs (to restrict ports 443 / 8089 later) or anywhere |
 | **SIP trunk**: provider, IP-allowlisted or username/password, provider SIP IP(s), DIDs, outgoing caller ID, concurrent channels | `add-trunk.sh`; ask the provider to allow your server's IP |
 | Campaigns: names, dial mode (manual / preview / progressive / predictive), outcomes (dispositions) and which count as success | Campaigns setup |
 | Lead lists (Excel / CSV) and the fields per lead | the campaign form + import template |
@@ -63,8 +63,9 @@ add EBS disk, Elastic IP and S3. Bill the client with a margin over this.
    |---|---|---|---|
    | 22 | TCP | your office IP | SSH |
    | 80 | TCP | 0.0.0.0/0 | certificate issue / renewal |
-   | 3000 | TCP | 0.0.0.0/0 (or the client's office IPs) | the app |
-   | 8089 | TCP | same as 3000 | agents' browser phones |
+   | 443 | TCP | 0.0.0.0/0 (or the client's office IPs) | the app |
+   | 3000 | TCP | same as 443 | old `:3000` links (redirect) |
+   | 8089 | TCP | same as 443 | agents' browser phones |
    | 3478 | TCP + UDP | 0.0.0.0/0 | TURN |
    | 10000-20000 | UDP | 0.0.0.0/0 | call audio |
    | 49152-49300 | UDP | 0.0.0.0/0 | TURN relay |
@@ -141,7 +142,7 @@ shows "copied off-server".
 
 ## 6. Set up the client (in the app, about 1-2 hours)
 
-Log in at `https://<hostname>:3000` as the Super Admin; **change the password**.
+Log in at `https://<hostname>` as the Super Admin; **change the password**.
 In this order (each needs the one before):
 
 0. **Licence** - what they pay for, on the server (only you can change it):
@@ -197,7 +198,7 @@ In this order (each needs the one before):
 - [ ] Backup: System health "copied off-server"; S3 bucket has today's files.
 - [ ] Alerts: stop and start the dialer service once -> the webhook gets a message.
 - [ ] Uptime check: a free external monitor (UptimeRobot / Better Stack) on
-      `https://<hostname>:3000/health`, alerting you.
+      `https://<hostname>/health`, alerting you.
 - [ ] Recording announcement / consent handled by the client.
 - [ ] Agents trained (login, outcomes, callbacks, call log); supervisors (Live Agents, Dialer, Reports).
 

@@ -107,9 +107,11 @@ fi
 
 sleep 4
 systemctl is-active dialforge-backend dialforge-dialer
-health=$(curl -sk https://localhost:3000/health)
+APP_PORT=$(sed -n 's/^PORT=//p' ~/$DIR/.env | tail -1)
+APP_PORT=${APP_PORT:-3000}
+health=$(curl -sk https://localhost:$APP_PORT/health)
 echo "health: $health"
-app=$(curl -sk -o /dev/null -w '%{http_code}' https://localhost:3000/app/)
+app=$(curl -sk -o /dev/null -w '%{http_code}' https://localhost:$APP_PORT/app/)
 echo "/app/: $app"
 case "$health" in *'"ok"'*) ;; *) echo "HEALTH CHECK FAILED - roll back:"; echo "  cd ~/$DIR && tar xzf $B/backend-files.tgz && sudo systemctl restart dialforge-backend dialforge-dialer"; exit 4 ;; esac
 echo

@@ -238,7 +238,9 @@ AMI_PORT=5038
 AMI_USER=dialforge
 AMI_PASS=$AMI_PASS
 SESSION_SECRET=$SESSION_SECRET
-PORT=3000
+# The app on the standard https port (no :port in the address); old :3000 links redirect.
+PORT=443
+REDIRECT_FROM_PORT=3000
 SIP_DOMAIN=$DOMAIN
 WEBRTC_WS_URL=wss://$DOMAIN:8089/ws
 STUN_URLS=stun:$DOMAIN:3478,stun:stun.l.google.com:19302
@@ -263,6 +265,10 @@ EOF
   chown "$APP_USER:$APP_USER" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
 fi
+APP_PORT=$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -1)
+APP_PORT=${APP_PORT:-3000}
+APP_URL="https://$DOMAIN$([ "$APP_PORT" = 443 ] || echo ":$APP_PORT")"
+info "app port $APP_PORT ($APP_URL)"
 cd "$APP_DIR"
 sudo -u "$APP_USER" npm ci --omit=dev --no-audit --no-fund >> "$LOG" 2>&1 || die "npm ci"
 sudo -u "$APP_USER" npm run -s db:migrate >> "$LOG" 2>&1 || die "database migrations"
@@ -501,7 +507,7 @@ if [ "$SELF_SIGNED" = 1 ]; then
       -keyout "$SS/privkey.pem" -out "$SS/fullchain.pem" >> "$LOG" 2>&1
   fi
   /usr/local/bin/viztex-cert-copy "$SS" >> "$LOG" 2>&1
-  warn "self-signed certificate: open https://$DOMAIN:3000 and https://$DOMAIN:8089/ws once and accept the warning"
+  warn "self-signed certificate: open $APP_URL and https://$DOMAIN:8089/ws once and accept the warning"
 else
   if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
     certbot certonly --standalone --non-interactive --agree-tos -m "$EMAIL" -d "$DOMAIN" >> "$LOG" 2>&1 ||
@@ -524,6 +530,8 @@ Type=simple
 User=$APP_USER
 WorkingDirectory=$APP_DIR
 ExecStart=/usr/bin/node server.js
+# Port 443 without running as root: only this one extra right.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=on-failure
 RestartSec=3
 StandardOutput=append:$APP_DIR/server.log
@@ -573,10 +581,10 @@ systemctl restart dialforge-backend dialforge-dialer
 systemctl start dialforge-backup.timer
 
 if [ "$FIREWALL" = 1 ]; then
-  ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 3000/tcp >/dev/null
+  ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow 3000/tcp >/dev/null
   ufw allow 8089/tcp >/dev/null; ufw allow 3478 >/dev/null; ufw allow 10000:20000/udp >/dev/null
   ufw allow 49152:49300/udp >/dev/null; ufw --force enable >/dev/null
-  info "ufw: 22, 80, 3000, 8089, 3478, 10000-20000/udp, 49152-49300/udp open"
+  info "ufw: 22, 80, 443, 3000, 8089, 3478, 10000-20000/udp, 49152-49300/udp open"
 fi
 
 # ---------------------------------------------------------------- 9. checks
@@ -595,19 +603,20 @@ check "Asterisk modules: AMD, MixMonitor, realtime" bash -c "for m in app_amd ap
 check "TURN server" systemctl is-active --quiet coturn
 check "MySQL" systemctl is-active --quiet mysql
 check "MySQL and Asterisk HTTP (ARI) only on 127.0.0.1" bash -c "! ss -lntH | awk '{print \$4}' | grep -qE '^(\*|0\.0\.0\.0|\[::\]):(3306|33060|8088)\$'"
-for i in $(seq 1 20); do curl -sk https://localhost:3000/health | grep -q '"ok"' && break; sleep 1; done
-check "VIZTEX backend /health" bash -c "curl -sk https://localhost:3000/health | grep -q '\"db\":\"connected\"'"
+for i in $(seq 1 20); do curl -sk https://localhost:$APP_PORT/health | grep -q '"ok"' && break; sleep 1; done
+check "VIZTEX backend /health" bash -c "curl -sk https://localhost:$APP_PORT/health | grep -q '\"db\":\"connected\"'"
+[ "$APP_PORT" = 3000 ] || check "Old :3000 links redirect to $APP_URL" bash -c "curl -sk -o /dev/null -w '%{http_code} %{redirect_url}' https://localhost:3000/app/ | grep -q '^301 $APP_URL/app/'"
 check "Backend connected to Asterisk (ARI)" bash -c "grep -q 'app \"dialforge-app\" connected' '$APP_DIR/server.log'"
 check "Dialer engine running" bash -c "grep -q 'dialer engine started' '$APP_DIR/dialer.log'"
 check "Nightly backup scheduled" systemctl is-enabled --quiet dialforge-backup.timer
-[ "$SELF_SIGNED" = 1 ] || check "Certificate valid for $DOMAIN" bash -c "echo | openssl s_client -connect localhost:3000 -servername $DOMAIN 2>/dev/null | openssl x509 -noout -checkhost $DOMAIN | grep -q 'does match'"
+[ "$SELF_SIGNED" = 1 ] || check "Certificate valid for $DOMAIN" bash -c "echo | openssl s_client -connect localhost:$APP_PORT -servername $DOMAIN 2>/dev/null | openssl x509 -noout -checkhost $DOMAIN | grep -q 'does match'"
 
 cat <<EOF | tee -a "$LOG"
 
 ==========================================================================
  VIZTEX is installed on $DOMAIN  ($([ "$FAILS" = 0 ] && echo "all checks OK" || echo "$FAILS check(s) FAILED - see $LOG"))
 
- Open:        https://$DOMAIN:3000
+ Open:        $APP_URL
  Super Admin: $ADMIN
 EOF
 if [ -n "$ADMIN_PASSWORD_LINE" ]; then
@@ -618,7 +627,7 @@ fi
 cat <<EOF
 
  Open these ports to the internet (AWS: the security group):
-   TCP 3000 (app), 8089 (agents' phones), 80 (certificate renewal), 3478 (TURN)
+   TCP $APP_PORT (app)$([ "$APP_PORT" = 3000 ] || echo ", 3000 (old links)"), 8089 (agents' phones), 80 (certificate renewal), 3478 (TURN)
    UDP 3478, 10000-20000 (call audio), 49152-49300 (TURN relay)
    SSH 22 from your office IP only. Never open 3306 (MySQL) or 5038 (AMI).
 
