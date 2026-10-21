@@ -189,7 +189,18 @@ chmod 2775 /var/spool/asterisk/monitor/dialforge
 
 # ---------------------------------------------------------------- 3. MySQL
 say "3/9 Database"
-systemctl enable --now mysql >> "$LOG" 2>&1
+# MySQL only for this server. Not in mysql.conf.d/mysqld.cnf: odbc-mariadb
+# pulls in mariadb-common, which points /etc/mysql/my.cnf at mariadb.cnf,
+# and that never reads mysql.conf.d - conf.d is read by both.
+put /etc/mysql/conf.d/viztex.cnf root:root 644 <<'EOF'
+[mysqld]
+bind-address = 127.0.0.1
+mysqlx-bind-address = 127.0.0.1
+EOF
+systemctl enable mysql >> "$LOG" 2>&1
+if [ "$(mysql -N -e "SELECT @@bind_address" 2>/dev/null)" != 127.0.0.1 ]; then
+  systemctl restart mysql >> "$LOG" 2>&1 || die "MySQL restart"
+fi
 mysql <<SQL || die "create database / users"
 CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 CREATE USER IF NOT EXISTS 'dialforge'@'localhost' IDENTIFIED BY '$DB_PASSWORD';
@@ -338,7 +349,7 @@ put /etc/asterisk/http.conf root:asterisk 640 <<'EOF'
 [general]
 enabled=yes
 enablestatic=no
-bindaddr=0.0.0.0
+bindaddr=127.0.0.1
 bindport=8088
 tlsenable=yes
 tlsbindaddr=0.0.0.0:8089
@@ -580,6 +591,7 @@ check "Asterisk reads MySQL (ODBC)" bash -c "/usr/sbin/asterisk -rx 'odbc show d
 check "Asterisk modules: AMD, MixMonitor, realtime" bash -c "for m in app_amd app_mixmonitor res_config_odbc; do /usr/sbin/asterisk -rx \"module show like \$m\" | grep -q Running || exit 1; done"
 check "TURN server" systemctl is-active --quiet coturn
 check "MySQL" systemctl is-active --quiet mysql
+check "MySQL and Asterisk HTTP (ARI) only on 127.0.0.1" bash -c "! ss -lntH | awk '{print \$4}' | grep -qE '^(\*|0\.0\.0\.0|\[::\]):(3306|33060|8088)\$'"
 for i in $(seq 1 20); do curl -sk https://localhost:3000/health | grep -q '"ok"' && break; sleep 1; done
 check "VIZTEX backend /health" bash -c "curl -sk https://localhost:3000/health | grep -q '\"db\":\"connected\"'"
 check "Backend connected to Asterisk (ARI)" bash -c "grep -q 'app \"dialforge-app\" connected' '$APP_DIR/server.log'"
