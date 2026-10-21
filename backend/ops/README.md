@@ -21,11 +21,33 @@ A backup on the same disk doesn't survive losing the server.
 3. EC2 -> the server -> Actions -> Security -> **Modify IAM role** -> pick it.
 4. On the server: `sudo snap install aws-cli --classic`, then in `~/dialforge-backend/.env`: `BACKUP_S3_BUCKET=<bucket name>`. Run the backup once by hand and check System health says "copied off-server".
 
-## Alerts (`ALERT_WEBHOOK_URL`)
-The backend checks the system every minute (`src/services/health.js`): database, Asterisk (ARI), Asterisk control (AMI), SIP trunk, dialer engine, services (asterisk, dialer, coturn), disk, memory, last backup. When a check turns bad or recovers it posts `{"text": "..."}` to `ALERT_WEBHOOK_URL` and writes an audit log row (`system.health`). Works with Slack / Google Chat / Microsoft Teams incoming webhooks and Discord (`.../slack` URL). Set it in `.env`, restart `dialforge-backend`.
+## Alerts (Telegram and/or a chat webhook)
+The backend checks the system every minute (`src/services/health.js`): database, Asterisk (ARI), Asterisk control (AMI), SIP trunk, dialer engine, services (asterisk, dialer, coturn), disk, memory, last backup, certificate expiry (warns 14 days before), the agents' phone port 8089, licence end date (warns 14 days before), call recordings stuck unconverted.
 
-## Uptime from outside
-The checks above run inside the backend, so they can't report the backend or the whole server being down. Add a free external monitor (e.g. UptimeRobot, Better Stack) on `https://<domain>:3000/health` every 1-5 minutes, alerting to the same people.
+- A check that turns bad, or recovers, sends an alert and writes an audit row (`system.health`).
+- One that stays bad is reminded every 2 hours ("STILL FAIL: ...").
+- Every day at `ALERT_DAILY_HOUR` (local time, default 9) a summary: "Daily check: all 17 checks OK", or what needs attention (audit row `system.daily`). If that message doesn't come, the alerts themselves are broken.
+- Every message starts with whose server it is: the licence's customer name and the domain, e.g. `Acme (crm.acme.in):`.
+
+### Telegram (recommended - free, instant on your phone)
+1. In Telegram open **@BotFather** -> `/newbot` -> a name (e.g. `VIZTEX Alerts`) and a username ending in `bot`. It answers with a **token** like `123456789:AAH...` - treat it like a password.
+2. Open your new bot in Telegram and press **Start** (or send `hi`). For a team: add the bot to a group and send a message there instead.
+3. On the server, in `~/dialforge-backend/.env`: `TELEGRAM_BOT_TOKEN=<the token>`
+4. `cd ~/dialforge-backend && npm run alert:test -- --find-chat` -> prints `TELEGRAM_CHAT_ID=...` for your chat; put that line in `.env`.
+5. `npm run alert:test` -> "telegram: sent", and the message arrives on your phone.
+6. `sudo systemctl restart dialforge-backend`.
+
+One bot can serve every customer server (same token and chat id on each); each message says which server it is from.
+
+### Chat webhook (Slack / Google Chat / Teams / Discord)
+`ALERT_WEBHOOK_URL=<incoming webhook URL>` in `.env` (Discord: the URL ending in `/slack`). Works together with Telegram.
+
+## Uptime from outside (the whole server down)
+The checks above run inside the backend, so they can't report the backend or the whole server being down. Add a free external monitor:
+1. **uptimerobot.com** -> sign up (free) -> **Add New Monitor** -> type **HTTP(s)**.
+2. URL: `https://<domain>:3000/health` (or `https://<domain>/health` once the app runs on 443); interval 5 minutes.
+3. Alert contacts: your email, and Telegram (UptimeRobot -> My Settings -> Alert Contacts -> Telegram).
+4. Test it: `sudo systemctl stop dialforge-backend` for 6 minutes on a test server -> you get "down", then start it -> "up".
 
 ## Call recording
 Calls are recorded when the customer is connected to an agent (click-to-call: when the customer answers; inbound / dialer: when an agent takes the call from the queue), on the customer's channel, so the recording follows the call through transfers and conferences. Per campaign: Campaigns -> Edit -> **Record calls** (on by default). Calls without a campaign: `RECORD_CALLS_WITHOUT_CAMPAIGN` (default on). Playback / download: Call Log -> **Play** (right "Call Log -> Play recordings"); every playback is in the audit log.

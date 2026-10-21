@@ -221,6 +221,22 @@ then open **UDP 5060 to the provider's IP only** in the security group, map
 the DID to the queue (**DID Numbers**), and test an outbound call and a call
 to the DID.
 
+## 10b. Alerts to your phone (Telegram)
+
+The server checks itself every minute (database, Asterisk, trunk, dialer,
+disk, certificate, licence, backups, ...) and messages you when something
+breaks, reminds you every 2 hours while it stays broken, and sends an
+"all OK" summary every morning. Full steps: `backend/ops/README.md` → Alerts.
+
+1. Telegram → **@BotFather** → `/newbot` → copy the token.
+2. Open your bot → **Start**.
+3. `nano ~/dialforge-backend/.env` → `TELEGRAM_BOT_TOKEN=<token>`
+4. `cd ~/dialforge-backend && npm run alert:test -- --find-chat` → copy the `TELEGRAM_CHAT_ID=...` line into `.env`.
+5. `npm run alert:test` → a test message on your phone.
+6. `sudo systemctl restart dialforge-backend`
+
+- [ ] Test alert received on your phone.
+
 ## 11. Look around (learn the server)
 
 | Command | Shows |

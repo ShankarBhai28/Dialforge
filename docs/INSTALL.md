@@ -90,7 +90,7 @@ What it sets up:
    ```
    Then give the provider the Elastic IP, open UDP 5060 to their IP, and map
    DIDs to queues (DID Numbers; campaigns that have the queue take its calls).
-4. Alerts and off-server backups: `ALERT_WEBHOOK_URL`, `BACKUP_S3_BUCKET` in
+4. Alerts (Telegram: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`, test with `npm run alert:test`) and off-server backups (`BACKUP_S3_BUCKET`) in
    `~/dialforge-backend/.env` (see `backend/ops/README.md`), then
    `sudo systemctl restart dialforge-backend`.
 5. An external uptime check on `https://<domain>:3000/health`.
