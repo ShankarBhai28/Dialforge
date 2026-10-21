@@ -10,6 +10,7 @@ function deps(over = {}) {
     ari: { endpointStates: async () => ({ 1001: 'online' }), endpointState: async () => 'online' },
     ami: { isReady: () => true },
     systemctlActive: async () => 'active',
+    systemctlInstalled: async () => true,
     statfs: async () => ({ bavail: 50, blocks: 100, bsize: 1e9 }),
     readBackupStatus: () => ({ at: '2026-10-12T21:05:00Z', status: 'ok', offsite: 'ok' }),
     memoryAvailablePct: () => 60,
@@ -48,6 +49,20 @@ test('problems are named: Asterisk down, AMI gone, dialer silent, a stopped serv
   assert.match(h.dialer.detail, /no tick for 400s/);
   assert.strictEqual(h['svc:asterisk'].status, 'fail');
   assert.strictEqual(h.disk.status, 'fail');
+});
+
+test('a service not installed on this server is skipped; installed but stopped still fails', async () => {
+  const h = byKey(
+    await collectHealth(
+      deps({
+        services: ['coturn', 'coturn-443'],
+        systemctlInstalled: async (u) => u !== 'coturn-443',
+        systemctlActive: async () => 'inactive',
+      }),
+    ),
+  );
+  assert.strictEqual(h['svc:coturn-443'], undefined);
+  assert.strictEqual(h['svc:coturn'].status, 'fail');
 });
 
 test('backups: missing, failed, old, or only on this server are all flagged', async () => {

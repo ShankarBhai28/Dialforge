@@ -19,6 +19,8 @@ const { audit } = require('./audit');
 const { TRUNK_ENDPOINT } = require('../config');
 
 const BACKUP_STATUS = process.env.BACKUP_STATUS_FILE || path.join(os.homedir(), 'backups', 'nightly', 'last.json');
+// coturn-443 (TURN on 443 for strict office firewalls) exists only where it
+// was set up by hand: a service that isn't installed is skipped, not a fail.
 const SERVICES = ['asterisk', 'dialforge-dialer', 'coturn', 'coturn-443'];
 
 const ok = (key, label, detail) => ({ key, label, status: 'ok', detail });
@@ -29,6 +31,15 @@ function systemctlActive(unit) {
   return new Promise((resolve) => {
     execFile('systemctl', ['is-active', unit], { timeout: 3000 }, (err, stdout) =>
       resolve(String(stdout).trim() || 'unknown'),
+    );
+  });
+}
+
+/** False only when systemd has no such unit at all (not merely stopped). */
+function systemctlInstalled(unit) {
+  return new Promise((resolve) => {
+    execFile('systemctl', ['show', '-p', 'LoadState', '--value', unit], { timeout: 3000 }, (err, stdout) =>
+      resolve(String(stdout).trim() !== 'not-found'),
     );
   });
 }
@@ -49,6 +60,7 @@ const defaultDeps = {
   ari,
   ami,
   systemctlActive,
+  systemctlInstalled,
   statfs: (p) => fs.promises.statfs(p),
   readBackupStatus: () => JSON.parse(fs.readFileSync(BACKUP_STATUS, 'utf8')),
   memoryAvailablePct,
@@ -102,6 +114,7 @@ async function collectHealth(deps = defaultDeps) {
   }
 
   for (const unit of d.services) {
+    if (!(await d.systemctlInstalled(unit))) continue;
     const s = await d.systemctlActive(unit);
     checks.push(
       s === 'active' ? ok(`svc:${unit}`, `Service ${unit}`, 'running') : fail(`svc:${unit}`, `Service ${unit}`, s),
