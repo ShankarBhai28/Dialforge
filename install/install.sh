@@ -268,10 +268,19 @@ put /etc/mysql/conf.d/viztex.cnf root:root 644 <<EOF
 bind-address = $DB_BIND
 mysqlx-bind-address = 127.0.0.1
 EOF
+# Without mariadb-common (a database-only server) my.cnf reads conf.d and then
+# mysql.conf.d, whose mysqld.cnf says 127.0.0.1 - so the same setting also
+# goes there, under a name read after mysqld.cnf.
+if [ -d /etc/mysql/mysql.conf.d ]; then
+  cp -p /etc/mysql/conf.d/viztex.cnf /etc/mysql/mysql.conf.d/zz-viztex.cnf
+fi
 systemctl enable mysql >> "$LOG" 2>&1
 if [ "$(mysql -N -e "SELECT @@bind_address" 2>/dev/null)" != "$DB_BIND" ]; then
   systemctl restart mysql >> "$LOG" 2>&1 || die "MySQL restart"
 fi
+BOUND=$(mysql -N -e "SELECT @@bind_address" 2>/dev/null)
+[ "$BOUND" = "$DB_BIND" ] ||
+  die "MySQL listens on '${BOUND:-?}', not $DB_BIND - another file in /etc/mysql sets bind-address (grep -rn bind-address /etc/mysql)"
 mysql <<SQL || die "create database / users"
 CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 CREATE USER IF NOT EXISTS 'dialforge'@'$APP_DBHOST' IDENTIFIED BY '$DB_PASSWORD';
@@ -778,6 +787,7 @@ check "TURN server" systemctl is-active --quiet coturn
 fi
 if has db; then
 check "MySQL" systemctl is-active --quiet mysql
+[ "$SPLIT" = 1 ] && check "MySQL listens on $PRIVATE_IP for the app and telephony servers" bash -c "ss -lntH | awk '{print \$4}' | grep -qx '$PRIVATE_IP:3306'"
 fi
 if [ "$SPLIT" = 1 ] && { has telephony || has db; }; then
 check "Server health check every minute (alerts: /etc/viztex/server.env)" systemctl is-enabled --quiet viztex-server-health.timer
