@@ -10,6 +10,18 @@
 # server's IP first; the old trunk config is saved for reference and the
 # script prints the add-trunk.sh line.
 #
+# Servers split in three (install.sh --role ...): run it on the APP server -
+# it works on the database server over the network. Which case:
+#   - app server lost, DB server fine: reinstall the app, then --settings-only
+#     (settings + licence; NEVER the database - it would go back to last night)
+#   - telephony server lost: reinstall it and add-trunk.sh - nothing to restore
+#     (its dialplan comes with the package, its recordings are in S3)
+#   - DB server lost: reinstall it with --secrets (a copy from the app server),
+#     then this script on the app server, --from-host <the old APP server>
+#     (the app server's nightly backup holds the database dump)
+# Recordings stay in S3 where they were: the old server's folder is kept as
+# RECORDINGS_HOST, so old and new recordings play.
+#
 # From S3 (the nightly backup's bucket; the server needs an IAM role that may
 # read it - see docs/DISASTER_RECOVERY.md):
 #   sudo bash viztex/install/restore.sh --s3 dialforgedev --from-host ip-172-31-10-157
@@ -23,10 +35,11 @@
 #   --at TIME            a specific backup (e.g. 20261014-210001) instead of the newest
 #   --db FILE / --config FILE / --recordings PATH   local files instead of S3
 #   --skip-recordings    don't bring the recordings (can be large)
+#   --settings-only      only the settings and the licence - not the database, not the recordings
 #   --yes                don't ask before replacing this server's data
 set -euo pipefail
 
-S3="" FROM_HOST="" LIST=0 AT="" DB_FILE="" CFG_FILE="" REC="" SKIP_REC=0 YES=0
+S3="" FROM_HOST="" LIST=0 AT="" DB_FILE="" CFG_FILE="" REC="" SKIP_REC=0 YES=0 SETTINGS_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --s3) S3="$2"; shift 2 ;;
@@ -37,8 +50,9 @@ while [ $# -gt 0 ]; do
     --config) CFG_FILE="$2"; shift 2 ;;
     --recordings) REC="$2"; shift 2 ;;
     --skip-recordings) SKIP_REC=1; shift ;;
+    --settings-only) SETTINGS_ONLY=1; SKIP_REC=1; shift ;;
     --yes) YES=1; shift ;;
-    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,44p' "$0"; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -77,22 +91,43 @@ if [ -n "$S3" ]; then
     "$AWS" s3 ls "$PREFIX/" | awk '{print $4}' | grep "^$1-${AT:-}" | sort | tail -1
   }
   DBK=$(pick db) CFK=$(pick config)
-  [ -n "$DBK" ] || die "no database backup in $PREFIX/"
-  say "Downloading $DBK${CFK:+ and $CFK}"
-  "$AWS" s3 cp --only-show-errors "$PREFIX/$DBK" "$WORK/$DBK"
-  DB_FILE="$WORK/$DBK"
+  if [ "$SETTINGS_ONLY" = 1 ]; then
+    [ -n "$CFK" ] || die "no config backup in $PREFIX/"
+    DBK=""
+  else
+    [ -n "$DBK" ] || die "no database backup in $PREFIX/"
+  fi
+  say "Downloading ${DBK:+$DBK and }$CFK"
+  if [ -n "$DBK" ]; then "$AWS" s3 cp --only-show-errors "$PREFIX/$DBK" "$WORK/$DBK"; DB_FILE="$WORK/$DBK"; fi
   if [ -n "$CFK" ]; then "$AWS" s3 cp --only-show-errors "$PREFIX/$CFK" "$WORK/$CFK"; CFG_FILE="$WORK/$CFK"; fi
 fi
-[ -n "$DB_FILE" ] || die "say where the backup is: --s3 BUCKET --from-host NAME, or --db FILE (see --help)"
-[ -f "$DB_FILE" ] || die "$DB_FILE not found"
-gzip -t "$DB_FILE" 2>/dev/null || [[ "$DB_FILE" != *.gz ]] || die "$DB_FILE is damaged (gzip test failed)"
+if [ "$SETTINGS_ONLY" = 1 ]; then
+  [ -n "$CFG_FILE" ] || die "--settings-only needs the config backup: --s3 ... --from-host ..., or --config FILE"
+else
+  [ -n "$DB_FILE" ] || die "say where the backup is: --s3 BUCKET --from-host NAME, or --db FILE (see --help)"
+  [ -f "$DB_FILE" ] || die "$DB_FILE not found"
+  gzip -t "$DB_FILE" 2>/dev/null || [[ "$DB_FILE" != *.gz ]] || die "$DB_FILE is damaged (gzip test failed)"
+fi
 
 set -a; . "$ENV_FILE"; set +a
 DB_NAME="${DB_NAME:-viztex}"
-say "Restore into this server ($(hostname -s)), database $DB_NAME"
-info "database backup: $(basename "$DB_FILE")"
+# Split servers: the database is on another server (DB_HOST); this app server
+# reaches it as the app's own user. Asterisk's read-only user is on ARI_HOST.
+SPLIT=0
+case "${DB_HOST:-localhost}" in localhost | 127.*) ;; *) SPLIT=1 ;; esac
+RT_HOST=localhost; [ "$SPLIT" = 1 ] && RT_HOST="${ARI_HOST:?ARI_HOST missing in .env}"
+dbcmd() { # dbcmd <mysql|mysqldump> [args...] - as root locally, as the app user on split servers
+  local tool=$1; shift
+  if [ "$SPLIT" = 1 ]; then MYSQL_PWD="$DB_PASSWORD" "$tool" -h "$DB_HOST" -u "${DB_USER:-dialforge}" "$@"; else "$tool" "$@"; fi
+}
+say "Restore into this server ($(hostname -s)), database $DB_NAME$([ "$SPLIT" = 1 ] && echo " on $DB_HOST")"
+if [ "$SETTINGS_ONLY" = 1 ]; then
+  info "settings only (--settings-only): the database is NOT touched"
+else
+  info "database backup: $(basename "$DB_FILE")"
+fi
 info "config backup:   ${CFG_FILE:+$(basename "$CFG_FILE")}${CFG_FILE:-none}"
-info "This REPLACES this server's data (leads, calls, users...)."
+[ "$SETTINGS_ONLY" = 1 ] || info "This REPLACES this customer's data (leads, calls, users...)."
 if [ "$YES" != 1 ]; then
   read -r -p "   Type RESTORE to continue: " ok
   [ "$ok" = RESTORE ] || die "cancelled - nothing changed"
@@ -103,29 +138,40 @@ systemctl daemon-reload # installing the AWS CLI (snap) can leave systemd asking
 systemctl stop dialforge-backend dialforge-dialer
 mkdir -p /root/viztex-backups && chmod 700 /root/viztex-backups
 NOW=$(date +%Y%m%d-%H%M%S)
-mysqldump --single-transaction --no-tablespaces "$DB_NAME" | gzip > "/root/viztex-backups/before-restore-$NOW.sql.gz"
+if [ "$SETTINGS_ONLY" = 0 ]; then
+  dbcmd mysqldump --single-transaction --no-tablespaces "$DB_NAME" | gzip > "/root/viztex-backups/before-restore-$NOW.sql.gz"
+  info "the data before: /root/viztex-backups/before-restore-$NOW.sql.gz"
+fi
 cp -p "$ENV_FILE" "/root/viztex-backups/before-restore-$NOW.env"
-info "this server's data before: /root/viztex-backups/before-restore-$NOW.sql.gz"
 
+if [ "$SETTINGS_ONLY" = 0 ]; then
 say "2/5 Database"
-mysql -e "DROP DATABASE \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-  GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO 'dialforge'@'localhost';"
-# Views in the dump name their creator; on this server that's the same 'dialforge' user.
+if [ "$SPLIT" = 1 ]; then
+  # The app user may drop and re-create its own database (its grants stay).
+  dbcmd mysql -e "DROP DATABASE \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"
+else
+  mysql -e "DROP DATABASE \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+    GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO 'dialforge'@'localhost';"
+fi
+# Views in the dump name their creator. Single server: the same 'dialforge'
+# user. Split: none - the app user may only create views as itself.
+if [ "$SPLIT" = 1 ]; then DEFINER_SED='s/DEFINER=`[^`]+`@`[^`]+`//g'; else DEFINER_SED='s/DEFINER=`[^`]+`@`[^`]+`/DEFINER=`dialforge`@`localhost`/g'; fi
 if [[ "$DB_FILE" == *.gz ]]; then gunzip -c "$DB_FILE"; else cat "$DB_FILE"; fi |
-  sed -E 's/DEFINER=`[^`]+`@`[^`]+`/DEFINER=`dialforge`@`localhost`/g' | mysql "$DB_NAME" || die "loading the database"
+  sed -E "$DEFINER_SED" | dbcmd mysql "$DB_NAME" || die "loading the database"
 cd "$APP_DIR"
 sudo -u "$APP_USER" npm run -s db:migrate || die "migrations after restore"
-mysql <<SQL
-GRANT SELECT ON \`$DB_NAME\`.ps_endpoints TO 'asterisk_rt'@'localhost';
-GRANT SELECT ON \`$DB_NAME\`.ps_auths TO 'asterisk_rt'@'localhost';
-GRANT SELECT ON \`$DB_NAME\`.ps_aors TO 'asterisk_rt'@'localhost';
-GRANT SELECT ON \`$DB_NAME\`.ast_queues TO 'asterisk_rt'@'localhost';
+dbcmd mysql "$DB_NAME" <<SQL
+GRANT SELECT ON \`$DB_NAME\`.ps_endpoints TO 'asterisk_rt'@'$RT_HOST';
+GRANT SELECT ON \`$DB_NAME\`.ps_auths TO 'asterisk_rt'@'$RT_HOST';
+GRANT SELECT ON \`$DB_NAME\`.ps_aors TO 'asterisk_rt'@'$RT_HOST';
+GRANT SELECT ON \`$DB_NAME\`.ast_queues TO 'asterisk_rt'@'$RT_HOST';
 SQL
 # Sessions and live state of the old server mean nothing here.
-mysql "$DB_NAME" -e "DELETE FROM sessions; DELETE FROM live_agents; UPDATE agent_status_log SET ended_at = NOW() WHERE ended_at IS NULL;
+dbcmd mysql "$DB_NAME" -e "DELETE FROM sessions; DELETE FROM live_agents; UPDATE agent_status_log SET ended_at = NOW() WHERE ended_at IS NULL;
   UPDATE calls SET end_time = COALESCE(end_time, start_time) WHERE end_time IS NULL;
   UPDATE campaigns SET dialer_state = 'stopped';"
 info "users, leads, calls, campaigns restored (everyone logs in with their old password); dialers stopped"
+fi
 
 say "3/5 Settings from the old server"
 OLD_TRUNK=""
@@ -134,8 +180,9 @@ if [ -n "$CFG_FILE" ]; then
   OLD_ENV=$(find "$WORK/cfg" -path '*dialforge-backend/.env' | head -1)
   if [ -n "$OLD_ENV" ]; then
     # Not the passwords (this server made its own) - the choices someone made.
-    for k in ALERT_WEBHOOK_URL BACKUP_S3_BUCKET BACKUP_KEEP_DAYS REPORT_TIMEZONE APP_DISPLAY_NAME TRUNK_CALLER_ID \
-      DIALER_MAX_TRUNK_CHANNELS RECORDING_RETENTION_DAYS RECORD_CALLS_WITHOUT_CAMPAIGN STALE_AGENT_MINUTES; do
+    for k in ALERT_WEBHOOK_URL TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID ALERT_DAILY_HOUR BACKUP_S3_BUCKET BACKUP_KEEP_DAYS \
+      REPORT_TIMEZONE APP_DISPLAY_NAME TRUNK_CALLER_ID DIALER_MAX_TRUNK_CHANNELS RECORDING_RETENTION_DAYS \
+      RECORD_CALLS_WITHOUT_CAMPAIGN STALE_AGENT_MINUTES RECORDINGS_HOST RECORDINGS_S3_BUCKET; do
       v=$(grep -m1 "^$k=" "$OLD_ENV" | cut -d= -f2- || true)
       [ -n "$v" ] || continue
       if grep -q "^$k=" "$ENV_FILE"; then sed -i "s|^$k=.*|$k=$v|" "$ENV_FILE"; else echo "$k=$v" >> "$ENV_FILE"; fi
@@ -154,8 +201,18 @@ if [ -n "$CFG_FILE" ]; then
   fi
 fi
 
+# Recordings stay in S3 under the old server's folder: keep reading (and
+# uploading) there, so old and new recordings play.
+if [ -n "$FROM_HOST" ] && ! grep -q "^RECORDINGS_HOST=." "$ENV_FILE"; then
+  if grep -q "^RECORDINGS_HOST=" "$ENV_FILE"; then sed -i "s|^RECORDINGS_HOST=.*|RECORDINGS_HOST=$FROM_HOST|" "$ENV_FILE"
+  else echo "RECORDINGS_HOST=$FROM_HOST" >> "$ENV_FILE"; fi
+  info "RECORDINGS_HOST=$FROM_HOST (recordings in S3 stay where they are)"
+fi
+
 say "4/5 Recordings"
-if [ "$SKIP_REC" = 1 ]; then
+if [ "$SPLIT" = 1 ] || [ ! -d "$REC_DIR" ]; then
+  info "none on this server - they are made on the telephony server and played from S3"
+elif [ "$SKIP_REC" = 1 ]; then
   info "skipped (--skip-recordings)"
 elif [ -n "$S3" ]; then
   "$AWS" s3 sync --only-show-errors "$PREFIX/recordings" "$REC_DIR" && info "synced from $PREFIX/recordings"
@@ -165,7 +222,7 @@ elif [ -n "$REC" ]; then
 else
   info "none given (--recordings) - calls show as recorded but can't play until the files are back"
 fi
-chown -R asterisk:asterisk "$REC_DIR"
+[ -d "$REC_DIR" ] && chown -R asterisk:asterisk "$REC_DIR"
 
 say "5/5 Start and check"
 systemctl start dialforge-backend dialforge-dialer
@@ -183,7 +240,7 @@ cat <<EOF
 
  Still to do:
   1. DNS: point the client's hostname at this server (if it changed).
-  2. SIP trunk: give the provider this server's IP, then
+  2. SIP trunk$([ "$SPLIT" = 1 ] && echo " (on the TELEPHONY server, if it was rebuilt)"): give the provider its IP, then
        sudo bash $(dirname "$0")/add-trunk.sh --host <provider> --caller-id <did> --channels <n>
      $([ -n "$OLD_TRUNK" ] && echo "(old settings for reference: grep -A12 'type=endpoint' $OLD_TRUNK)")
   3. Agents: Ctrl+F5 and log in; Dialer: start the campaigns again (they were stopped).

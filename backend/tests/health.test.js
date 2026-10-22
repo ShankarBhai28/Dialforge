@@ -28,6 +28,7 @@ function deps(over = {}) {
     licence: () => ({ state: 'ok', customer: 'Acme', expires: '2027-03-31', daysLeft: 169 }),
     phonePortOpen: async () => true,
     stuckRecordings: async () => 0,
+    recordingsElsewhere: false, // a server with a recordings folder
     ...over,
   };
 }

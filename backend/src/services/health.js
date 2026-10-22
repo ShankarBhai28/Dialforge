@@ -138,7 +138,8 @@ const defaultDeps = {
   licence: () => getLicence(),
   phonePortOpen,
   stuckRecordings,
-  recordingsElsewhere: !!process.env.RECORDINGS_HOST && process.env.RECORDINGS_HOST !== os.hostname().split('.')[0],
+  // Recordings are made where Asterisk runs; no recordings folder here = an app server of split servers.
+  recordingsElsewhere: !fs.existsSync(RECORDINGS),
 };
 
 async function collectHealth(deps = defaultDeps) {

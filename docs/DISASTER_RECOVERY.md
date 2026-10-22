@@ -84,8 +84,9 @@ activity can be lost.
    (the restore prints where the old trunk settings are, for reference).
 6. **Backups again**: the restored `.env` has `BACKUP_S3_BUCKET` - check
    `sudo systemctl start dialforge-backup.service` then the Dashboard's System
-   health says the backup was copied off-server. The new server writes to its own
-   folder (its hostname) in the bucket.
+   health says the backup was copied off-server. The new server's nightly backup writes
+   to its own folder (its hostname) in the bucket; recordings keep going to the old
+   folder (`RECORDINGS_HOST`, set by the restore), so old and new recordings all play.
 7. **Check**: log in as a real admin (old password), an agent logs in and calls,
    Reports show the old data, a recording plays, Live Agents / Dialer work.
 8. **Tell people**: agents Ctrl+F5 (or the new address), supervisors start the dialer again.
@@ -97,3 +98,25 @@ activity can be lost.
 | A deploy broke the app | the deploy prints a rollback line (`tar xzf .../backend-files.tgz && sudo systemctl restart ...`) |
 | Stuck agents / calls / dialer rows | `npm run db:check -- --fix` (backs up first) - backend/ops/README.md |
 | Disk full | Dashboard -> System health; recordings older than `RECORDING_RETENTION_DAYS` go nightly; move them to S3 / shorten the keep |
+
+## D. Three servers (one customer split: db, telephony, app) - one server is lost
+
+What each server's nightly backup holds (S3 folder = that server's short hostname):
+the **app** server's folder has the database dump (`db-*.sql.gz`, dumped over the network)
+and its config (`.env`, licence in `etc/viztex`, the shared `secrets.env`); the
+**telephony** server's folder has its config (`etc/asterisk` incl. the trunk) and
+`recordings/`; the DB server has no backup of its own (its data is in the app server's dump).
+The shared passwords (`/etc/viztex/secrets.env`) exist on all three servers.
+
+Install commands and ports: docs/INSTALL_THREE_SERVERS.md. Same package version on all three.
+
+| Lost | Data lost? | Do this |
+|---|---|---|
+| **App server** | none - the data is on the DB server | 1. New server, same private network; give it the old private IP if you can, else update the DB user and ARI/AMI rules (or reinstall those two with `--app-ip`). 2. Copy `/etc/viztex/secrets.env` from the DB or telephony server (step 8 of the guide). 3. `install.sh --role app ...` 4. `sudo bash viztex/install/restore.sh --s3 <bucket> --from-host <old-app-host> --settings-only` - settings (alerts, Telegram, S3, trunk caller ID, `RECORDINGS_HOST`) and the licence. **Never without `--settings-only` here**: a database restore would roll the DB back to last night. 5. DNS `crm.…` → the new Elastic IP. |
+| **Telephony server** | none - recordings are in S3, the dialplan comes with the package | 1. New server; give it the old private IP if you can (else reinstall the app with `--telephony-ip` and the DB with `--telephony-ip`). 2. Copy `secrets.env` from the DB server. 3. `install.sh --role telephony ...`, then `--checks-only`. 4. `add-trunk.sh` again (old trunk settings: the telephony folder's `config-*.tgz` in S3, `etc/asterisk/pjsip.conf`). 5. DNS `sip.…` → the new Elastic IP. Agents: Ctrl+F5. Recordings keep playing (the app keeps `RECORDINGS_HOST`). |
+| **DB server** | up to one day (since the last nightly dump) | 1. New server; give it the old private IP if you can (else reinstall app and telephony with the new `--db-ip`). 2. Copy `secrets.env` from the app server (`sudo cat /etc/viztex/secrets.env` → `~/secrets.env`), then `install.sh --role db --app-ip ... --telephony-ip ... --secrets ~/secrets.env` - same passwords, so the others need no change. 3. On the **app** server: `sudo bash viztex/install/restore.sh --s3 <bucket> --from-host <app-host>` (the app server's own folder holds the dump; full restore). 4. Telephony server: `install.sh --role telephony ... --checks-only` (Asterisk reconnects). |
+| **All three** | up to one day | Install db → telephony → app as in the guide, then the full restore on the app server from the OLD app server's folder; then `add-trunk.sh` on the telephony server. |
+
+The restore on split servers works on the DB server over the network as the app's own user (it may drop and
+re-create its database; its grants stay), loads the dump without the views' old creator, and grants Asterisk's
+read-only user on the telephony server's IP. Recordings are not copied - they stay in S3 and play from there.
