@@ -100,8 +100,8 @@ What it sets up:
 
 From your PC: `DEPLOY_HOST=ubuntu@<client-ip> DEPLOY_KEY=client.pem bash scripts/deploy-dev.sh`
 (backup, migrations, restart, health check, rollback hint - same as dev).
-Dialplan file changes (`backend/asterisk/*.conf`) are copied by hand:
-`sudo install -o root -g asterisk -m 640 <file> /etc/asterisk/ && sudo asterisk -rx 'dialplan reload'`.
+Dialplan file changes (`backend/asterisk/*.conf`) and the recording script are updated by the deploy when they
+changed (`ops/update-telephony.sh`, old files kept in the deploy's backup folder; calls are not affected).
 
 ## Notes
 - The app runs as the `ubuntu` user (as on dev). On AWS that user has password-free sudo,
@@ -141,4 +141,8 @@ sudo bash viztex/install/install.sh --role telephony --domain sip.client.com --e
   --db-ip <db> --app-ip <app> --secrets ~/secrets.env --checks-only
 rm ~/secrets.env                          # on the telephony and app servers
 ```
-Licence, extensions (`set-licence.sh`, `npm run ext:add`) and the trunk: licence and extensions on the app server, `add-trunk.sh` on the telephony server. Recordings: set `BACKUP_S3_BUCKET` on the app server and give the telephony and app servers an IAM role for the bucket - the app plays recordings from S3. Still to come (Phase 1 step 5): backups of the telephony server's config and deploy to three servers.
+Licence, extensions (`set-licence.sh`, `npm run ext:add`) and the trunk: licence and extensions on the app server, `add-trunk.sh` on the telephony server. Recordings: set `BACKUP_S3_BUCKET` on the app server and give the telephony and app servers an IAM role for the bucket - the app plays recordings from S3. 
+
+**Alerts and backups of the other servers:** the telephony and DB servers check their own services, disk and memory every minute (`viztex-server-health.timer`) and alert the same Telegram bot - put the app's `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` into `/etc/viztex/server.env` on each (test: `sudo bash /opt/viztex/ops/server-health.sh --verbose`). The telephony server backs up its Asterisk/TURN config and syncs recordings every night (set `BACKUP_S3_BUCKET` there too); the app server's backup dumps the database over the network.
+
+**Updates:** `DEPLOY_HOST=ubuntu@<app> DEPLOY_TELEPHONY_HOST=ubuntu@<telephony> DEPLOY_KEY=<key> bash scripts/deploy-dev.sh` - checks for calls on the telephony server, deploys the app, then updates the telephony server's dialplan files, recording script and ops scripts (only what changed, old files kept).

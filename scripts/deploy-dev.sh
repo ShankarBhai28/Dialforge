@@ -10,6 +10,10 @@
 #   DEPLOY_HOST   ssh target              (default ubuntu@3.7.241.104 = dialforge-dev)
 #   DEPLOY_DIR    app folder on server    (default dialforge-backend, under the ssh user's home)
 #   DEPLOY_KEY    ssh private key file    (required)
+#   DEPLOY_TELEPHONY_HOST  servers split in three: the telephony server's ssh
+#                 target (same key, or DEPLOY_TELEPHONY_KEY). Its dialplan
+#                 files, recording script and ops scripts are updated too, and
+#                 active calls are checked there. DEPLOY_HOST is the app server.
 #   SKIP_CHECKS=1 skip `npm run check`    (not recommended)
 #   FORCE=1       deploy even if calls are active (restarting drops them)
 #   DRY_RUN=1     build and package only; show what would be sent
@@ -19,6 +23,9 @@ HOST=${DEPLOY_HOST:-ubuntu@3.7.241.104}
 DIR=${DEPLOY_DIR:-dialforge-backend}
 KEY=${DEPLOY_KEY:?set DEPLOY_KEY to your .pem file}
 SSH=(ssh -i "$KEY" -o ConnectTimeout=15 "$HOST")
+TEL=${DEPLOY_TELEPHONY_HOST:-}
+TEL_KEY=${DEPLOY_TELEPHONY_KEY:-$KEY}
+TEL_SSH=(ssh -i "$TEL_KEY" -o ConnectTimeout=15 "$TEL")
 TS=$(date +%Y%m%d-%H%M%S)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
@@ -41,12 +48,22 @@ PKG=$(mktemp -d)/dialforge-deploy.tgz
 # app, and the dependency manifest. Never .env, certs or logs.
 (cd backend && tar czf "$PKG" \
   server.js dialer-engine.js dialer-common.js call-control.js ari.js ami.js db.js seed-users.js \
-  package.json package-lock.json src migrations ops web-dist)
+  package.json package-lock.json src migrations ops asterisk web-dist)
 echo "package: $(du -h "$PKG" | cut -f1)"
 if [ "${DRY_RUN:-}" = 1 ]; then
   tar tzf "$PKG" | sed 's#/.*##' | sort | uniq -c
   echo "DRY_RUN - nothing sent."
   exit 0
+fi
+
+if [ -n "$TEL" ] && [ "${FORCE:-}" != 1 ]; then
+  step "Active calls on the telephony server $TEL"
+  calls=$("${TEL_SSH[@]}" "sudo asterisk -rx 'core show channels count'" | awk '/active call/ {print $1}')
+  if [ "${calls:-0}" != 0 ]; then
+    echo "ABORT: $calls active call(s). Restarting the app would disturb them. Try later or set FORCE=1."
+    exit 3
+  fi
+  echo "none"
 fi
 
 step "Upload"
@@ -58,7 +75,9 @@ set -euo pipefail
 cd ~/"$DIR"
 PKG=/tmp/dialforge-deploy-$TS.tgz
 
-calls=$(sudo asterisk -rx 'core show channels count' | awk '/active call/ {print $1}')
+# Active calls - on this server when it runs Asterisk (the split case checked the telephony server).
+calls=0
+if [ -x /usr/sbin/asterisk ]; then calls=$(sudo asterisk -rx 'core show channels count' | awk '/active call/ {print $1}'); fi
 if [ "${calls:-0}" != 0 ] && [ "${FORCE:-}" != 1 ]; then
   echo "ABORT: $calls active call(s). Restarting would drop them. Try later or set FORCE=1."
   rm -f "$PKG"
@@ -98,12 +117,8 @@ if ! npm run -s db:migrate -- --status >/dev/null 2>&1; then
   fi
 fi
 
-# The recording script runs from /usr/local/bin (Asterisk calls it): update it when it changed.
-if ! cmp -s ~/$DIR/ops/recording-done.sh /usr/local/bin/dialforge-recording-done; then
-  sudo cp -p /usr/local/bin/dialforge-recording-done "$B/dialforge-recording-done.bak" 2>/dev/null || true
-  sudo install -o root -g root -m 755 ~/$DIR/ops/recording-done.sh /usr/local/bin/dialforge-recording-done
-  echo "updated /usr/local/bin/dialforge-recording-done"
-fi
+# Dialplan files and the recording script, when this server runs Asterisk (only what changed).
+if [ -x /usr/sbin/asterisk ]; then bash ~/$DIR/ops/update-telephony.sh ~/$DIR "$B"; fi
 sudo systemctl restart dialforge-backend
 echo "restarted dialforge-backend"
 if [ "$(sum $DIALER_FILES)" != "$old_dialer" ]; then
@@ -124,5 +139,18 @@ echo
 echo "Rollback if needed:"
 echo "  cd ~/$DIR && tar xzf $B/backend-files.tgz && sudo systemctl restart dialforge-backend dialforge-dialer"
 REMOTE
+
+if [ -n "$TEL" ]; then
+  step "Telephony server $TEL"
+  scp -q -i "$TEL_KEY" "$PKG" "$TEL:/tmp/dialforge-deploy-$TS.tgz"
+  "${TEL_SSH[@]}" "TS=$TS bash -s" <<'TELREMOTE'
+set -euo pipefail
+W=$(mktemp -d)
+tar xzf /tmp/dialforge-deploy-$TS.tgz -C "$W" asterisk ops
+rm -f /tmp/dialforge-deploy-$TS.tgz
+bash "$W/ops/update-telephony.sh" "$W" ~/backups/pre-deploy-$TS
+rm -rf "$W"
+TELREMOTE
+fi
 
 step "Done"

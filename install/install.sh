@@ -683,6 +683,68 @@ if has app; then
   systemctl start dialforge-backup.timer
 fi
 
+# Split servers: the telephony and DB servers check themselves every minute and
+# alert (the app server's own checks can't see their disk or services); the
+# telephony server also backs up its config and recordings every night.
+if [ "$SPLIT" = 1 ] && { has telephony || has db; }; then
+  rm -rf /opt/viztex/ops && mkdir -p /opt/viztex && cp -r "$RELEASE/app/ops" /opt/viztex/ops
+  chown -R root:root /opt/viztex && chmod 755 /opt/viztex/ops/*.sh
+  if [ ! -f /etc/viztex/server.env ]; then
+    put /etc/viztex/server.env "$APP_USER:$APP_USER" 600 <<EOF
+# This server's part of a split VIZTEX (read by /opt/viztex/ops scripts).
+SERVER_ROLE=$ROLE
+SERVER_NAME=$([ "$ROLE" = db ] && echo "database $PRIVATE_IP" || echo "$DOMAIN")
+APP_DISPLAY_NAME=$APP_NAME
+# Alerts: the same bot / chat as the app server (its .env), see ops/README.md
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+ALERT_WEBHOOK_URL=
+# Telephony: off-server copy of config + recordings (the bucket the app uses)
+BACKUP_S3_BUCKET=
+BACKUP_KEEP_DAYS=14
+RECORDING_RETENTION_DAYS=90
+EOF
+  fi
+  put /etc/systemd/system/viztex-server-health.service root:root 644 <<'EOF'
+[Unit]
+Description=VIZTEX server health check (split servers)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/viztex/ops/server-health.sh
+EOF
+  put /etc/systemd/system/viztex-server-health.timer root:root 644 <<'EOF'
+[Unit]
+Description=VIZTEX server health check every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+
+[Install]
+WantedBy=timers.target
+EOF
+  if has telephony; then
+    put /etc/systemd/system/dialforge-backup.service root:root 644 <<EOF
+[Unit]
+Description=VIZTEX nightly backup of the telephony server (Asterisk config, recordings)
+
+[Service]
+Type=oneshot
+User=$APP_USER
+Environment=BACKUP_ENV=/etc/viztex/server.env APP_DIR=/opt/viztex
+ExecStart=/bin/bash /opt/viztex/ops/backup.sh
+Nice=10
+IOSchedulingClass=idle
+EOF
+    cp "$RELEASE/app/ops/dialforge-backup.timer" /etc/systemd/system/
+  fi
+  systemctl daemon-reload
+  systemctl enable --now viztex-server-health.timer >> "$LOG" 2>&1
+  has telephony && systemctl enable --now dialforge-backup.timer >> "$LOG" 2>&1
+  info "server health check every minute$(has telephony && echo ', nightly backup'); alerts: /etc/viztex/server.env"
+fi
+
 if [ "$FIREWALL" = 1 ]; then
   ufw allow 22/tcp >/dev/null
   has app && { ufw allow 443/tcp >/dev/null; ufw allow 3000/tcp >/dev/null; }
@@ -716,6 +778,10 @@ check "TURN server" systemctl is-active --quiet coturn
 fi
 if has db; then
 check "MySQL" systemctl is-active --quiet mysql
+fi
+if [ "$SPLIT" = 1 ] && { has telephony || has db; }; then
+check "Server health check every minute (alerts: /etc/viztex/server.env)" systemctl is-enabled --quiet viztex-server-health.timer
+has telephony && check "Nightly backup scheduled (config + recordings)" systemctl is-enabled --quiet dialforge-backup.timer
 fi
 if [ "$SPLIT" = 0 ]; then
 check "MySQL and Asterisk HTTP (ARI) only on 127.0.0.1" bash -c "! ss -lntH | awk '{print \$4}' | grep -qE '^(\*|0\.0\.0\.0|\[::\]):(3306|33060|8088)\$'"
