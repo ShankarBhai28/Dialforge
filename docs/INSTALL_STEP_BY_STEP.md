@@ -4,7 +4,8 @@ A fresh, standalone VIZTEX (one server: database, Asterisk, app) on a new
 AWS instance, done by you, with **what each step does, why, and how to check
 it**. Follow it top to bottom; tick each step. Short reference versions:
 [INSTALL.md](INSTALL.md) (installer) and [CLIENT_PLAYBOOK.md](CLIENT_PLAYBOOK.md)
-(a real client).
+(a real client). A bigger customer on three servers (database, telephony, app):
+[INSTALL_THREE_SERVERS.md](INSTALL_THREE_SERVERS.md).
 
 **Time:** about 2-3 hours the first time (45 min of it is waiting for Asterisk to compile).
 **Cost:** the instance costs roughly ₹7-10 per hour while it runs, plus a small

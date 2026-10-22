@@ -21,6 +21,8 @@
 # Calls from the trunk enter the [from-trunk] dialplan -> the app routes them
 # by DID (DID Numbers: each number -> a queue). Outgoing calls use endpoint "trunk".
 # A backup of pjsip.conf and .env is kept; nothing else is touched.
+# Servers split in three: run it on the telephony server (it has Asterisk but
+# no app); it then prints the 3 settings to add to the app server's .env.
 set -euo pipefail
 
 HOST="" PORT=5060 MATCH="" USERNAME="" PASSWORD="" REGISTER=0 CALLER_ID="" CODECS="ulaw,alaw" CHANNELS=""
@@ -52,13 +54,16 @@ APP_DIR="$(getent passwd "$APP_USER" | cut -d: -f6)/dialforge-backend"
 ENV_FILE="$APP_DIR/.env"
 PJSIP=/etc/asterisk/pjsip.conf
 MARKER='; ---- trunk (add-trunk.sh) ----'
-[ -f "$ENV_FILE" ] || die "$ENV_FILE not found - run install.sh first"
+[ -f "$PJSIP" ] || die "$PJSIP not found - run this on the server that runs Asterisk (install.sh first)"
 grep -qF "$MARKER" "$PJSIP" || die "$PJSIP has no trunk marker - was it written by install.sh?"
+# No app here: the telephony server of split servers (the app's .env is on the app server).
+HAS_APP=1; [ -f "$ENV_FILE" ] || HAS_APP=0
 PUBLIC_IP=$(sed -n 's/^external_signaling_address=//p' "$PJSIP" | head -1)
 MATCH="${MATCH:-$HOST}"
 
 B="/etc/viztex/backup-trunk-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$B" && cp -p "$PJSIP" "$ENV_FILE" "$B/" && chmod -R go-rwx "$B"
+mkdir -p "$B" && cp -p "$PJSIP" "$B/" && chmod -R go-rwx "$B"
+[ "$HAS_APP" = 0 ] || cp -p "$ENV_FILE" "$B/"
 echo "backup: $B"
 
 # Everything above the marker stays; the trunk part is rewritten.
@@ -122,12 +127,13 @@ install -o root -g asterisk -m 640 "$PJSIP.new" "$PJSIP" && rm -f "$PJSIP.new"
 setenv() { # setenv KEY VALUE in .env
   if grep -q "^$1=" "$ENV_FILE"; then sed -i "s|^$1=.*|$1=$2|" "$ENV_FILE"; else echo "$1=$2" >> "$ENV_FILE"; fi
 }
-setenv TRUNK_ENDPOINT trunk
-[ -z "$CALLER_ID" ] || setenv TRUNK_CALLER_ID "$CALLER_ID"
-[ -z "$CHANNELS" ] || setenv DIALER_MAX_TRUNK_CHANNELS "$CHANNELS"
-
 /usr/sbin/asterisk -rx 'pjsip reload' >/dev/null
-systemctl restart dialforge-backend dialforge-dialer
+if [ "$HAS_APP" = 1 ]; then
+  setenv TRUNK_ENDPOINT trunk
+  [ -z "$CALLER_ID" ] || setenv TRUNK_CALLER_ID "$CALLER_ID"
+  [ -z "$CHANNELS" ] || setenv DIALER_MAX_TRUNK_CHANNELS "$CHANNELS"
+  systemctl restart dialforge-backend dialforge-dialer
+fi
 sleep 3
 echo
 /usr/sbin/asterisk -rx 'pjsip show endpoint trunk' | sed -n '1,12p' | grep -E 'Endpoint:|Aor:|Contact:|Identify' || true
@@ -139,5 +145,14 @@ Trunk added (endpoint "trunk", calls in -> [from-trunk]).
  - Open UDP 5060 to the provider's IP ($MATCH) in the security group / firewall.
  - Map each DID to a queue: DID Numbers (the campaigns that have the queue take its calls).
  - Test: an agent calls a mobile number; then call a DID from a mobile.
-Undo: sudo cp $B/pjsip.conf $PJSIP && sudo cp $B/.env $ENV_FILE && sudo asterisk -rx 'pjsip reload' && sudo systemctl restart dialforge-backend dialforge-dialer
 EOF
+if [ "$HAS_APP" = 1 ]; then
+  echo "Undo: sudo cp $B/pjsip.conf $PJSIP && sudo cp $B/.env $ENV_FILE && sudo asterisk -rx 'pjsip reload' && sudo systemctl restart dialforge-backend dialforge-dialer"
+else
+  cat <<EOF
+ - This is the telephony server: on the APP server, in ~/dialforge-backend/.env set
+     TRUNK_ENDPOINT=trunk$([ -z "$CALLER_ID" ] || printf '\n     TRUNK_CALLER_ID=%s' "$CALLER_ID")$([ -z "$CHANNELS" ] || printf '\n     DIALER_MAX_TRUNK_CHANNELS=%s' "$CHANNELS")
+   then: sudo systemctl restart dialforge-backend dialforge-dialer
+Undo here: sudo cp $B/pjsip.conf $PJSIP && sudo asterisk -rx 'pjsip reload'
+EOF
+fi

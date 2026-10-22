@@ -112,7 +112,7 @@ changed (`ops/update-telephony.sh`, old files kept in the deploy's backup folder
 ## One customer on three servers (Phase 1)
 
 For a bigger customer (~30-150 agents): database, telephony and app each on their own server, in one VPC.
-**Not rehearsed yet** (Phase 1 step 6) - try it on temporary servers before a customer.
+Rehearsed on 22 Oct 2026 (RUNBOOK). Step by step, with checks after each step: [INSTALL_THREE_SERVERS.md](INSTALL_THREE_SERVERS.md).
 
 | Server | Size (~100 agents, estimate) | Name in DNS | Open to the internet |
 |---|---|---|---|
