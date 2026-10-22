@@ -67,7 +67,7 @@ fi
 
 B=~/backups/pre-deploy-$TS
 mkdir -p "$B"
-tar czf "$B/backend-files.tgz" --exclude=node_modules --exclude=certs --exclude='*.log' --exclude=.env .
+tar czf "$B/backend-files.tgz" --exclude=node_modules --exclude=certs --exclude=recording-cache --exclude='*.log' --exclude=.env .
 echo "backup: $B"
 
 # What changed decides what restarts.
@@ -98,6 +98,12 @@ if ! npm run -s db:migrate -- --status >/dev/null 2>&1; then
   fi
 fi
 
+# The recording script runs from /usr/local/bin (Asterisk calls it): update it when it changed.
+if ! cmp -s ~/$DIR/ops/recording-done.sh /usr/local/bin/dialforge-recording-done; then
+  sudo cp -p /usr/local/bin/dialforge-recording-done "$B/dialforge-recording-done.bak" 2>/dev/null || true
+  sudo install -o root -g root -m 755 ~/$DIR/ops/recording-done.sh /usr/local/bin/dialforge-recording-done
+  echo "updated /usr/local/bin/dialforge-recording-done"
+fi
 sudo systemctl restart dialforge-backend
 echo "restarted dialforge-backend"
 if [ "$(sum $DIALER_FILES)" != "$old_dialer" ]; then

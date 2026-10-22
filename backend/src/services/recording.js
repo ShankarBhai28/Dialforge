@@ -5,8 +5,10 @@
 // follows the customer through transfers and conferences. Option b = only
 // while bridged (no ringing / waiting in queue). When the call ends,
 // Asterisk runs /usr/local/bin/dialforge-recording-done, which turns the
-// WAV into an MP3. calls.recording_path holds the MP3 path; playback falls
-// back to the WAV if the conversion didn't happen.
+// WAV into an MP3 and, with an S3 bucket set, uploads it right away
+// (services/recordingStore.js). calls.recording_path holds the MP3 path;
+// playback falls back to the WAV if the conversion didn't happen, and to
+// S3 when the file isn't on this server.
 //
 // Recorded: calls of campaigns with record_calls = 1 (the default), and
 // calls without a campaign unless RECORD_CALLS_WITHOUT_CAMPAIGN=0.
@@ -26,6 +28,11 @@ function recordingBase(callId, now = new Date()) {
   const day = `${now.getUTCFullYear()}/${p(now.getUTCMonth() + 1)}/${p(now.getUTCDate())}`;
   const stamp = `${now.getUTCFullYear()}${p(now.getUTCMonth() + 1)}${p(now.getUTCDate())}-${p(now.getUTCHours())}${p(now.getUTCMinutes())}${p(now.getUTCSeconds())}`;
   return path.posix.join(BASE, day, `call-${Number(callId)}-${stamp}`);
+}
+
+/** What Asterisk runs when the recording ends: convert, and upload to S3 if a bucket is set. */
+function doneCommand(base, prefix = require('./recordingStore').s3Prefix()) {
+  return `${DONE_COMMAND} ${base}.wav${prefix ? ` ${prefix}` : ''}`;
 }
 
 async function shouldRecord(campaignId, deps = { pool }) {
@@ -52,7 +59,7 @@ async function startRecording({ callId, channelName, campaignId }, deps = { pool
       channel: channelName,
       file: `${base}.wav`,
       options: 'b',
-      command: `${DONE_COMMAND} ${base}.wav`,
+      command: doneCommand(base),
     });
     // Only the first recording of a call is kept as "the" recording.
     await deps.pool.query('UPDATE calls SET recording_path = ? WHERE id = ? AND recording_path IS NULL', [
@@ -81,4 +88,4 @@ function playableFile(recordingPath, exists = fs.existsSync) {
   return null;
 }
 
-module.exports = { BASE, recordingBase, shouldRecord, startRecording, playableFile };
+module.exports = { BASE, doneCommand, recordingBase, shouldRecord, startRecording, playableFile };

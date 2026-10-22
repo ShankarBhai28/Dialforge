@@ -54,6 +54,8 @@ Calls are recorded when the customer is connected to an agent (click-to-call: wh
 
 Files: `/var/spool/asterisk/monitor/dialforge/YYYY/MM/DD/call-<id>-<time>.mp3` (~0.2 MB a minute). Kept `RECORDING_RETENTION_DAYS` (default 90) on the server, removed by the nightly backup (after the S3 sync, if S3 is set).
 
+**In S3 right after each call** (with `BACKUP_S3_BUCKET` or `RECORDINGS_S3_BUCKET` set): the recording script uploads the MP3 as soon as it is converted, to `s3://<bucket>/dialforge/<server>/recordings/YYYY/MM/DD/` - the same place the nightly backup syncs to, which catches up a failed upload. Upload problems are in the system log: `journalctl -t dialforge-recording`. **Playback** uses the file on the server while it is there, otherwise fetches it from S3 into `~/dialforge-backend/recording-cache/` (kept a day), so recordings older than the keep period still play, and an app server without the recordings folder (servers split) plays them too - set `RECORDINGS_HOST=<the Asterisk server's short host name>` there. The server role needs `s3:GetObject` on the bucket (the backup role already has it). Optional: an S3 lifecycle rule to delete recordings after the period your customer must keep them.
+
 Install once per server:
 ```
 sudo apt-get install -y ffmpeg

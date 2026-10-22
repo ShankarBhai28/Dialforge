@@ -15,7 +15,7 @@ const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/
 
 const { campaignInScope, scopeCondition } = require('../services/access');
 const { audit } = require('../services/audit');
-const { playableFile } = require('../services/recording');
+const { findRecording } = require('../services/recordingStore');
 const { agentCanSeeLead, findLeadByPhone } = require('../services/leadHistory');
 const { outcomeLabel } = require('../services/reports/common');
 const { localToday, parseRange } = require('../services/reports/time');
@@ -82,9 +82,8 @@ router.get('/agent/calls/:id/recording', requireCaller, async (req, res) => {
   }
   if (!allowed) return res.status(403).json({ error: 'that call is not one you can listen to' });
   if (!call.recording_path) return res.status(404).json({ error: 'this call was not recorded' });
-  const found = playableFile(call.recording_path);
-  if (!found)
-    return res.status(410).json({ error: 'the recording is no longer on the server (older than the keep period)' });
+  const found = await findRecording(call.recording_path);
+  if (!found) return res.status(410).json({ error: 'the recording is no longer kept (not on the server or in S3)' });
   void audit({ user, action: 'calls.recording_play', entity: 'calls', entityId: call.id, ip: req.ip });
   res.type(found.type);
   res.sendFile(found.file, (err) => {
@@ -133,9 +132,8 @@ router.get('/admin/calls/:id/recording', requirePermission('calls', 'recordings'
   if (!call || !campaignInScope(req.access.scope, call.campaign_id))
     return res.status(404).json({ error: 'call not found' });
   if (!call.recording_path) return res.status(404).json({ error: 'this call was not recorded' });
-  const found = playableFile(call.recording_path);
-  if (!found)
-    return res.status(410).json({ error: 'the recording is no longer on the server (older than the keep period)' });
+  const found = await findRecording(call.recording_path);
+  if (!found) return res.status(410).json({ error: 'the recording is no longer kept (not on the server or in S3)' });
   void audit({
     user: req.session.user,
     action: req.query.download ? 'calls.recording_download' : 'calls.recording_play',

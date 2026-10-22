@@ -9,3 +9,4 @@ backend/web-dist/
 
 # Release packages (scripts/make-release.sh)
 dist/
+backend/recording-cache/
