@@ -780,7 +780,7 @@ sleep 4
 if has telephony; then
 check "Asterisk running" systemctl is-active --quiet asterisk
 check "Asterisk HTTPS / WebSocket on 8089" bash -c "/usr/sbin/asterisk -rx 'http show status' | grep -q 'HTTPS Server Enabled'"
-check "Asterisk reads MySQL (ODBC)$(if [ "$SPLIT" = 1 ]; then echo ' - on split servers only after the app install: then --checks-only'; fi)" bash -c "/usr/sbin/asterisk -rx 'odbc show dialforge' | grep -qiE 'active connections: [1-9]|connected: yes'"
+check "Asterisk reads MySQL (ODBC)$(if [ "$SPLIT" = 1 ]; then echo ' - on split servers only after the app install: then --checks-only'; fi)" bash -c "/usr/sbin/asterisk -rx 'pjsip show endpoints' >/dev/null; /usr/sbin/asterisk -rx 'odbc show dialforge' | grep -qiE 'active connections: [1-9]|connected: yes'"
 check "Asterisk modules: AMD, MixMonitor, realtime" bash -c "for m in app_amd app_mixmonitor res_config_odbc; do /usr/sbin/asterisk -rx \"module show like \$m\" | grep -q Running || exit 1; done"
 check "TURN server" systemctl is-active --quiet coturn
 [ "$SELF_SIGNED" = 1 ] || [ "$ROLE" != telephony ] || check "Certificate valid for $DOMAIN (agents' phones, 8089)" bash -c "echo | openssl s_client -connect localhost:8089 -servername $DOMAIN 2>/dev/null | openssl x509 -noout -checkhost $DOMAIN | grep -q 'does match'"
@@ -855,8 +855,13 @@ fi
 cat <<EOF
 
  Open these ports to the internet (AWS: the security group):
-   TCP $APP_PORT (app)$([ "$APP_PORT" = 3000 ] || echo ", 3000 (old links)"), 8089 (agents' phones), 80 (certificate renewal), 3478 (TURN)
-   UDP 3478, 10000-20000 (call audio), 49152-49300 (TURN relay)
+$(if [ "$SPLIT" = 1 ]; then
+  echo "   TCP $APP_PORT (app)$([ "$APP_PORT" = 3000 ] || echo ", 3000 (old links)"), 80 (certificate renewal)"
+  echo "   (agents' phones, TURN and call audio are on the telephony server, $TEL_DOMAIN)"
+else
+  echo "   TCP $APP_PORT (app)$([ "$APP_PORT" = 3000 ] || echo ", 3000 (old links)"), 8089 (agents' phones), 80 (certificate renewal), 3478 (TURN)"
+  echo "   UDP 3478, 10000-20000 (call audio), 49152-49300 (TURN relay)"
+fi)
    SSH 22 from your office IP only. Never open 3306 (MySQL) or 5038 (AMI).
 
  Next:
@@ -865,7 +870,7 @@ cat <<EOF
         cd $APP_DIR && npm run ext:add -- --from 1001 --count 10
       Then log in: Users -> add agents (each with an extension), Teams, Queues, Campaigns.
    2. The client's SIP trunk:  sudo bash $(dirname "$0")/add-trunk.sh --help
-   3. Alerts / off-server backups: ALERT_WEBHOOK_URL, BACKUP_S3_BUCKET in $ENV_FILE
+   3. Alerts (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID; test: npm run alert:test) and off-server backups (BACKUP_S3_BUCKET) in $ENV_FILE
       (then: sudo systemctl restart dialforge-backend) - see $APP_DIR/ops/README.md
 ==========================================================================
 EOF
