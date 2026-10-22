@@ -108,3 +108,37 @@ Dialplan file changes (`backend/asterisk/*.conf`) are copied by hand:
   which the nightly backup uses to copy `/etc/asterisk`.
 - Internal names stay `dialforge` (folder, services, Asterisk app names) on every server,
   so the same scripts and docs work everywhere.
+
+## One customer on three servers (Phase 1)
+
+For a bigger customer (~30-150 agents): database, telephony and app each on their own server, in one VPC.
+**Not rehearsed yet** (Phase 1 step 6) - try it on temporary servers before a customer.
+
+| Server | Size (~100 agents, estimate) | Name in DNS | Open to the internet |
+|---|---|---|---|
+| DB | 2 vCPU / 8 GB | none needed | nothing (SSH from your IP) |
+| Telephony | 4 vCPU / 8 GB | `sip.client.com` | TCP 8089, 80, 3478; UDP 3478, 10000-20000, 49152-49300; UDP 5060 from the provider only |
+| App | 2 vCPU / 4 GB | `crm.client.com` | TCP 443, 3000, 80 |
+
+Private network rules (security groups): DB TCP 3306 only from the app and telephony servers; telephony TCP 8088 (ARI) and 5038 (AMI) only from the app server.
+
+In this order (the same package unpacked on each server; `<...>` = private IPs):
+```
+# 1. DB server - makes the shared secrets
+sudo bash viztex/install/install.sh --role db --app-ip <app> --telephony-ip <tel>
+sudo cat /etc/viztex/secrets.env        # copy to the other two as ~/secrets.env (over SSH, never chat/email)
+
+# 2. Telephony server
+sudo bash viztex/install/install.sh --role telephony --domain sip.client.com --email you@x.com \
+  --db-ip <db> --app-ip <app> --secrets ~/secrets.env
+
+# 3. App server
+sudo bash viztex/install/install.sh --role app --domain crm.client.com --admin boss --email you@x.com \
+  --db-ip <db> --telephony-ip <tel> --telephony-domain sip.client.com --secrets ~/secrets.env
+
+# 4. Telephony server again: its database check passes now that the app made the tables
+sudo bash viztex/install/install.sh --role telephony --domain sip.client.com --email you@x.com \
+  --db-ip <db> --app-ip <app> --secrets ~/secrets.env --checks-only
+rm ~/secrets.env                          # on the telephony and app servers
+```
+Licence, extensions (`set-licence.sh`, `npm run ext:add`) and the trunk: licence and extensions on the app server, `add-trunk.sh` on the telephony server. Recordings: set `BACKUP_S3_BUCKET` on the app server and give the telephony and app servers an IAM role for the bucket - the app plays recordings from S3. Still to come (Phase 1 step 5): backups of the telephony server's config and deploy to three servers.

@@ -32,7 +32,8 @@ errors=()
 
 # 1. database
 dbfile="$DEST/db-$TS.sql.gz"
-if MYSQL_PWD="$DB_PASSWORD" mysqldump --single-transaction --routines --no-tablespaces -u"${DB_USER:-dialforge}" "$DB" | gzip -9 > "$dbfile" \
+# DB_HOST: the database server when the servers are split (localhost otherwise).
+if MYSQL_PWD="$DB_PASSWORD" mysqldump --single-transaction --routines --no-tablespaces -h"${DB_HOST:-localhost}" -u"${DB_USER:-dialforge}" "$DB" | gzip -9 > "$dbfile" \
    && gzip -t "$dbfile" && [ "$(stat -c %s "$dbfile")" -gt 1000 ]; then
   chmod 600 "$dbfile"
   echo "database: $dbfile ($(du -h "$dbfile" | cut -f1))"
@@ -43,8 +44,9 @@ fi
 
 # 2. Asterisk / ODBC / TURN config and the app's .env (install/restore.sh reads them)
 cfgfile="$DEST/config-$TS.tgz"
-cfgparts=(etc/asterisk etc/odbc.ini "${APP#/}/.env")
-for p in etc/turnserver.conf etc/viztex; do [ -e "/$p" ] && cfgparts+=("$p"); done
+# Only what this server has (an app server of split servers has no Asterisk).
+cfgparts=("${APP#/}/.env")
+for p in etc/asterisk etc/odbc.ini etc/turnserver.conf etc/viztex; do [ -e "/$p" ] && cfgparts+=("$p"); done
 if sudo -n tar czf "$cfgfile" -C / "${cfgparts[@]}" 2>/dev/null && sudo -n chown "$(id -u):$(id -g)" "$cfgfile"; then
   chmod 600 "$cfgfile"
   echo "config: $cfgfile ($(du -h "$cfgfile" | cut -f1))"
@@ -63,7 +65,9 @@ if [ -n "${BACKUP_S3_BUCKET:-}" ]; then
     "$AWS" s3 cp --only-show-errors --sse AES256 "$f" "$prefix/$(basename "$f")" || ok=0
   done
   if [ -d /var/spool/asterisk/monitor/dialforge ]; then
-    "$AWS" s3 sync --only-show-errors --sse AES256 /var/spool/asterisk/monitor/dialforge "$prefix/recordings" || ok=0
+    if [ -d /var/spool/asterisk/monitor/dialforge ]; then
+      "$AWS" s3 sync --only-show-errors --sse AES256 /var/spool/asterisk/monitor/dialforge "$prefix/recordings" || ok=0
+    fi
   fi
   if [ $ok = 1 ]; then offsite="ok"; echo "copied to $prefix"; else offsite="failed"; errors+=("upload to S3 failed"); fi
 fi

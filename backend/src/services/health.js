@@ -72,10 +72,16 @@ function certValidTo() {
   return new Date(new X509Certificate(fs.readFileSync(CERT_FILE)).validTo);
 }
 
-/** Does Asterisk answer on the agents' phone port (secure WebSocket, 8089)? */
-function phonePortOpen(port = 8089) {
+/**
+ * Does Asterisk answer on the agents' phone port (secure WebSocket, 8089)?
+ * On this server, or on the telephony server (ARI_HOST) when they are split.
+ */
+function phonePortOpen(
+  port = 8089,
+  host = /^(localhost|127\.)/.test(process.env.ARI_HOST || 'localhost') ? '127.0.0.1' : process.env.ARI_HOST,
+) {
   return new Promise((resolve) => {
-    const sock = tls.connect({ host: '127.0.0.1', port, rejectUnauthorized: false, timeout: 3000 }, () => {
+    const sock = tls.connect({ host, port, rejectUnauthorized: false, timeout: 3000 }, () => {
       sock.end();
       resolve(true);
     });
@@ -132,6 +138,7 @@ const defaultDeps = {
   licence: () => getLicence(),
   phonePortOpen,
   stuckRecordings,
+  recordingsElsewhere: !!process.env.RECORDINGS_HOST && process.env.RECORDINGS_HOST !== os.hostname().split('.')[0],
 };
 
 async function collectHealth(deps = defaultDeps) {
@@ -263,12 +270,15 @@ async function collectHealth(deps = defaultDeps) {
   else if (lic.state === 'ok')
     checks.push(ok('licence', 'Licence', lic.expires ? `until ${lic.expires}` : 'no end date'));
 
-  const stuck = await d.stuckRecordings(d.now());
-  checks.push(
-    stuck
-      ? warn('recordings', 'Call recordings', `${stuck} not converted to MP3 - check ffmpeg and disk`)
-      : ok('recordings', 'Call recordings', 'converting'),
-  );
+  // Recordings are made where Asterisk runs; an app server of split servers has none to look at.
+  if (!d.recordingsElsewhere) {
+    const stuck = await d.stuckRecordings(d.now());
+    checks.push(
+      stuck
+        ? warn('recordings', 'Call recordings', `${stuck} not converted to MP3 - check ffmpeg and disk`)
+        : ok('recordings', 'Call recordings', 'converting'),
+    );
+  }
 
   const overall = checks.some((c) => c.status === 'fail')
     ? 'fail'
@@ -324,7 +334,7 @@ function whoAmI(env = process.env, licence = () => getLicence()) {
   } catch {
     /* no licence */
   }
-  return `${name || env.APP_DISPLAY_NAME || 'VIZTEX'} (${env.SIP_DOMAIN || os.hostname()})`;
+  return `${name || env.APP_DISPLAY_NAME || 'VIZTEX'} (${env.APP_DOMAIN || env.SIP_DOMAIN || os.hostname()})`;
 }
 
 const line = (c, prefix) =>

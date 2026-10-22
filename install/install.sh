@@ -19,6 +19,21 @@
 #   --public-ip IP      override the detected public IP
 #   --firewall          also open the ports in ufw (cloud: use the security group)
 #   --skip-asterisk-build   Asterisk 22 is already installed
+#   --checks-only       run only the final checks (after fixing something, or on
+#                       the telephony server once the app server is installed)
+#
+# One customer on three servers (Phase 1) - in this order, each on its own server:
+#   --role db         MySQL only, reachable from the app and telephony servers
+#                       --app-ip IP --telephony-ip IP    (their private IPs)
+#   --role telephony  Asterisk + TURN + recordings
+#                       --domain sip.client.com --email ... --db-ip IP --app-ip IP
+#                       --secrets <the DB server's /etc/viztex/secrets.env>
+#   --role app        the VIZTEX app + dialer
+#                       --domain crm.client.com --admin ... --email ... --db-ip IP
+#                       --telephony-ip IP --telephony-domain sip.client.com
+#                       --secrets <the DB server's /etc/viztex/secrets.env>
+#                       [--telephony-host NAME]  (default: ip-a-b-c-d from --telephony-ip)
+#   Default --role all: everything on this one server (unchanged).
 #
 # Safe to run again: finished steps are skipped, secrets are kept
 # (/etc/viztex/secrets.env), existing configs are backed up before changes.
@@ -26,7 +41,8 @@ set -euo pipefail
 
 # ---------------------------------------------------------------- options
 DOMAIN="" ADMIN="" EMAIL="" TZ_NAME="Asia/Kolkata" APP_NAME="VIZTEX"
-SELF_SIGNED=0 PUBLIC_IP="" FIREWALL=0 SKIP_AST_BUILD=0
+SELF_SIGNED=0 PUBLIC_IP="" FIREWALL=0 SKIP_AST_BUILD=0 CHECKS_ONLY=0
+ROLE=all APP_IP="" TEL_IP="" DB_IP="" TEL_DOMAIN="" TEL_HOST="" SECRETS_FROM="" ADMIN_PASSWORD_LINE=""
 ASTERISK_VERSION="${ASTERISK_VERSION:-22.11.0}"
 NODE_MAJOR=24
 DB_NAME="viztex"
@@ -41,10 +57,23 @@ while [ $# -gt 0 ]; do
     --public-ip) PUBLIC_IP="$2"; shift 2 ;;
     --firewall) FIREWALL=1; shift ;;
     --skip-asterisk-build) SKIP_AST_BUILD=1; shift ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+    --checks-only) CHECKS_ONLY=1; shift ;;
+    --role) ROLE="$2"; shift 2 ;;
+    --app-ip) APP_IP="$2"; shift 2 ;;
+    --telephony-ip) TEL_IP="$2"; shift 2 ;;
+    --db-ip) DB_IP="$2"; shift 2 ;;
+    --telephony-domain) TEL_DOMAIN="$2"; shift 2 ;;
+    --telephony-host) TEL_HOST="$2"; shift 2 ;;
+    --secrets) SECRETS_FROM="$2"; shift 2 ;;
+    -h|--help) sed -n '2,43p' "$0"; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
+
+case "$ROLE" in all | db | telephony | app) ;; *) echo "--role must be all, db, telephony or app" >&2; exit 2 ;; esac
+# has <part>: does this server run that part? (all = every part)
+has() { [ "$ROLE" = all ] || [ "$ROLE" = "$1" ]; }
+SPLIT=0; [ "$ROLE" = all ] || SPLIT=1
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 RELEASE="$(dirname "$HERE")"                       # .../viztex
@@ -60,6 +89,12 @@ die()  { printf '\033[1;31mFAILED: %s\033[0m\n   Full log: %s\n' "$*" "$LOG" >&2
 done_step() { touch "$STATE/$1"; }
 is_done() { [ -f "$STATE/$1" ]; }
 rand() { openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c "${1:-32}"; }
+# The port this server's app really uses (an older .env may keep 3000) and its address.
+app_port() {
+  APP_PORT=$(sed -n 's/^PORT=//p' "$ENV_FILE" 2>/dev/null | tail -1)
+  APP_PORT=${APP_PORT:-3000}
+  APP_URL="https://$DOMAIN$([ "$APP_PORT" = 443 ] || echo ":$APP_PORT")"
+}
 # Writes a config file (backing up what was there), owner and mode.
 put() { # put <file> <owner> <mode>  (content on stdin)
   local f="$1"
@@ -80,15 +115,30 @@ mkdir -p "$STATE" /etc/viztex
 chmod 755 /etc/viztex
 : >> "$LOG"; chmod 600 "$LOG"
 
-[ -n "$DOMAIN" ] || die "--domain is required (the hostname agents will open)"
-[ -n "$ADMIN" ] || die "--admin is required (the first Super Admin's username)"
-[ "$SELF_SIGNED" = 1 ] || [ -n "$EMAIL" ] || die "--email is required for the Let's Encrypt certificate (or use --self-signed to test)"
-[[ "$ADMIN" =~ ^[A-Za-z0-9._-]{3,50}$ ]] || die "--admin: 3-50 letters, digits, dots, dashes or underscores"
+ipok() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; }
+if has app || has telephony; then
+  [ -n "$DOMAIN" ] || die "--domain is required (the hostname agents will open)"
+  [ "$SELF_SIGNED" = 1 ] || [ -n "$EMAIL" ] || die "--email is required for the Let's Encrypt certificate (or use --self-signed to test)"
+fi
+if has app; then
+  [ -n "$ADMIN" ] || die "--admin is required (the first Super Admin's username)"
+  [[ "$ADMIN" =~ ^[A-Za-z0-9._-]{3,50}$ ]] || die "--admin: 3-50 letters, digits, dots, dashes or underscores"
+fi
+case "$ROLE" in
+  db) ipok "$APP_IP" && ipok "$TEL_IP" || die "--role db needs --app-ip and --telephony-ip (the other servers' private IPs)"
+      DOMAIN=${DOMAIN:-database} ;;
+  telephony) ipok "$DB_IP" && ipok "$APP_IP" || die "--role telephony needs --db-ip and --app-ip (private IPs)" ;;
+  app) ipok "$DB_IP" && ipok "$TEL_IP" && [ -n "$TEL_DOMAIN" ] ||
+         die "--role app needs --db-ip, --telephony-ip and --telephony-domain (the name agents' phones connect to)"
+       TEL_HOST=${TEL_HOST:-ip-${TEL_IP//./-}} ;;
+esac
+TEL_DOMAIN=${TEL_DOMAIN:-$DOMAIN}
+ENV_FILE="$APP_DIR/.env"
 [ -d "$RELEASE/app" ] || die "app/ not found next to install/ - unpack the whole release package"
 . /etc/os-release
 [ "$ID" = ubuntu ] && [ "${VERSION_ID%%.*}" -ge 24 ] || die "needs Ubuntu 24.04 (this is $PRETTY_NAME)"
 
-say "VIZTEX install $(cat "$RELEASE/VERSION" 2>/dev/null || echo '?') - $DOMAIN"
+say "VIZTEX install $(cat "$RELEASE/VERSION" 2>/dev/null || echo '?') - $DOMAIN$([ "$ROLE" = all ] || echo " (role: $ROLE)")"
 info "app user: $APP_USER   app dir: $APP_DIR   log: $LOG"
 # The nightly backup (runs as the app user) copies /etc/asterisk with sudo -n.
 sudo -n -l -U "$APP_USER" 2>/dev/null | grep -q 'NOPASSWD: ALL' ||
@@ -107,11 +157,12 @@ if [ -z "$PUBLIC_IP" ]; then
   [ -n "$TOKEN" ] && PUBLIC_IP=$(curl -s -m 3 -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4 || true)
   [[ "$PUBLIC_IP" =~ ^[0-9.]+$ ]] || PUBLIC_IP=$(curl -s -m 5 https://checkip.amazonaws.com | tr -d '[:space:]')
 fi
-[[ "$PUBLIC_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "couldn't find the public IP - pass --public-ip"
-info "public IP $PUBLIC_IP   private IP $PRIVATE_IP   local net $LOCAL_NET"
+# The database server may have no public IP at all (private subnet).
+ipok "$PUBLIC_IP" || [ "$ROLE" = db ] || die "couldn't find the public IP - pass --public-ip"
+info "public IP ${PUBLIC_IP:-none}   private IP $PRIVATE_IP   local net $LOCAL_NET"
 
 DNS_IP=$(getent ahostsv4 "$DOMAIN" | awk 'NR==1 {print $1}' || true)
-if [ "$DNS_IP" != "$PUBLIC_IP" ]; then
+if [ "$ROLE" != db ] && [ "$DNS_IP" != "$PUBLIC_IP" ]; then
   if [ "$SELF_SIGNED" = 1 ]; then
     warn "$DOMAIN resolves to '${DNS_IP:-nothing}', not $PUBLIC_IP - fine for a self-signed test"
   else
@@ -119,7 +170,15 @@ if [ "$DNS_IP" != "$PUBLIC_IP" ]; then
   fi
 fi
 
-# Secrets: made once, kept across re-runs.
+# Secrets: made once, kept across re-runs. Split servers share one file:
+# made by the DB server's install, copied to the others with --secrets.
+if [ ! -f "$SECRETS" ] && [ -n "$SECRETS_FROM" ]; then
+  [ -f "$SECRETS_FROM" ] || die "--secrets $SECRETS_FROM: file not found"
+  install -m 600 "$SECRETS_FROM" "$SECRETS"
+fi
+if [ ! -f "$SECRETS" ] && [ "$ROLE" != all ] && [ "$ROLE" != db ]; then
+  die "no $SECRETS yet: copy the DB server's /etc/viztex/secrets.env here and pass --secrets <file>"
+fi
 if [ ! -f "$SECRETS" ]; then
   umask 077
   cat > "$SECRETS" <<EOF
@@ -135,6 +194,7 @@ fi
 chmod 600 "$SECRETS"
 . "$SECRETS"
 
+if [ "$CHECKS_ONLY" = 0 ]; then
 # ---------------------------------------------------------------- 1. packages
 if ! is_done packages; then
   say "1/9 System packages"
@@ -142,20 +202,24 @@ if ! is_done packages; then
   timedatectl set-timezone UTC 2>/dev/null || true # the app stores UTC; reports use --timezone
   apt-get update -y >> "$LOG" 2>&1
   apt-get upgrade -y >> "$LOG" 2>&1
-  apt-get install -y build-essential git wget curl subversion libncurses5-dev libssl-dev libxml2-dev \
-    libsqlite3-dev uuid-dev libjansson-dev pkg-config libedit-dev automake libtool python3 unzip \
-    libsrtp2-dev unixodbc unixodbc-dev odbc-mariadb mysql-server coturn certbot ffmpeg openssl \
-    ca-certificates gnupg >> "$LOG" 2>&1 || die "apt-get install"
-  if ! node -v 2>/dev/null | grep -q "^v$NODE_MAJOR\."; then
+  PKGS="curl openssl ca-certificates gnupg python3"
+  has db && PKGS="$PKGS mysql-server"
+  has telephony && PKGS="$PKGS build-essential git wget subversion libncurses5-dev libssl-dev libxml2-dev
+    libsqlite3-dev uuid-dev libjansson-dev pkg-config libedit-dev automake libtool unzip
+    libsrtp2-dev unixodbc unixodbc-dev odbc-mariadb coturn certbot ffmpeg"
+  has app && PKGS="$PKGS certbot mysql-client"
+  # shellcheck disable=SC2086
+  apt-get install -y $PKGS >> "$LOG" 2>&1 || die "apt-get install"
+  if has app && ! node -v 2>/dev/null | grep -q "^v$NODE_MAJOR\."; then
     curl -fsSL "https://deb.nodesource.com/setup_$NODE_MAJOR.x" | bash - >> "$LOG" 2>&1 || die "Node.js repository"
     apt-get install -y nodejs >> "$LOG" 2>&1 || die "Node.js"
   fi
-  info "node $(node -v), mysql $(mysql --version | awk '{print $3}')"
+  info "node $(node -v 2>/dev/null || echo -), mysql $(mysql --version 2>/dev/null | awk '{print $3}')"
   done_step packages
 fi
 
 # ---------------------------------------------------------------- 2. Asterisk
-if [ "$SKIP_AST_BUILD" = 0 ] && ! is_done asterisk-build; then
+if has telephony && [ "$SKIP_AST_BUILD" = 0 ] && ! is_done asterisk-build; then
   if /usr/sbin/asterisk -V 2>/dev/null | grep -q "Asterisk 22\."; then
     info "Asterisk 22 already installed - not building again"
   else
@@ -181,59 +245,69 @@ if [ "$SKIP_AST_BUILD" = 0 ] && ! is_done asterisk-build; then
   fi
   done_step asterisk-build
 fi
+if has telephony; then
 /usr/sbin/asterisk -V >/dev/null 2>&1 || die "Asterisk is not installed"
 id asterisk >/dev/null 2>&1 || useradd -r -d /var/lib/asterisk -s /usr/sbin/nologin asterisk
 mkdir -p /etc/asterisk/keys /var/spool/asterisk/monitor/dialforge
 chown -R asterisk:asterisk /etc/asterisk /var/lib/asterisk /var/log/asterisk /var/spool/asterisk /usr/lib/asterisk
 chmod 2775 /var/spool/asterisk/monitor/dialforge
+fi
 
 # ---------------------------------------------------------------- 3. MySQL
+if has db; then
 say "3/9 Database"
+# Single server: only this server reaches MySQL (127.0.0.1). Split: the
+# private IP, and each user only from its own server.
+DB_BIND=127.0.0.1 APP_DBHOST=localhost RT_DBHOST=localhost
+[ "$SPLIT" = 1 ] && DB_BIND=$PRIVATE_IP APP_DBHOST=$APP_IP RT_DBHOST=$TEL_IP
 # MySQL only for this server. Not in mysql.conf.d/mysqld.cnf: odbc-mariadb
 # pulls in mariadb-common, which points /etc/mysql/my.cnf at mariadb.cnf,
 # and that never reads mysql.conf.d - conf.d is read by both.
-put /etc/mysql/conf.d/viztex.cnf root:root 644 <<'EOF'
+put /etc/mysql/conf.d/viztex.cnf root:root 644 <<EOF
 [mysqld]
-bind-address = 127.0.0.1
+bind-address = $DB_BIND
 mysqlx-bind-address = 127.0.0.1
 EOF
 systemctl enable mysql >> "$LOG" 2>&1
-if [ "$(mysql -N -e "SELECT @@bind_address" 2>/dev/null)" != 127.0.0.1 ]; then
+if [ "$(mysql -N -e "SELECT @@bind_address" 2>/dev/null)" != "$DB_BIND" ]; then
   systemctl restart mysql >> "$LOG" 2>&1 || die "MySQL restart"
 fi
 mysql <<SQL || die "create database / users"
 CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE USER IF NOT EXISTS 'dialforge'@'localhost' IDENTIFIED BY '$DB_PASSWORD';
-ALTER USER 'dialforge'@'localhost' IDENTIFIED BY '$DB_PASSWORD';
-GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO 'dialforge'@'localhost';
-CREATE USER IF NOT EXISTS 'asterisk_rt'@'localhost' IDENTIFIED BY '$ASTERISK_RT_PASSWORD';
-ALTER USER 'asterisk_rt'@'localhost' IDENTIFIED BY '$ASTERISK_RT_PASSWORD';
+CREATE USER IF NOT EXISTS 'dialforge'@'$APP_DBHOST' IDENTIFIED BY '$DB_PASSWORD';
+ALTER USER 'dialforge'@'$APP_DBHOST' IDENTIFIED BY '$DB_PASSWORD';
+GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO 'dialforge'@'$APP_DBHOST'$(if [ "$SPLIT" = 1 ]; then echo " WITH GRANT OPTION"; fi);
+CREATE USER IF NOT EXISTS 'asterisk_rt'@'$RT_DBHOST' IDENTIFIED BY '$ASTERISK_RT_PASSWORD';
+ALTER USER 'asterisk_rt'@'$RT_DBHOST' IDENTIFIED BY '$ASTERISK_RT_PASSWORD';
 FLUSH PRIVILEGES;
 SQL
-info "database $DB_NAME, users dialforge + asterisk_rt (read-only, granted after the tables exist)"
+info "database $DB_NAME, users dialforge@$APP_DBHOST + asterisk_rt@$RT_DBHOST (read-only, granted after the tables exist)"
+fi
 
 # ---------------------------------------------------------------- 4. app
+if has app; then
 say "4/9 VIZTEX app"
+ENV_DB_HOST=localhost ENV_ARI_HOST=localhost ENV_AMI_HOST=127.0.0.1
+[ "$SPLIT" = 1 ] && ENV_DB_HOST=$DB_IP ENV_ARI_HOST=$TEL_IP ENV_AMI_HOST=$TEL_IP
 mkdir -p "$APP_DIR/certs"
 # Code from the release; .env, certs, logs and node_modules stay.
 cp -r "$RELEASE/app/." "$APP_DIR/"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
-ENV_FILE="$APP_DIR/.env"
 if [ ! -f "$ENV_FILE" ]; then
   umask 077
   cat > "$ENV_FILE" <<EOF
 # Written by the VIZTEX installer $(date -u +%F). Secrets also in $SECRETS (root only).
 # A client's server: test-only tools (db:reset-test-data) refuse to run.
 APP_ENV=production
-DB_HOST=localhost
+DB_HOST=$ENV_DB_HOST
 DB_USER=dialforge
 DB_PASSWORD=$DB_PASSWORD
 DB_NAME=$DB_NAME
-ARI_HOST=localhost
+ARI_HOST=$ENV_ARI_HOST
 ARI_PORT=8088
 ARI_USER=dialforge
 ARI_PASS=$ARI_PASS
-AMI_HOST=127.0.0.1
+AMI_HOST=$ENV_AMI_HOST
 AMI_PORT=5038
 AMI_USER=dialforge
 AMI_PASS=$AMI_PASS
@@ -241,10 +315,12 @@ SESSION_SECRET=$SESSION_SECRET
 # The app on the standard https port (no :port in the address); old :3000 links redirect.
 PORT=443
 REDIRECT_FROM_PORT=3000
-SIP_DOMAIN=$DOMAIN
-WEBRTC_WS_URL=wss://$DOMAIN:8089/ws
-STUN_URLS=stun:$DOMAIN:3478,stun:stun.l.google.com:19302
-TURN_URLS=turn:$DOMAIN:3478?transport=udp,turn:$DOMAIN:3478?transport=tcp
+# The address of the app; agents' phones connect to SIP_DOMAIN (the telephony server).
+APP_DOMAIN=$DOMAIN
+SIP_DOMAIN=$TEL_DOMAIN
+WEBRTC_WS_URL=wss://$TEL_DOMAIN:8089/ws
+STUN_URLS=stun:$TEL_DOMAIN:3478,stun:stun.l.google.com:19302
+TURN_URLS=turn:$TEL_DOMAIN:3478?transport=udp,turn:$TEL_DOMAIN:3478?transport=tcp$(if [ "$SPLIT" = 1 ]; then printf '\n# Recordings are made on the telephony server (S3 path: dialforge/<this>/recordings)\nRECORDINGS_HOST=%s' "$TEL_HOST"; fi)
 TURN_SECRET=$TURN_SECRET
 # The SIP trunk - set by install/add-trunk.sh
 TRUNK_ENDPOINT=trunk
@@ -265,29 +341,35 @@ EOF
   chown "$APP_USER:$APP_USER" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
 fi
-APP_PORT=$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -1)
-APP_PORT=${APP_PORT:-3000}
-APP_URL="https://$DOMAIN$([ "$APP_PORT" = 443 ] || echo ":$APP_PORT")"
+app_port
 info "app port $APP_PORT ($APP_URL)"
 cd "$APP_DIR"
 sudo -u "$APP_USER" npm ci --omit=dev --no-audit --no-fund >> "$LOG" 2>&1 || die "npm ci"
 sudo -u "$APP_USER" npm run -s db:migrate >> "$LOG" 2>&1 || die "database migrations"
-mysql <<SQL || die "asterisk_rt grants"
-GRANT SELECT ON \`$DB_NAME\`.ps_endpoints TO 'asterisk_rt'@'localhost';
-GRANT SELECT ON \`$DB_NAME\`.ps_auths TO 'asterisk_rt'@'localhost';
-GRANT SELECT ON \`$DB_NAME\`.ps_aors TO 'asterisk_rt'@'localhost';
-GRANT SELECT ON \`$DB_NAME\`.ast_queues TO 'asterisk_rt'@'localhost';
+# Asterisk's read-only user may read the 4 views it needs (they exist now).
+RT_DBHOST=localhost; [ "$SPLIT" = 1 ] && RT_DBHOST=$TEL_IP
+grants() {
+  if [ "$SPLIT" = 1 ]; then MYSQL_PWD="$DB_PASSWORD" mysql -h "$DB_IP" -u dialforge "$DB_NAME"; else mysql; fi
+}
+grants <<SQL || die "asterisk_rt grants"
+GRANT SELECT ON \`$DB_NAME\`.ps_endpoints TO 'asterisk_rt'@'$RT_DBHOST';
+GRANT SELECT ON \`$DB_NAME\`.ps_auths TO 'asterisk_rt'@'$RT_DBHOST';
+GRANT SELECT ON \`$DB_NAME\`.ps_aors TO 'asterisk_rt'@'$RT_DBHOST';
+GRANT SELECT ON \`$DB_NAME\`.ast_queues TO 'asterisk_rt'@'$RT_DBHOST';
 SQL
-ADMIN_PASSWORD_LINE=""
 if ! is_done admin; then
   OUT=$(sudo -u "$APP_USER" npm run -s create-admin -- --username "$ADMIN" 2>&1) || die "create admin: $OUT"
   ADMIN_PASSWORD_LINE=$(printf '%s\n' "$OUT" | sed -n 's/^Password[^:]*: //p')
   done_step admin
 fi
 info "migrations applied; Super Admin '$ADMIN' ready"
+fi
 
 # ---------------------------------------------------------------- 5. Asterisk config
+if has telephony; then
 say "5/9 Asterisk configuration"
+# Single server: ARI and AMI only on 127.0.0.1. Split: on the private IP, for the app server.
+AST_BIND=127.0.0.1; [ "$SPLIT" = 1 ] && AST_BIND=$PRIVATE_IP
 put /etc/asterisk/pjsip.conf root:asterisk 640 <<EOF
 ; Written by the VIZTEX installer. Agent extensions are NOT here - Asterisk
 ; reads them from MySQL (sorcery.conf / extconfig.conf). The SIP trunk is
@@ -354,11 +436,11 @@ rtpend=20000
 [ice_host_candidates]
 $PRIVATE_IP => $PUBLIC_IP
 EOF
-put /etc/asterisk/http.conf root:asterisk 640 <<'EOF'
+put /etc/asterisk/http.conf root:asterisk 640 <<EOF
 [general]
 enabled=yes
 enablestatic=no
-bindaddr=127.0.0.1
+bindaddr=$AST_BIND
 bindport=8088
 tlsenable=yes
 tlsbindaddr=0.0.0.0:8089
@@ -378,12 +460,12 @@ put /etc/asterisk/manager.conf root:asterisk 640 <<EOF
 [general]
 enabled = yes
 port = 5038
-bindaddr = 127.0.0.1
+bindaddr = $AST_BIND
 
 [dialforge]
 secret = $AMI_PASS
 deny = 0.0.0.0/0.0.0.0
-permit = 127.0.0.1/255.255.255.255
+permit = 127.0.0.1/255.255.255.255$(if [ "$SPLIT" = 1 ]; then printf '\npermit = %s/255.255.255.255' "$APP_IP"; fi)
 read = system,call,agent,user,config
 write = system,call,agent,user,config,originate
 EOF
@@ -396,7 +478,7 @@ EOF
 put /etc/odbc.ini root:asterisk 640 <<EOF
 [dialforge-asterisk]
 Driver   = MariaDB Unicode
-SOCKET   = /var/run/mysqld/mysqld.sock
+$(if [ "$SPLIT" = 1 ]; then printf 'SERVER   = %s\nPORT     = 3306' "$DB_IP"; else echo "SOCKET   = /var/run/mysqld/mysqld.sock"; fi)
 DATABASE = $DB_NAME
 EOF
 put /etc/asterisk/res_odbc.conf root:asterisk 640 <<EOF
@@ -452,9 +534,11 @@ WantedBy=multi-user.target
 EOF
 # The packaged init script, if 'make config' ran before, would fight the unit.
 [ -f /etc/init.d/asterisk ] && update-rc.d -f asterisk remove >/dev/null 2>&1 || true
-info "pjsip (transports, NAT $PRIVATE_IP -> $PUBLIC_IP), dialplan, ARI, AMI, ODBC realtime"
+info "pjsip (transports, NAT $PRIVATE_IP -> $PUBLIC_IP), dialplan, ARI, AMI ($AST_BIND), ODBC realtime"
+fi
 
 # ---------------------------------------------------------------- 6. TURN
+if has telephony; then
 say "6/9 TURN server (coturn)"
 put /etc/turnserver.conf root:turnserver 640 <<EOF
 listening-port=3478
@@ -480,8 +564,10 @@ sed -i 's/^#\?TURNSERVER_ENABLED=.*/TURNSERVER_ENABLED=1/' /etc/default/coturn 2
 mkdir -p /var/log/turnserver && chown turnserver:turnserver /var/log/turnserver
 systemctl enable coturn >> "$LOG" 2>&1
 systemctl restart coturn || die "coturn didn't start"
+fi
 
 # ---------------------------------------------------------------- 7. certificate
+if has telephony || has app; then
 say "7/9 TLS certificate"
 mkdir -p /etc/letsencrypt/renewal-hooks/deploy
 put /usr/local/bin/viztex-cert-copy root:root 755 <<EOF
@@ -490,12 +576,18 @@ put /usr/local/bin/viztex-cert-copy root:root 755 <<EOF
 # Run by certbot after every renewal, and once by the installer.
 set -e
 SRC="\${1:-/etc/letsencrypt/live/$DOMAIN}"
-install -o asterisk -g asterisk -m 644 "\$SRC/fullchain.pem" /etc/asterisk/keys/dialforge.crt
-install -o asterisk -g asterisk -m 600 "\$SRC/privkey.pem" /etc/asterisk/keys/dialforge.key
-install -o $APP_USER -g $APP_USER -m 644 "\$SRC/fullchain.pem" $APP_DIR/certs/fullchain.pem
-install -o $APP_USER -g $APP_USER -m 600 "\$SRC/privkey.pem" $APP_DIR/certs/privkey.pem
-systemctl restart asterisk || true
-systemctl restart dialforge-backend 2>/dev/null || true
+# Asterisk (agents' phones, 8089) - on the server that has it.
+if [ -d /etc/asterisk/keys ] && id asterisk >/dev/null 2>&1; then
+  install -o asterisk -g asterisk -m 644 "\$SRC/fullchain.pem" /etc/asterisk/keys/dialforge.crt
+  install -o asterisk -g asterisk -m 600 "\$SRC/privkey.pem" /etc/asterisk/keys/dialforge.key
+  systemctl restart asterisk || true
+fi
+# The app (https) - on the server that has it.
+if [ -d $APP_DIR/certs ]; then
+  install -o $APP_USER -g $APP_USER -m 644 "\$SRC/fullchain.pem" $APP_DIR/certs/fullchain.pem
+  install -o $APP_USER -g $APP_USER -m 600 "\$SRC/privkey.pem" $APP_DIR/certs/privkey.pem
+  systemctl restart dialforge-backend 2>/dev/null || true
+fi
 EOF
 ln -sf /usr/local/bin/viztex-cert-copy /etc/letsencrypt/renewal-hooks/deploy/viztex-cert-copy.sh
 if [ "$SELF_SIGNED" = 1 ]; then
@@ -516,14 +608,18 @@ else
   /usr/local/bin/viztex-cert-copy >> "$LOG" 2>&1
   info "Let's Encrypt certificate for $DOMAIN (renews by itself)"
 fi
+fi
 
 # ---------------------------------------------------------------- 8. services
 say "8/9 Services"
+# On a single server the app waits for the local MySQL and Asterisk; split, they are elsewhere.
+LOCAL_DEPS=""; [ "$SPLIT" = 0 ] && LOCAL_DEPS=" mysql.service asterisk.service"
+if has app; then
 put /etc/systemd/system/dialforge-backend.service root:root 644 <<EOF
 [Unit]
 Description=VIZTEX backend (web app, API, call control)
-After=network.target mysql.service asterisk.service
-Wants=mysql.service asterisk.service
+After=network.target$LOCAL_DEPS
+Wants=${LOCAL_DEPS# }
 
 [Service]
 Type=simple
@@ -543,8 +639,8 @@ EOF
 put /etc/systemd/system/dialforge-dialer.service root:root 644 <<EOF
 [Unit]
 Description=VIZTEX dialer engine (hopper + pacing)
-After=network.target mysql.service asterisk.service
-Wants=mysql.service
+After=network.target$LOCAL_DEPS
+Wants=$([ "$SPLIT" = 0 ] && echo mysql.service)
 
 [Service]
 Type=simple
@@ -562,7 +658,6 @@ EOF
 # Nightly backup + recording conversion (backend/ops).
 sed "s#/home/ubuntu#$APP_HOME#g; s#^User=ubuntu#User=$APP_USER#" "$APP_DIR/ops/dialforge-backup.service" > /etc/systemd/system/dialforge-backup.service
 cp "$APP_DIR/ops/dialforge-backup.timer" /etc/systemd/system/
-install -o root -g root -m 755 "$APP_DIR/ops/recording-done.sh" /usr/local/bin/dialforge-recording-done
 put /etc/logrotate.d/viztex root:root 644 <<EOF
 $APP_DIR/server.log $APP_DIR/dialer.log {
   weekly
@@ -573,19 +668,35 @@ $APP_DIR/server.log $APP_DIR/dialer.log {
   copytruncate
 }
 EOF
+fi
+# The recording script (MixMonitor runs it when a call's recording ends).
+has telephony && install -o root -g root -m 755 "$RELEASE/app/ops/recording-done.sh" /usr/local/bin/dialforge-recording-done
 systemctl daemon-reload
-systemctl enable asterisk dialforge-backend dialforge-dialer dialforge-backup.timer >> "$LOG" 2>&1
-systemctl restart asterisk
-for i in $(seq 1 30); do /usr/sbin/asterisk -rx 'core show version' >/dev/null 2>&1 && break; sleep 1; done
-systemctl restart dialforge-backend dialforge-dialer
-systemctl start dialforge-backup.timer
+if has telephony; then
+  systemctl enable asterisk >> "$LOG" 2>&1
+  systemctl restart asterisk
+  for i in $(seq 1 30); do /usr/sbin/asterisk -rx 'core show version' >/dev/null 2>&1 && break; sleep 1; done
+fi
+if has app; then
+  systemctl enable dialforge-backend dialforge-dialer dialforge-backup.timer >> "$LOG" 2>&1
+  systemctl restart dialforge-backend dialforge-dialer
+  systemctl start dialforge-backup.timer
+fi
 
 if [ "$FIREWALL" = 1 ]; then
-  ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow 3000/tcp >/dev/null
-  ufw allow 8089/tcp >/dev/null; ufw allow 3478 >/dev/null; ufw allow 10000:20000/udp >/dev/null
-  ufw allow 49152:49300/udp >/dev/null; ufw --force enable >/dev/null
-  info "ufw: 22, 80, 443, 3000, 8089, 3478, 10000-20000/udp, 49152-49300/udp open"
+  ufw allow 22/tcp >/dev/null
+  has app && { ufw allow 443/tcp >/dev/null; ufw allow 3000/tcp >/dev/null; }
+  { has app || has telephony; } && ufw allow 80/tcp >/dev/null
+  if has telephony; then
+    ufw allow 8089/tcp >/dev/null; ufw allow 3478 >/dev/null; ufw allow 10000:20000/udp >/dev/null
+    ufw allow 49152:49300/udp >/dev/null
+    [ "$SPLIT" = 1 ] && { ufw allow from "$APP_IP" to any port 8088 proto tcp >/dev/null; ufw allow from "$APP_IP" to any port 5038 proto tcp >/dev/null; }
+  fi
+  [ "$ROLE" = db ] && { ufw allow from "$APP_IP" to any port 3306 proto tcp >/dev/null; ufw allow from "$TEL_IP" to any port 3306 proto tcp >/dev/null; }
+  ufw --force enable >/dev/null
+  info "ufw: on, ports for role $ROLE open"
 fi
+fi # --checks-only skips everything above
 
 # ---------------------------------------------------------------- 9. checks
 say "9/9 Checks"
@@ -595,22 +706,63 @@ check() { # check <label> <command...>
 }
 ast() { /usr/sbin/asterisk -rx "$1" 2>/dev/null; }
 sleep 4
+if has telephony; then
 check "Asterisk running" systemctl is-active --quiet asterisk
 check "Asterisk HTTPS / WebSocket on 8089" bash -c "/usr/sbin/asterisk -rx 'http show status' | grep -q 'HTTPS Server Enabled'"
-check "Licence readable by the app (if one is set)" bash -c "[ ! -f /etc/viztex/licence.json ] || sudo -u $APP_USER cat /etc/viztex/licence.json >/dev/null"
-check "Asterisk reads MySQL (ODBC)" bash -c "/usr/sbin/asterisk -rx 'odbc show dialforge' | grep -qiE 'active connections: [1-9]|connected: yes'"
+check "Asterisk reads MySQL (ODBC)$(if [ "$SPLIT" = 1 ]; then echo ' - on split servers only after the app install: then --checks-only'; fi)" bash -c "/usr/sbin/asterisk -rx 'odbc show dialforge' | grep -qiE 'active connections: [1-9]|connected: yes'"
 check "Asterisk modules: AMD, MixMonitor, realtime" bash -c "for m in app_amd app_mixmonitor res_config_odbc; do /usr/sbin/asterisk -rx \"module show like \$m\" | grep -q Running || exit 1; done"
 check "TURN server" systemctl is-active --quiet coturn
+[ "$SELF_SIGNED" = 1 ] || [ "$ROLE" != telephony ] || check "Certificate valid for $DOMAIN (agents' phones, 8089)" bash -c "echo | openssl s_client -connect localhost:8089 -servername $DOMAIN 2>/dev/null | openssl x509 -noout -checkhost $DOMAIN | grep -q 'does match'"
+fi
+if has db; then
 check "MySQL" systemctl is-active --quiet mysql
+fi
+if [ "$SPLIT" = 0 ]; then
 check "MySQL and Asterisk HTTP (ARI) only on 127.0.0.1" bash -c "! ss -lntH | awk '{print \$4}' | grep -qE '^(\*|0\.0\.0\.0|\[::\]):(3306|33060|8088)\$'"
+else
+check "MySQL, ARI and AMI not open on every address (private IP only)" bash -c "! ss -lntH | awk '{print \$4}' | grep -qE '^(\*|0\.0\.0\.0|\[::\]):(3306|33060|8088|5038)\$'"
+fi
+if has app; then
+[ -n "${APP_PORT:-}" ] || app_port
+check "Licence readable by the app (if one is set)" bash -c "[ ! -f /etc/viztex/licence.json ] || sudo -u $APP_USER cat /etc/viztex/licence.json >/dev/null"
 for i in $(seq 1 20); do curl -sk https://localhost:$APP_PORT/health | grep -q '"ok"' && break; sleep 1; done
-check "VIZTEX backend /health" bash -c "curl -sk https://localhost:$APP_PORT/health | grep -q '\"db\":\"connected\"'"
+check "VIZTEX backend /health (database$(if [ "$SPLIT" = 1 ]; then echo " on $DB_IP"; fi) connected)" bash -c "curl -sk https://localhost:$APP_PORT/health | grep -q '\"db\":\"connected\"'"
 [ "$APP_PORT" = 3000 ] || check "Old :3000 links redirect to $APP_URL" bash -c "curl -sk -o /dev/null -w '%{http_code} %{redirect_url}' https://localhost:3000/app/ | grep -q '^301 $APP_URL/app/'"
-check "Backend connected to Asterisk (ARI)" bash -c "grep -q 'app \"dialforge-app\" connected' '$APP_DIR/server.log'"
+check "Backend connected to Asterisk (ARI)$(if [ "$SPLIT" = 1 ]; then echo " on $TEL_IP"; fi)" bash -c "grep -q 'app \"dialforge-app\" connected' '$APP_DIR/server.log'"
 check "Dialer engine running" bash -c "grep -q 'dialer engine started' '$APP_DIR/dialer.log'"
 check "Nightly backup scheduled" systemctl is-enabled --quiet dialforge-backup.timer
 [ "$SELF_SIGNED" = 1 ] || check "Certificate valid for $DOMAIN" bash -c "echo | openssl s_client -connect localhost:$APP_PORT -servername $DOMAIN 2>/dev/null | openssl x509 -noout -checkhost $DOMAIN | grep -q 'does match'"
+fi
 
+if [ "$ROLE" = db ] || [ "$ROLE" = telephony ]; then
+  cat <<EOF | tee -a "$LOG"
+
+==========================================================================
+ VIZTEX $ROLE server installed ($([ "$FAILS" = 0 ] && echo "all checks OK" || echo "$FAILS check(s) FAILED - see $LOG"))
+EOF
+  if [ "$ROLE" = db ]; then
+    cat <<EOF
+
+ Next: copy this server's secrets to the telephony and app servers
+ (they are passwords - copy them over SSH, never by email or chat):
+   sudo cat /etc/viztex/secrets.env      -> save as ~/secrets.env on each of them,
+   then pass --secrets ~/secrets.env to their install (delete the copy afterwards).
+ Security group: TCP 3306 only from $APP_IP and $TEL_IP. Nothing else open but SSH.
+==========================================================================
+EOF
+  else
+    cat <<EOF
+
+ Security group (telephony): TCP 8089, 80, 3478; UDP 3478, 10000-20000, 49152-49300
+   from anywhere; TCP 8088 + 5038 only from the app server ($APP_IP); UDP 5060 only
+   from the SIP provider.
+ Next: install the app server. Then here: sudo bash $0 --role telephony ... --checks-only
+==========================================================================
+EOF
+  fi
+  [ "$FAILS" = 0 ]
+  exit
+fi
 cat <<EOF | tee -a "$LOG"
 
 ==========================================================================

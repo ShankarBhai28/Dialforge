@@ -42,3 +42,13 @@ test('the answer is a permanent redirect that browsers do not cache forever by m
     process.env = saved;
   }
 });
+
+test("split servers: old links go to the app's address (APP_DOMAIN), not the telephony server's", () => {
+  assert.strictEqual(
+    redirectTarget(
+      { headers: { host: 'crm.acme.in:3000' }, url: '/app/' },
+      { PORT: '443', APP_DOMAIN: 'crm.acme.in', SIP_DOMAIN: 'sip.acme.in' },
+    ),
+    'https://crm.acme.in/app/',
+  );
+});

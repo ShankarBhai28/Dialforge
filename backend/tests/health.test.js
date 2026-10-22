@@ -229,3 +229,12 @@ test('daily summary: once per local day from the hour on; says all OK or lists w
     'Daily check: 1 need attention\nWARN: Disk - 9 GB free (12%)',
   );
 });
+
+test('split servers: the app server has no recordings to check; alerts name the app, not the telephony server', async () => {
+  const h = byKey(await collectHealth(deps({ recordingsElsewhere: true, stuckRecordings: async () => 5 })));
+  assert.strictEqual(h.recordings, undefined);
+  assert.strictEqual(
+    whoAmI({ APP_DOMAIN: 'crm.acme.in', SIP_DOMAIN: 'sip.acme.in' }, () => ({ customer: 'Acme' })),
+    'Acme (crm.acme.in)',
+  );
+});
