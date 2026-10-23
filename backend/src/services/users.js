@@ -87,4 +87,12 @@ function extensionOutsideScope(scope, users, exceptId = null) {
   return others.length ? 'that extension belongs to an agent outside your teams - pick a free one' : null;
 }
 
-module.exports = { parseNewUser, parseUserUpdate, checkPassword, extensionOutsideScope, MIN_PASSWORD, ROLES };
+module.exports = {
+  parseNewUser,
+  parseUserUpdate,
+  checkPassword,
+  extensionOutsideScope,
+  MIN_PASSWORD,
+  ROLES,
+  USERNAME_RE,
+};

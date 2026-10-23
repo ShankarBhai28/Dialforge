@@ -85,6 +85,40 @@ export function useUpdateUser() {
   });
 }
 
+/** POST /admin/users/import without commit: what the file would create (passwords never come back). */
+export type UserImportCheck = {
+  ready: number;
+  problems: { rowNum: number; username: string; error: string }[];
+};
+
+function importForm(file: File, commit: boolean) {
+  const form = new FormData();
+  form.append('file', file);
+  if (commit) form.append('commit', '1');
+  return form;
+}
+
+/** Bulk import, step 1: check the file - nothing is saved. */
+export function useCheckUserImport() {
+  return useMutation({
+    mutationFn: (file: File) => post<UserImportCheck>('/admin/users/import', importForm(file, false)),
+    meta: { errorInline: true },
+  });
+}
+
+/** Bulk import, step 2: create every account (only accepted when the whole file is clean). */
+export function useImportUsers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => post<{ created: number }>('/admin/users/import', importForm(file, true)),
+    meta: { errorInline: true },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: userKeys.all });
+      qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
+    },
+  });
+}
+
 /** Admin sets a new password; the user is logged out everywhere. */
 export function useResetPassword() {
   return useMutation({

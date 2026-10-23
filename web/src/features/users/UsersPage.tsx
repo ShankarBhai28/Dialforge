@@ -7,7 +7,7 @@
 // only the agents of its teams, and new agents go into one of them.
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
-import { KeyRound, Pencil, Plus, UserRound, UserRoundCheck, UserRoundX } from 'lucide-react';
+import { KeyRound, Pencil, Plus, Upload, UserRound, UserRoundCheck, UserRoundX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -40,6 +40,7 @@ import {
   useUsers,
   type User,
 } from './api';
+import { ImportUsersDialog } from './ImportUsersDialog';
 
 const PASSWORD_HINT = 'At least 8 characters.';
 
@@ -396,7 +397,7 @@ function ResetPasswordDialog({ user, onOpenChange }: { user: User; onOpenChange:
   );
 }
 
-type Open = { kind: 'create' } | { kind: 'edit' | 'password' | 'toggle'; user: User } | null;
+type Open = { kind: 'create' | 'import' } | { kind: 'edit' | 'password' | 'toggle'; user: User } | null;
 
 export function UsersPage() {
   const users = useUsers();
@@ -422,9 +423,14 @@ export function UsersPage() {
           description="Agents, admin logins with a role, and Super Admins. People who leave are deactivated, so their call history stays."
           actions={
             can('users', 'create') && (
-              <Button onClick={() => setOpen({ kind: 'create' })}>
-                <Plus /> Create user
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => setOpen({ kind: 'import' })}>
+                  <Upload /> Import agents
+                </Button>
+                <Button onClick={() => setOpen({ kind: 'create' })}>
+                  <Plus /> Create user
+                </Button>
+              </>
             )
           }
         />
@@ -515,6 +521,7 @@ export function UsersPage() {
       </CardContent>
 
       {open?.kind === 'create' && <CreateUserDialog onOpenChange={(v) => !v && close()} />}
+      {open?.kind === 'import' && <ImportUsersDialog onOpenChange={(v) => !v && close()} />}
       {open?.kind === 'edit' && <EditUserDialog user={open.user} onOpenChange={(v) => !v && close()} />}
       {open?.kind === 'password' && <ResetPasswordDialog user={open.user} onOpenChange={(v) => !v && close()} />}
       <ConfirmDialog

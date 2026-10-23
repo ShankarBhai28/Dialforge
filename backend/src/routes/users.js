@@ -8,6 +8,8 @@ const { releasePreviewLocks } = require('../services/preview');
 const { revokeUserSessions } = require('../services/sessions');
 const { checkPassword, extensionOutsideScope, parseNewUser, parseUserUpdate } = require('../services/users');
 const hub = require('../realtime/hub');
+const { readLeadUpload, receiveLeadFile } = require('../services/leadImport');
+const { hashPasswords, planUserImport } = require('../services/userImport');
 
 const router = express.Router();
 
@@ -103,6 +105,71 @@ router.post('/admin/users', requirePermission('users', 'create'), async (req, re
   } finally {
     conn.release();
   }
+});
+
+// --- Bulk import: agent accounts from an Excel / CSV file ---
+// Without commit: the check - how many are ready and every problem (row,
+// username, reason); nothing is saved. With commit=1: the same check, and
+// only if the whole file is clean, every account is created in one go
+// (all or nothing). Passwords never come back in the answer.
+async function importContext(scope) {
+  const [users] = await pool.query('SELECT username FROM users');
+  const [exts] = await pool.query(
+    `SELECT e.id, e.name, e.enabled, GROUP_CONCAT(u.id) AS user_ids
+     FROM extensions e LEFT JOIN users u ON u.extension_id = e.id
+     WHERE e.deleted_at IS NULL GROUP BY e.id`,
+  );
+  const [teams] = await pool.query('SELECT id, name FROM teams');
+  return {
+    scope,
+    usernames: new Set(users.map((u) => u.username.toLowerCase())),
+    extensions: new Map(
+      exts.map((e) => [
+        e.name,
+        { id: e.id, enabled: !!e.enabled, userIds: e.user_ids ? String(e.user_ids).split(',').map(Number) : [] },
+      ]),
+    ),
+    teams: new Map(teams.map((t) => [t.name.toLowerCase(), t.id])),
+  };
+}
+
+router.post('/admin/users/import', requirePermission('users', 'create'), receiveLeadFile, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'choose an .xlsx or .csv file' });
+  const parsed = await readLeadUpload(req.file);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  const plan = planUserImport(parsed.headers, parsed.rows, await importContext(req.access.scope));
+  if (plan.error) return res.status(400).json({ error: plan.error });
+  const { ready, problems } = plan;
+  const summary = { ready: ready.length, problems };
+  if (req.body.commit !== '1') return res.json(summary);
+  if (problems.length)
+    return res.status(400).json({ ...summary, error: 'fix the rows with problems first - nothing was created' });
+  if (!ready.length) return res.status(400).json({ ...summary, error: 'the file has no users to create' });
+
+  const hashes = await hashPasswords(ready.map((r) => r.password));
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    for (const [i, r] of ready.entries()) {
+      const [result] = await conn.query(
+        "INSERT INTO users (tenant_id, username, password_hash, role, extension_id) VALUES (1, ?, ?, 'agent', ?)",
+        [r.username, hashes[i], r.extensionId],
+      );
+      if (r.teamId)
+        await conn.query('INSERT INTO team_members (team_id, user_id) VALUES (?, ?)', [r.teamId, result.insertId]);
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    // Someone took a username between the check and now.
+    if (err.code === 'ER_DUP_ENTRY')
+      return res.status(409).json({ error: 'a username in the file was just taken - check the file again' });
+    throw err;
+  } finally {
+    conn.release();
+  }
+  hub.refreshAccess();
+  res.status(201).json({ created: ready.length });
 });
 
 // Role, extension and active/inactive. No delete: calls, status history,

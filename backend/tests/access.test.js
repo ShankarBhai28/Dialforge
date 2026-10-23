@@ -63,8 +63,24 @@ const db = {
     if (s.startsWith('SELECT id FROM users WHERE extension_id'))
       return [(EXT_USERS[params[0]] || []).map((id) => ({ id }))];
     if (s.startsWith('INSERT INTO users')) return [{ insertId: 50 }];
+    // Bulk import's look-ups.
+    if (s.startsWith('SELECT username FROM users')) return [[{ username: 'agent01' }]];
+    if (s.startsWith('SELECT e.id, e.name, e.enabled'))
+      return [
+        [
+          { id: 1, name: '1001', enabled: 1, user_ids: null },
+          { id: 5, name: '1005', enabled: 1, user_ids: '40' },
+        ],
+      ];
+    if (s.startsWith('SELECT id, name FROM teams'))
+      return [
+        [
+          { id: 3, name: 'TL 1' },
+          { id: 8, name: 'TL 3' },
+        ],
+      ];
     // Extensions: 1001 free, 1005 agent 40's (other team), 1006 agent 21's, 1007 the manager's own line.
-    if (s.startsWith('SELECT e.id, e.name'))
+    if (s.startsWith('SELECT e.id, e.name, e.label'))
       return [
         [
           { id: 1, name: '1001', enabled: 1, has_password: 1, used_by: null, user_ids: null },
@@ -246,6 +262,48 @@ test('own-teams logins manage the agents of their teams - and only those', async
   assert.strictEqual((await call('super', 'POST', '/admin/users', agent)).status, 201);
   // A role without Users rights still can't.
   assert.strictEqual((await call('tl', 'POST', '/admin/users', { ...agent, teamId: 3 })).status, 403);
+});
+
+test('bulk import: checked first (nothing saved), created only when the whole file is clean', async () => {
+  const upload = async (who, csv, commit) => {
+    const form = new FormData();
+    form.append('file', new Blob([csv], { type: 'text/csv' }), 'agents.csv');
+    if (commit) form.append('commit', '1');
+    const res = await fetch(base + '/admin/users/import', {
+      method: 'POST',
+      headers: { 'x-test-user': who },
+      body: form,
+    });
+    return { status: res.status, body: await res.json() };
+  };
+  const bad =
+    'Username,Password,Extension,Team\nagent02,longenough,1001,TL 1\nagent03,longenough,1005,TL 1\nagent04,longenough,1001,TL 3\n';
+  sql.length = 0;
+  const check = await upload('mgr', bad, false);
+  assert.strictEqual(check.status, 200);
+  assert.strictEqual(check.body.ready, 1);
+  assert.deepStrictEqual(
+    check.body.problems.map((p) => [p.rowNum, p.username]),
+    [
+      [3, 'agent03'],
+      [4, 'agent04'],
+    ],
+  );
+  assert.ok(!JSON.stringify(check.body).includes('longenough'), 'passwords never come back');
+  // Commit with problems: refused, nothing written.
+  const refused = await upload('mgr', bad, true);
+  assert.strictEqual(refused.status, 400);
+  assert.match(refused.body.error, /nothing was created/);
+  assert.ok(!sql.some(([q]) => q.startsWith('INSERT INTO users')));
+  // A clean file: every agent created and put in its team.
+  const good = 'username,password,extension,team\nagent02,longenough,1001,TL 1\nagent05,longenough,1001,tl 1\n';
+  const done = await upload('mgr', good, true);
+  assert.strictEqual(done.status, 201);
+  assert.deepStrictEqual(done.body, { created: 2 });
+  assert.strictEqual(sql.filter(([q]) => q.startsWith('INSERT INTO users')).length, 2);
+  assert.strictEqual(sql.filter(([q, p]) => q.startsWith('INSERT INTO team_members') && p[0] === 3).length, 2);
+  // Without Users: Create, no import at all.
+  assert.strictEqual((await upload('tl', good, false)).status, 403);
 });
 
 test('/auth/me tells the screens what a staff login may do', async () => {

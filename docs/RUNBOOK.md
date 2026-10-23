@@ -1646,3 +1646,10 @@ Reported by the user after trying the agent panel:
 - Unchanged: only a Super Admin creates or changes admin-side logins (TLs, managers, Super Admins); agents still can't be deleted (deactivate).
 - Create user has an optional **Team** for everyone else too (the account joins that team in the same step; useful for bulk import next).
 - Moving an agent from one team to another stays on the Teams screen (all-teams roles).
+
+## tecdata features 3: bulk agent import (2026-10-24)
+- Users → **Import agents**: an .xlsx or .csv with the columns `username, password, extension, team` (any order or case; a Template link gives a starting file). One agent per row, **up to 500 per file** (tecdata's 1300 = 3 files).
+- Choosing the file **checks** it (nothing saved): ready count + every problem with its row (bad / taken / repeated username, short password, missing / unknown / disabled extension, unknown team, and for an own-teams login: a team that isn't theirs or another team's extension). **Create** is offered only when every row is fine, and the server creates **all or none** (one transaction).
+- Same rules as Create user: an own-teams login (TL / manager) imports only into its teams, and the team column is required for it. Team = the team's name as on the Teams screen.
+- Passwords are hashed in a worker thread (`backend/src/services/hashWorker.js`, ~85 ms each → ~45 s for 500), so live screens and call handling don't stall. Passwords never come back in the answer and are hidden in the audit log (`users.import`).
+- API: `POST /admin/users/import` (multipart `file`; `commit=1` to create).

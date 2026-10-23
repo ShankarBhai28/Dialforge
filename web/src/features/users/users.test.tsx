@@ -98,6 +98,51 @@ describe('Users', () => {
     expect(calls.find((c) => c.key === 'POST /admin/users')?.body).toMatchObject({ role: 'agent', teamId: 12 });
   });
 
+  it('imports agents: the file is checked first, Create only when every row is fine', async () => {
+    // First file: one problem. Second file: clean. Commit = the second file with commit=1.
+    let clean = false;
+    const calls = fakeApi({
+      'GET /admin/users': USERS,
+      'POST /admin/users/import': (init) => {
+        const form = init?.body as FormData;
+        if (form.get('commit') === '1') return { status: 201, body: { created: 2 } };
+        return clean
+          ? { body: { ready: 2, problems: [] } }
+          : {
+              body: {
+                ready: 1,
+                problems: [{ rowNum: 3, username: 'agent01', error: 'that username is already taken' }],
+              },
+            };
+      },
+    });
+    renderPage(<UsersPage />);
+    await userEvent.click(await screen.findByRole('button', { name: /import agents/i }));
+    const dialog = screen.getByRole('dialog');
+    const create = within(dialog).getByRole('button', { name: /create agents/i });
+    expect(create).toBeDisabled();
+    const csv = (name: string) => new File(['username,password,extension,team\n'], name, { type: 'text/csv' });
+
+    await userEvent.upload(within(dialog).getByLabelText('File'), csv('bad.csv'));
+    const problem = await within(dialog).findByText('that username is already taken');
+    expect(within(problem.closest('tr')!).getByText('3')).toBeInTheDocument();
+    expect(create).toBeDisabled();
+    expect(calls.filter((c) => c.key === 'POST /admin/users/import')).toHaveLength(1);
+
+    clean = true;
+    await userEvent.upload(within(dialog).getByLabelText('File'), csv('good.csv'));
+    const go = await within(dialog).findByRole('button', { name: 'Create 2 agents' });
+    expect(go).toBeEnabled();
+    await userEvent.click(go);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const sent = calls.filter((c) => c.key === 'POST /admin/users/import').map((c) => c.body as FormData);
+    expect(sent.map((form) => [(form.get('file') as File).name, form.get('commit')])).toEqual([
+      ['bad.csv', null],
+      ['good.csv', null],
+      ['good.csv', '1'],
+    ]);
+  });
+
   it('creates an agent linked to an extension, never showing SIP passwords', async () => {
     const calls = fakeApi({
       'GET /admin/users': USERS,
