@@ -39,7 +39,15 @@ function parseNewUser(body) {
     body.roleId ? Number(body.roleId) : null,
   );
   if (f.error) return { error: f.error };
-  return { user: { username, password: body.password, role: body.role, extensionId: f.extensionId, roleId: f.roleId } };
+  // The team the new account joins (optional; required for an own-teams login - the route checks).
+  let teamId = null;
+  if (body.teamId !== undefined && body.teamId !== null && body.teamId !== '') {
+    teamId = Number(body.teamId);
+    if (!Number.isInteger(teamId) || teamId <= 0) return { error: 'team must be a team id' };
+  }
+  return {
+    user: { username, password: body.password, role: body.role, extensionId: f.extensionId, roleId: f.roleId, teamId },
+  };
 }
 
 /**
@@ -68,4 +76,15 @@ function parseUserUpdate(body, current, { meId, activeAdmins }) {
   };
 }
 
-module.exports = { parseNewUser, parseUserUpdate, checkPassword, MIN_PASSWORD, ROLES };
+/**
+ * Own-teams logins (scope = { teamIds, agentIds, ... }) may give an agent only an
+ * extension nobody uses or one used only by their own agents - never another
+ * team's line. `users` = ids of the accounts that have the extension now. Error or null.
+ */
+function extensionOutsideScope(scope, users, exceptId = null) {
+  if (!scope) return null;
+  const others = users.filter((id) => id !== exceptId && !scope.agentIds.includes(id));
+  return others.length ? 'that extension belongs to an agent outside your teams - pick a free one' : null;
+}
+
+module.exports = { parseNewUser, parseUserUpdate, checkPassword, extensionOutsideScope, MIN_PASSWORD, ROLES };

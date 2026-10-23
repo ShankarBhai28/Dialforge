@@ -20,13 +20,25 @@ router.get('/admin/extensions', requireAdminSide, async (req, res) => {
     `SELECT e.id, e.name, e.label, e.enabled, e.created_at,
             (e.sip_password IS NOT NULL AND e.sip_password <> '') AS has_password,
             (SELECT GROUP_CONCAT(u.username ORDER BY u.username SEPARATOR ', ')
-               FROM users u WHERE u.extension_id = e.id) AS used_by
+               FROM users u WHERE u.extension_id = e.id) AS used_by,
+            (SELECT GROUP_CONCAT(u.id) FROM users u WHERE u.extension_id = e.id) AS user_ids
      FROM extensions e WHERE e.deleted_at IS NULL ORDER BY e.name`,
   );
+  // An own-teams login sees only the free extensions and those of its own
+  // agents (and its own monitoring line) - not other teams' lines.
+  const { scope } = req.access;
+  const mine = (r) => {
+    if (!scope || !r.user_ids) return true;
+    return String(r.user_ids)
+      .split(',')
+      .map(Number)
+      .every((id) => scope.agentIds.includes(id) || id === req.session.user.id);
+  };
+  const visible = rows.filter(mine).map(({ user_ids, ...r }) => r);
   // Registered right now (a browser or phone is connected)? null = Asterisk didn't answer.
   const states = await ari.endpointStates();
   res.json(
-    rows.map((r) => ({
+    visible.map((r) => ({
       ...r,
       enabled: !!r.enabled,
       has_password: !!Number(r.has_password),

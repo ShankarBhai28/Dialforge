@@ -1639,3 +1639,10 @@ Reported by the user after trying the agent panel:
 - Teams screen: "Under (parent team)" field; the list is shown as a tree.
 - To set up tecdata's shape: create "Head" (members: the head's login), "Manager A" under Head (member: manager A's login), "TL 1" under Manager A (members: TL 1's login + agents, campaigns). Give the logins a role with scope "own teams".
 - Not yet: per-team totals rolled up in Reports (the totals already include everything below; a breakdown per sub-team comes later). Migration to be confirmed on dev's MySQL before testing.
+
+## tecdata features 2: TLs / managers manage their own agents (2026-10-24)
+- An own-teams role (scope "own teams") may now have **Users: Create / Edit / Reset password** (Roles screen). It reaches **only the agents of its teams and of every team below** (step 1): new agents must go into one of those teams (the Team field on Create user is required for them; the list shows only their teams), edits and password resets of any other user are refused ("that agent is not in your teams").
+- Extensions: such a login may give an agent only a free extension or one its own agents already use (never another team's line); its Extensions list shows only those (plus its own monitoring line).
+- Unchanged: only a Super Admin creates or changes admin-side logins (TLs, managers, Super Admins); agents still can't be deleted (deactivate).
+- Create user has an optional **Team** for everyone else too (the account joins that team in the same step; useful for bulk import next).
+- Moving an agent from one team to another stays on the Teams screen (all-teams roles).

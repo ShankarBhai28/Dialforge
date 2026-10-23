@@ -20,12 +20,26 @@ const ROLES = {
   },
   // Saved in the first format ('manage'): read as every action, minus what own-teams roles can't have.
   5: { id: 5, name: 'Team Leader', scope: 'team', permissions: { calls: 'view', campaigns: 'manage', dialer: 'view' } },
+  // An own-teams role that manages its teams' agents.
+  6: { id: 6, name: 'Manager', scope: 'team', permissions: { users: ['view', 'create', 'edit', 'password'] } },
 };
 function fake(rel, exports) {
   const file = require.resolve(path.join(root, rel));
   require.cache[file] = { id: file, filename: file, loaded: true, exports };
 }
-fake('db.js', {
+// Agents 21 + 22 are in team 3; agent 40 is in another team. Extension 5 is
+// agent 40's line, extension 6 agent 21's, any other one is free.
+const EXT_USERS = { 5: [40], 6: [21] };
+const db = {
+  async getConnection() {
+    return {
+      query: db.query,
+      beginTransaction: async () => {},
+      commit: async () => {},
+      rollback: async () => {},
+      release() {},
+    };
+  },
   async query(q, params) {
     const s = q.replace(/\s+/g, ' ').trim();
     sql.push([s, params]);
@@ -40,10 +54,29 @@ fake('db.js', {
     if (s.includes('campaign_id AS id FROM team_campaigns')) return [[{ id: 7 }]];
     if (s.includes('tm.user_id AS id')) return [[{ id: 21 }, { id: 22 }]];
     if (s.includes('COUNT(*)')) return [[{ n: 0, c: 0 }]];
-    if (s.startsWith('SELECT id, role FROM users WHERE id')) return [[{ id: params[0], role: 'admin' }]];
+    if (s.startsWith('SELECT id, role FROM users WHERE id'))
+      return [[{ id: Number(params[0]), role: Number(params[0]) === 1 ? 'admin' : 'agent' }]];
+    if (s.startsWith('SELECT id, role, role_id, status, extension_id FROM users WHERE id'))
+      return [[{ id: Number(params[0]), role: 'agent', role_id: null, status: 'active', extension_id: 6 }]];
+    if (s.startsWith('SELECT 1 FROM extensions WHERE id') || s.startsWith('SELECT 1 FROM teams WHERE id'))
+      return [[{ 1: 1 }]];
+    if (s.startsWith('SELECT id FROM users WHERE extension_id'))
+      return [(EXT_USERS[params[0]] || []).map((id) => ({ id }))];
+    if (s.startsWith('INSERT INTO users')) return [{ insertId: 50 }];
+    // Extensions: 1001 free, 1005 agent 40's (other team), 1006 agent 21's, 1007 the manager's own line.
+    if (s.startsWith('SELECT e.id, e.name'))
+      return [
+        [
+          { id: 1, name: '1001', enabled: 1, has_password: 1, used_by: null, user_ids: null },
+          { id: 5, name: '1005', enabled: 1, has_password: 1, used_by: 'agent40', user_ids: '40' },
+          { id: 6, name: '1006', enabled: 1, has_password: 1, used_by: 'agent21', user_ids: '21' },
+          { id: 7, name: '1007', enabled: 1, has_password: 1, used_by: 'mgr', user_ids: '32' },
+        ],
+      ];
     return [[]];
   },
-});
+};
+fake('db.js', db);
 
 const { createApp } = require('../src/app');
 const { SCREENS, parseRole, scopeCondition, campaignInScope } = require('../src/services/access');
@@ -53,6 +86,7 @@ const USERS = {
   super: { id: 1, username: 'boss', role: 'admin' },
   sup: { id: 30, username: 'sup', role: 'staff', roleId: 4 },
   tl: { id: 31, username: 'tl', role: 'staff', roleId: 5 },
+  mgr: { id: 32, username: 'mgr', role: 'staff', roleId: 6 },
   agent: { id: 21, username: 'agent', role: 'agent', extensionName: '1001' },
 };
 const app = createApp({
@@ -166,6 +200,52 @@ test('team scope: queries are limited to the teams; reaching outside is refused'
   assert.match(create.body.error, /Campaigns - Create/);
   // a campaign outside the team answers like a missing one
   assert.strictEqual((await call('tl', 'GET', '/admin/campaigns/9/dispositions')).status, 404);
+});
+
+test('own-teams logins manage the agents of their teams - and only those', async () => {
+  const agent = { username: 'agent99', password: 'longenough', role: 'agent', extensionId: 9 };
+  // A new agent joins one of their teams; the team is required.
+  sql.length = 0;
+  const created = await call('mgr', 'POST', '/admin/users', { ...agent, teamId: 3 });
+  assert.strictEqual(created.status, 201);
+  assert.ok(sql.some(([q, p]) => q.startsWith('INSERT INTO team_members') && p[0] === 3 && p[1] === 50));
+  assert.match((await call('mgr', 'POST', '/admin/users', agent)).body.error, /pick the team/);
+  const otherTeam = await call('mgr', 'POST', '/admin/users', { ...agent, teamId: 8 });
+  assert.strictEqual(otherTeam.status, 403);
+  assert.match(otherTeam.body.error, /not one of yours/);
+  // Never an admin-side login, never another team's extension.
+  assert.match(
+    (await call('mgr', 'POST', '/admin/users', { ...agent, role: 'admin', teamId: 3 })).body.error,
+    /only manage agent accounts/,
+  );
+  const taken = await call('mgr', 'POST', '/admin/users', { ...agent, extensionId: 5, teamId: 3 });
+  assert.strictEqual(taken.status, 403);
+  assert.match(taken.body.error, /outside your teams/);
+  assert.strictEqual((await call('mgr', 'POST', '/admin/users', { ...agent, extensionId: 6, teamId: 3 })).status, 201);
+
+  // Edit and password reset: their agents yes, others no.
+  assert.strictEqual((await call('mgr', 'PUT', '/admin/users/21', { status: 'inactive' })).status, 200);
+  const outside = await call('mgr', 'PUT', '/admin/users/40', { status: 'inactive' });
+  assert.strictEqual(outside.status, 403);
+  assert.match(outside.body.error, /not in your teams/);
+  assert.strictEqual((await call('mgr', 'PUT', '/admin/users/21', { extensionId: 5 })).status, 403);
+  assert.strictEqual((await call('mgr', 'POST', '/admin/users/22/password', { password: 'longenough' })).status, 200);
+  assert.strictEqual((await call('mgr', 'POST', '/admin/users/40/password', { password: 'longenough' })).status, 403);
+
+  // The extension list: free ones and their own agents' (and their own line) - not other teams' lines.
+  const exts = await call('mgr', 'GET', '/admin/extensions');
+  assert.deepStrictEqual(
+    exts.body.map((e) => e.name),
+    ['1001', '1006', '1007'],
+  );
+  assert.ok(exts.body.every((e) => !('user_ids' in e)));
+  assert.strictEqual((await call('super', 'GET', '/admin/extensions')).body.length, 4);
+
+  // A Super Admin may put the new account in any team, or none.
+  assert.strictEqual((await call('super', 'POST', '/admin/users', { ...agent, teamId: 8 })).status, 201);
+  assert.strictEqual((await call('super', 'POST', '/admin/users', agent)).status, 201);
+  // A role without Users rights still can't.
+  assert.strictEqual((await call('tl', 'POST', '/admin/users', { ...agent, teamId: 3 })).status, 403);
 });
 
 test('/auth/me tells the screens what a staff login may do', async () => {

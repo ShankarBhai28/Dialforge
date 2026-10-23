@@ -1,7 +1,7 @@
 // Account rules (create / edit / deactivate) and ending a user's sessions.
 const assert = require('node:assert');
 const { test } = require('node:test');
-const { parseNewUser, parseUserUpdate, checkPassword } = require('../src/services/users');
+const { parseNewUser, parseUserUpdate, checkPassword, extensionOutsideScope } = require('../src/services/users');
 const { revokeUserSessions, isRevoked } = require('../src/services/sessions');
 
 test('new user: checks username, password, role and extension', () => {
@@ -19,10 +19,25 @@ test('new user: checks username, password, role and extension', () => {
     parseNewUser({ username: ' ravi.k ', password: 'longenough', role: 'admin', extensionId: 3 }),
     {
       // an admin may keep an extension: their monitoring line
-      user: { username: 'ravi.k', password: 'longenough', role: 'admin', extensionId: 3, roleId: null },
+      user: { username: 'ravi.k', password: 'longenough', role: 'admin', extensionId: 3, roleId: null, teamId: null },
     },
   );
   assert.strictEqual(checkPassword('12345678'), null);
+  // The team the new account joins: optional here (the route requires it for own-teams logins).
+  const base = { username: 'agent9', password: 'longenough', role: 'agent', extensionId: 1 };
+  assert.strictEqual(parseNewUser({ ...base, teamId: '3' }).user.teamId, 3);
+  assert.strictEqual(parseNewUser({ ...base, teamId: '' }).user.teamId, null);
+  assert.match(parseNewUser({ ...base, teamId: 'x' }).error, /team/);
+});
+
+test("own-teams logins: an extension that's free or their own agents' - never another team's", () => {
+  const scope = { agentIds: [21, 22], teamIds: [3], campaignIds: [] };
+  assert.strictEqual(extensionOutsideScope(null, [40]), null, 'all-teams roles: no limit');
+  assert.strictEqual(extensionOutsideScope(scope, []), null, 'free');
+  assert.strictEqual(extensionOutsideScope(scope, [21, 22]), null, 'their own agents share it');
+  assert.match(extensionOutsideScope(scope, [21, 40]), /outside your teams/);
+  // The agent being edited doesn't count against itself.
+  assert.strictEqual(extensionOutsideScope({ ...scope, agentIds: [] }, [50], 50), null);
 });
 
 const agent = { id: 7, role: 'agent', status: 'active', extension_id: 3 };
@@ -61,7 +76,7 @@ test('staff logins need a role; changing the role ends their sessions', () => {
   assert.match(parseNewUser({ username: 'tl.ravi', password: 'longenough', role: 'staff' }).error, /role/);
   assert.deepStrictEqual(
     parseNewUser({ username: 'tl.ravi', password: 'longenough', role: 'staff', roleId: '4', extensionId: 2 }).user,
-    { username: 'tl.ravi', password: 'longenough', role: 'staff', extensionId: 2, roleId: 4 },
+    { username: 'tl.ravi', password: 'longenough', role: 'staff', extensionId: 2, roleId: 4, teamId: null },
   );
   const tl = { id: 9, role: 'staff', status: 'active', extension_id: null, role_id: 4 };
   assert.deepStrictEqual(parseUserUpdate({ roleId: 5 }, tl, { meId: 1, activeAdmins: 1 }), {

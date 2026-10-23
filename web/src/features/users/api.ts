@@ -48,6 +48,8 @@ export type NewUser = {
   role: string;
   extensionId: number | null;
   roleId: number | null;
+  /** The team the account joins (required for an own-teams login: one of its teams). */
+  teamId: number | null;
 };
 
 export const userKeys = {

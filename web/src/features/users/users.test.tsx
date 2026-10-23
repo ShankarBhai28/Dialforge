@@ -51,6 +51,53 @@ describe('Users', () => {
     expect(within(row).getByText('1003')).toBeInTheDocument();
   });
 
+  it('a team leader / manager creates agents only into one of their teams', async () => {
+    const team = (id: number, name: string, parent_id: number | null) => ({
+      id,
+      name,
+      parent_id,
+      status: 'active',
+      created_at: '',
+      members: [],
+      campaigns: [],
+    });
+    const calls = fakeApi({
+      'GET /auth/me': {
+        body: {
+          id: 32,
+          username: 'mgr',
+          role: 'staff',
+          roleName: 'Manager',
+          scope: 'team',
+          teamCount: 2,
+          permissions: { users: ['view', 'create', 'edit', 'password'] },
+        },
+      },
+      'GET /admin/users': USERS,
+      'GET /admin/extensions': EXTENSIONS,
+      'GET /admin/teams': { body: [team(12, 'TL 1', 11), team(11, 'Manager A', null)] },
+      'POST /admin/users': { status: 201, body: { id: 9, username: 'agent09', role: 'agent' } },
+    });
+    renderPage(<UsersPage />);
+    await userEvent.click(await screen.findByRole('button', { name: /create user/i }));
+    // Agent accounts only (no account type choice), and the team is required.
+    expect(screen.queryByLabelText('Account type')).not.toBeInTheDocument();
+    const teamSelect = screen.getByLabelText('Team');
+    expect(teamSelect).toBeRequired();
+    await screen.findByRole('option', { name: /TL 1/ });
+    expect(
+      within(teamSelect)
+        .getAllByRole('option')
+        .map((o) => o.textContent?.trim()),
+    ).toEqual(['- Pick a team -', 'Manager A', 'TL 1']);
+    await userEvent.type(screen.getByLabelText('Username'), 'agent09');
+    await userEvent.type(screen.getByLabelText('Password'), 'pw123456');
+    await userEvent.selectOptions(teamSelect, '12');
+    await userEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(calls.find((c) => c.key === 'POST /admin/users')?.body).toMatchObject({ role: 'agent', teamId: 12 });
+  });
+
   it('creates an agent linked to an extension, never showing SIP passwords', async () => {
     const calls = fakeApi({
       'GET /admin/users': USERS,
@@ -72,6 +119,7 @@ describe('Users', () => {
       role: 'agent',
       extensionId: 3,
       roleId: null,
+      teamId: null,
     });
   });
 
@@ -95,6 +143,7 @@ describe('Users', () => {
       role: 'admin',
       extensionId: null,
       roleId: null,
+      teamId: null,
     });
   });
 
@@ -129,6 +178,7 @@ describe('Users', () => {
       role: 'staff',
       extensionId: null,
       roleId: 5,
+      teamId: null,
     });
   });
 

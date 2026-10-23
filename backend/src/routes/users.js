@@ -1,17 +1,29 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const pool = require('../../db');
-const { requirePermission, requireAdminSide, requireAllScope } = require('../middleware/auth');
+const { requirePermission, requireAdminSide } = require('../middleware/auth');
 const { scopeCondition } = require('../services/access');
 const { closeOpenStatus, syncQueueMembership } = require('../services/agents');
 const { releasePreviewLocks } = require('../services/preview');
 const { revokeUserSessions } = require('../services/sessions');
-const { checkPassword, parseNewUser, parseUserUpdate } = require('../services/users');
+const { checkPassword, extensionOutsideScope, parseNewUser, parseUserUpdate } = require('../services/users');
+const hub = require('../realtime/hub');
 
 const router = express.Router();
 
 async function extensionExists(id) {
   const [rows] = await pool.query('SELECT 1 FROM extensions WHERE id = ? AND deleted_at IS NULL', [id]);
+  return rows.length > 0;
+}
+
+/** Ids of the accounts that have this extension now. */
+async function extensionUsers(id) {
+  const [rows] = await pool.query('SELECT id FROM users WHERE extension_id = ?', [id]);
+  return rows.map((r) => r.id);
+}
+
+async function teamExists(id) {
+  const [rows] = await pool.query('SELECT 1 FROM teams WHERE id = ?', [id]);
   return rows.length > 0;
 }
 
@@ -25,6 +37,13 @@ async function roleExists(id) {
 // or anyone else more rights. Such a role manages agent accounts only.
 const AGENTS_ONLY = 'your role can only manage agent accounts - ask a Super Admin';
 const touchesAdminSide = (...roles) => roles.some((r) => r && r !== 'agent');
+
+// An own-teams login (TL, manager, head) manages only the agents of its teams
+// (and of every team below them): new agents go into one of those teams,
+// edits and password resets only reach those agents, and an agent's
+// extension must be free or already one of theirs.
+const NOT_YOURS = 'that agent is not in your teams';
+const outOfScope = (scope, userId) => !!scope && !scope.agentIds.includes(userId);
 
 // --- Admin: user accounts. A team-scoped role sees its teams' agents and itself. ---
 router.get('/admin/users', requireAdminSide, async (req, res) => {
@@ -42,98 +61,115 @@ router.get('/admin/users', requireAdminSide, async (req, res) => {
   res.json(rows);
 });
 
-router.post('/admin/users', requirePermission('users', 'create'), requireAllScope('manage users'), async (req, res) => {
+// New account; with teamId it joins that team in the same step.
+router.post('/admin/users', requirePermission('users', 'create'), async (req, res) => {
+  const { scope } = req.access;
   const { error, user } = parseNewUser(req.body);
   if (error) return res.status(400).json({ error });
   if (!req.access.superAdmin && touchesAdminSide(user.role)) return res.status(403).json({ error: AGENTS_ONLY });
+  if (scope && !user.teamId) return res.status(400).json({ error: 'pick the team the new agent joins' });
+  if (scope && !scope.teamIds.includes(user.teamId))
+    return res.status(403).json({ error: 'that team is not one of yours' });
+  if (!scope && user.teamId && !(await teamExists(user.teamId)))
+    return res.status(400).json({ error: 'that team does not exist' });
   if (user.extensionId && !(await extensionExists(user.extensionId))) {
     return res.status(400).json({ error: 'that extension does not exist' });
+  }
+  if (user.extensionId) {
+    const outside = extensionOutsideScope(scope, await extensionUsers(user.extensionId));
+    if (outside) return res.status(403).json({ error: outside });
   }
   if (user.roleId && !(await roleExists(user.roleId)))
     return res.status(400).json({ error: 'that role does not exist' });
   const hash = await bcrypt.hash(user.password, 10);
+  const conn = await pool.getConnection();
   try {
-    const [result] = await pool.query(
+    await conn.beginTransaction();
+    const [result] = await conn.query(
       'INSERT INTO users (tenant_id, username, password_hash, role, role_id, extension_id) VALUES (1, ?, ?, ?, ?, ?)',
       [user.username, hash, user.role, user.roleId, user.extensionId],
     );
+    if (user.teamId)
+      await conn.query('INSERT INTO team_members (team_id, user_id) VALUES (?, ?)', [user.teamId, result.insertId]);
+    await conn.commit();
+    if (user.teamId) hub.refreshAccess(); // the team's leaders see the new agent live
     res.status(201).json({ id: result.insertId, username: user.username, role: user.role });
   } catch (err) {
+    await conn.rollback();
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'that username is already taken' });
     }
     throw err;
+  } finally {
+    conn.release();
   }
 });
 
 // Role, extension and active/inactive. No delete: calls, status history,
 // form answers and callbacks point at users - deactivate instead.
-router.put(
-  '/admin/users/:id',
-  requirePermission('users', 'edit'),
-  requireAllScope('manage users'),
-  async (req, res) => {
-    const [rows] = await pool.query('SELECT id, role, role_id, status, extension_id FROM users WHERE id = ?', [
-      req.params.id,
-    ]);
-    const current = rows[0];
-    if (!current) return res.status(404).json({ error: 'user not found' });
-    const [[admins]] = await pool.query("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND status = 'active'");
-    const { error, changes, revoke } = parseUserUpdate(req.body, current, {
-      meId: req.session.user.id,
-      activeAdmins: admins.n,
-    });
-    if (error) return res.status(400).json({ error });
-    if (!req.access.superAdmin && touchesAdminSide(current.role, changes.role)) {
-      return res.status(403).json({ error: AGENTS_ONLY });
-    }
-    if (changes.extension_id && !(await extensionExists(changes.extension_id))) {
-      return res.status(400).json({ error: 'that extension does not exist' });
-    }
-    if (changes.role_id && !(await roleExists(changes.role_id))) {
-      return res.status(400).json({ error: 'that role does not exist' });
-    }
-    await pool.query('UPDATE users SET role = ?, role_id = ?, status = ?, extension_id = ? WHERE id = ?', [
-      changes.role,
-      changes.role_id,
-      changes.status,
-      changes.extension_id,
-      current.id,
-    ]);
+router.put('/admin/users/:id', requirePermission('users', 'edit'), async (req, res) => {
+  const { scope } = req.access;
+  const [rows] = await pool.query('SELECT id, role, role_id, status, extension_id FROM users WHERE id = ?', [
+    req.params.id,
+  ]);
+  const current = rows[0];
+  if (!current) return res.status(404).json({ error: 'user not found' });
+  if (outOfScope(scope, current.id)) return res.status(403).json({ error: NOT_YOURS });
+  const [[admins]] = await pool.query("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND status = 'active'");
+  const { error, changes, revoke } = parseUserUpdate(req.body, current, {
+    meId: req.session.user.id,
+    activeAdmins: admins.n,
+  });
+  if (error) return res.status(400).json({ error });
+  if (!req.access.superAdmin && touchesAdminSide(current.role, changes.role)) {
+    return res.status(403).json({ error: AGENTS_ONLY });
+  }
+  if (changes.extension_id && !(await extensionExists(changes.extension_id))) {
+    return res.status(400).json({ error: 'that extension does not exist' });
+  }
+  if (changes.extension_id && changes.extension_id !== current.extension_id) {
+    const outside = extensionOutsideScope(scope, await extensionUsers(changes.extension_id), current.id);
+    if (outside) return res.status(403).json({ error: outside });
+  }
+  if (changes.role_id && !(await roleExists(changes.role_id))) {
+    return res.status(400).json({ error: 'that role does not exist' });
+  }
+  await pool.query('UPDATE users SET role = ?, role_id = ?, status = ?, extension_id = ? WHERE id = ?', [
+    changes.role,
+    changes.role_id,
+    changes.status,
+    changes.extension_id,
+    current.id,
+  ]);
 
-    // A deactivated agent leaves their queues straight away, like a logout.
-    if (current.role === 'agent' && changes.status === 'inactive' && current.status === 'active') {
-      const [open] = await pool.query(
-        'SELECT extension_name FROM agent_status_log WHERE user_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1',
-        [current.id],
-      );
-      if (open[0]) {
-        await releasePreviewLocks(current.id, null);
-        await closeOpenStatus(current.id);
-        await syncQueueMembership(current.id, open[0].extension_name, 'offline', null);
-      }
+  // A deactivated agent leaves their queues straight away, like a logout.
+  if (current.role === 'agent' && changes.status === 'inactive' && current.status === 'active') {
+    const [open] = await pool.query(
+      'SELECT extension_name FROM agent_status_log WHERE user_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1',
+      [current.id],
+    );
+    if (open[0]) {
+      await releasePreviewLocks(current.id, null);
+      await closeOpenStatus(current.id);
+      await syncQueueMembership(current.id, open[0].extension_name, 'offline', null);
     }
-    if (revoke) revokeUserSessions(current.id);
-    res.json({ id: current.id, ...changes });
-  },
-);
+  }
+  if (revoke) revokeUserSessions(current.id);
+  res.json({ id: current.id, ...changes });
+});
 
 // An admin sets a new password; the user's open sessions end.
-router.post(
-  '/admin/users/:id/password',
-  requirePermission('users', 'password'),
-  requireAllScope('manage users'),
-  async (req, res) => {
-    const pwError = checkPassword(req.body.password);
-    if (pwError) return res.status(400).json({ error: pwError });
-    const [rows] = await pool.query('SELECT id, role FROM users WHERE id = ?', [req.params.id]);
-    if (!rows[0]) return res.status(404).json({ error: 'user not found' });
-    if (!req.access.superAdmin && touchesAdminSide(rows[0].role)) return res.status(403).json({ error: AGENTS_ONLY });
-    const hash = await bcrypt.hash(req.body.password, 10);
-    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [hash, rows[0].id]);
-    if (rows[0].id !== req.session.user.id) revokeUserSessions(rows[0].id);
-    res.json({ status: 'ok' });
-  },
-);
+router.post('/admin/users/:id/password', requirePermission('users', 'password'), async (req, res) => {
+  const pwError = checkPassword(req.body.password);
+  if (pwError) return res.status(400).json({ error: pwError });
+  const [rows] = await pool.query('SELECT id, role FROM users WHERE id = ?', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'user not found' });
+  if (!req.access.superAdmin && touchesAdminSide(rows[0].role)) return res.status(403).json({ error: AGENTS_ONLY });
+  if (outOfScope(req.access.scope, rows[0].id)) return res.status(403).json({ error: NOT_YOURS });
+  const hash = await bcrypt.hash(req.body.password, 10);
+  await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [hash, rows[0].id]);
+  if (rows[0].id !== req.session.user.id) revokeUserSessions(rows[0].id);
+  res.json({ status: 'ok' });
+});
 
 module.exports = router;

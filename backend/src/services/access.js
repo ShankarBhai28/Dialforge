@@ -13,7 +13,9 @@
 //   agent - the agent screen only; never the admin side.
 //
 // Any action implies view. A team-scoped role can't have the actions that
-// reach outside its teams (TEAM_SCOPE_BLOCKED).
+// reach outside its teams (TEAM_SCOPE_BLOCKED). It may manage the agents of
+// its teams (Users: create / edit / reset password) - the user routes keep
+// that inside its teams.
 const pool = require('../../db');
 const { subtree } = require('./teams');
 
@@ -63,7 +65,6 @@ const SCOPES = ['all', 'team'];
 /** Actions an own-teams role can't have: they would reach outside its teams. */
 const TEAM_SCOPE_BLOCKED = {
   campaigns: ['create', 'delete'],
-  users: ['create', 'edit', 'password'],
   teams: ['create', 'edit', 'delete'],
   // Every team's changes are in one log, so it's all-teams only.
   audit: ['view'],

@@ -3,7 +3,8 @@
 // extension, reset password, deactivate. There is no delete - calls,
 // status history, form answers and callbacks point at users - so leavers
 // are deactivated. Only a Super Admin manages admin-side accounts; a role
-// with Users: manage handles agent accounts.
+// with Users rights handles agent accounts - an own-teams role (TL, manager)
+// only the agents of its teams, and new agents go into one of them.
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import { KeyRound, Pencil, Plus, UserRound, UserRoundCheck, UserRoundX } from 'lucide-react';
@@ -29,6 +30,7 @@ import { cn } from '@/lib/utils';
 import { useMe } from '@/features/auth/auth';
 import { useAccess } from '@/features/auth/access';
 import { useRoles } from '@/features/roles/api';
+import { teamTree, useTeams } from '@/features/teams/api';
 import {
   accountLabel,
   useCreateUser,
@@ -159,6 +161,33 @@ function useChosenRole(chosen: string) {
   return chosen || (roles.data?.roles[0] ? String(roles.data.roles[0].id) : '');
 }
 
+/**
+ * The team a new account joins. Own-teams logins must pick one of their
+ * teams (the list only has those); others may leave it empty.
+ */
+function TeamSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const teams = useTeams();
+  const { teamScope } = useAccess();
+  return (
+    <Field
+      id="user-team"
+      label={teamScope ? 'Team' : 'Team (optional)'}
+      error={teams.error ? `Could not load teams: ${teams.error.message}` : null}
+      hint={teamScope ? 'The new agent joins this team and works its campaigns.' : 'Adds the account to this team.'}
+    >
+      <Select id="user-team" value={value} onChange={(e) => onChange(e.target.value)} required={teamScope}>
+        <option value="">{teamScope ? '- Pick a team -' : 'None'}</option>
+        {teamTree(teams.data ?? []).map(({ team, level }) => (
+          <option key={team.id} value={team.id}>
+            {'\u00a0\u00a0'.repeat(level)}
+            {team.name}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+}
+
 /** First extension pre-selected once the list loads. */
 function useDefaultExtension(chosen: string) {
   const extensions = useExtensions();
@@ -173,6 +202,7 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (v: boolean) => void
   const [role, setRole] = useState('agent');
   const [roleId, setRoleId] = useState('');
   const [extensionId, setExtensionId] = useState('');
+  const [teamId, setTeamId] = useState('');
   const extension = useDefaultExtension(extensionId);
   const adminRole = useChosenRole(roleId);
 
@@ -187,6 +217,7 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (v: boolean) => void
         extensionId:
           role === 'agent' ? (extension ? Number(extension) : null) : extensionId ? Number(extensionId) : null,
         roleId: role === 'staff' && adminRole ? Number(adminRole) : null,
+        teamId: teamId ? Number(teamId) : null,
       },
       {
         onSuccess: () => {
@@ -235,6 +266,7 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (v: boolean) => void
             ) : (
               <ExtensionSelect id="user-extension" value={extensionId} onChange={setExtensionId} monitoring />
             )}
+            <TeamSelect value={teamId} onChange={setTeamId} />
             <FormError message={create.error?.message} />
           </DialogBody>
           <DialogFooter>
