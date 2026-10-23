@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RecordingPlayer, clock } from './RecordingPlayer';
@@ -46,6 +46,22 @@ describe('RecordingPlayer', () => {
     audioEvent(screen.getByLabelText('Recording of call 3') as HTMLAudioElement, 'error');
     expect(screen.getByText(/couldn't play this recording/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Play' })).toBeDisabled();
+  });
+
+  it("a missing recording shows the server's reason (split servers without S3)", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      json: async () => ({ error: 'the recording is on the telephony server - set an S3 bucket' }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      render(<RecordingPlayer src="/r/4" label="Recording of call 4" autoPlay={false} />);
+      audioEvent(screen.getByLabelText('Recording of call 4') as HTMLAudioElement, 'error');
+      expect(await screen.findByText(/on the telephony server - set an S3 bucket/)).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledWith('/r/4', { credentials: 'same-origin' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('clock', () => {

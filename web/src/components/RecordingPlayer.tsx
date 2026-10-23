@@ -84,6 +84,16 @@ export function RecordingPlayer({
       setLoading(false);
       setPlaying(false);
       setError("Couldn't play this recording - it may have been removed (kept for a limited time).");
+      // The audio element hides the server's reason (e.g. "on the telephony
+      // server - set an S3 bucket"); ask once more and show it when there is one.
+      const url = a.getAttribute('src');
+      if (url && typeof fetch === 'function')
+        fetch(url, { credentials: 'same-origin' })
+          .then((r) => (r.ok ? null : r.json()))
+          .then((body: { error?: unknown } | null) => {
+            if (body && typeof body.error === 'string') setError(`Couldn't play this recording - ${body.error}.`);
+          })
+          .catch(() => {});
     };
     const events: [string, () => void][] = [
       ['timeupdate', onTime],

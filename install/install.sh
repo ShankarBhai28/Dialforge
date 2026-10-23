@@ -814,7 +814,7 @@ if [ "$ROLE" = db ] || [ "$ROLE" = telephony ]; then
   cat <<EOF | tee -a "$LOG"
 
 ==========================================================================
- VIZTEX $ROLE server installed ($([ "$FAILS" = 0 ] && echo "all checks OK" || echo "$FAILS check(s) FAILED - see $LOG"))
+ VIZTEX $ROLE server $([ "$CHECKS_ONLY" = 1 ] && echo checked || echo installed) ($([ "$FAILS" = 0 ] && echo "all checks OK" || echo "$FAILS check(s) FAILED - see $LOG"))
 EOF
   if [ "$ROLE" = db ]; then
     cat <<EOF
@@ -832,7 +832,7 @@ EOF
  Security group (telephony): TCP 8089, 80, 3478; UDP 3478, 10000-20000, 49152-49300
    from anywhere; TCP 8088 + 5038 only from the app server ($APP_IP); UDP 5060 only
    from the SIP provider.
- Next: install the app server. Then here: sudo bash $0 --role telephony ... --checks-only
+ Next: $(if [ "$CHECKS_ONLY" = 1 ]; then echo "in the app: agents log in and make a test call (guide step 12)."; else echo "install the app server. Then here: sudo bash $0 --role telephony ... --checks-only"; fi)
 ==========================================================================
 EOF
   fi

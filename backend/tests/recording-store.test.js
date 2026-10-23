@@ -7,7 +7,7 @@ const path = require('path');
 const { test } = require('node:test');
 
 process.env.RECORDINGS_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'viztex-rec-'));
-const { findRecording, relativePath, s3Prefix } = require('../src/services/recordingStore');
+const { findRecording, missingMessage, relativePath, s3Prefix } = require('../src/services/recordingStore');
 const { doneCommand } = require('../src/services/recording');
 
 const REC = '/var/spool/asterisk/monitor/dialforge/2026/10/22/call-7-20261022-101500.mp3';
@@ -83,4 +83,10 @@ test('the MP3 is not in S3 but the WAV is (conversion failed); neither -> null; 
     null,
   );
   assert.strictEqual(await findRecording(gone, { playableFile: () => null, s3Prefix: () => null }), null);
+});
+
+test('Play without a file: split servers without a bucket are told why', () => {
+  assert.match(missingMessage({}, false), /on the telephony server - set an S3 bucket/);
+  assert.match(missingMessage({ BACKUP_S3_BUCKET: 'b' }, false), /no longer kept/);
+  assert.match(missingMessage({}, true), /no longer kept/, 'one server: the folder is here, the file is gone');
 });

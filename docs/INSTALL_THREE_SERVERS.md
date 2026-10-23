@@ -134,20 +134,28 @@ nslookup crm.client.com
 ```
 cd /c/Users/User01/DialForge
 git checkout main && git pull
-bash scripts/make-release.sh
-for h in <db-public-ip> <tel-elastic-ip> <app-elastic-ip>; do
-  scp -i ~/Documents/<key>.pem dist/viztex-*.tgz ubuntu@$h:~ &&
-  ssh -i ~/Documents/<key>.pem ubuntu@$h "rm -rf viztex && tar xzf viztex-*.tgz && cat viztex/VERSION"
+bash scripts/make-release.sh          # prints the package name, e.g. dist/viztex-20261023-1d59009.tgz
+PKG=dist/viztex-20261023-1d59009.tgz   # <- the name it printed (dist/ keeps older ones too)
+for s in "<db-key>.pem <db-public-ip>" "<tel-key>.pem <tel-elastic-ip>" "<app-key>.pem <app-elastic-ip>"; do
+  set -- $s
+  scp -i ~/Documents/$1 $PKG ubuntu@$2:~ &&
+  ssh -i ~/Documents/$1 ubuntu@$2 "rm -rf viztex && tar xzf $(basename $PKG) && cat viztex/VERSION"
 done
 ```
+One key for all three? Put the same `.pem` name in all three pairs.
 **The same package on all three** - mixing versions between servers is not supported.
+
+> **Git Bash or CMD?** All commands from your PC in this guide are for **Git Bash**: paths with
+> forward slashes, `~/Documents/<key>.pem`. A Windows path like `C:\Users\...\x.pem` in Git Bash
+> loses its backslashes ("Identity file C:UsersUser01... not accessible"). In CMD, use
+> `C:\Users\<you>\Documents\<key>.pem` instead.
 
 - [ ] All three print the same VERSION.
 
 ## 7. Install the DB server (~5 min)
 
 ```
-ssh -i <key>.pem ubuntu@<db-public-ip>
+ssh -i ~/Documents/<db-key>.pem ubuntu@<db-public-ip>
 sudo bash viztex/install/install.sh --role db --app-ip <app-private> --telephony-ip <tel-private>
 ```
 What it does: MySQL only; listens on its private IP; database `viztex`; user
@@ -160,31 +168,32 @@ Expected checks: `MySQL`, **`MySQL listens on <db-private> for the app and telep
 
 Check from the other two that the database is reachable (each prints `reachable`):
 ```
-ssh -i <key>.pem ubuntu@<app-elastic-ip> "timeout 3 bash -c 'echo > /dev/tcp/<db-private>/3306' && echo reachable"
-ssh -i <key>.pem ubuntu@<tel-elastic-ip> "timeout 3 bash -c 'echo > /dev/tcp/<db-private>/3306' && echo reachable"
+ssh -i ~/Documents/<app-key>.pem ubuntu@<app-elastic-ip> "timeout 3 bash -c 'echo > /dev/tcp/<db-private>/3306' && echo reachable"
+ssh -i ~/Documents/<tel-key>.pem ubuntu@<tel-elastic-ip> "timeout 3 bash -c 'echo > /dev/tcp/<db-private>/3306' && echo reachable"
 ```
 - [ ] All checks OK, and `reachable` twice.
 
 ## 8. Copy the shared passwords to the other two
 
-From **your PC** (CMD or Git Bash), one line each - the file goes from the DB server straight
-to the other server through your SSH connection, never on screen:
+From **your PC** (Git Bash; each server's own key), one **whole** line each - never run the
+part before `|` alone, it would print the passwords on screen.
+The file goes from the DB server straight to the other server through your SSH connection:
 ```
-ssh -i <key>.pem ubuntu@<db-public-ip> "sudo cat /etc/viztex/secrets.env" | ssh -i <key>.pem ubuntu@<tel-elastic-ip> "umask 077; cat > ~/secrets.env"
-ssh -i <key>.pem ubuntu@<db-public-ip> "sudo cat /etc/viztex/secrets.env" | ssh -i <key>.pem ubuntu@<app-elastic-ip> "umask 077; cat > ~/secrets.env"
+ssh -i ~/Documents/<db-key>.pem ubuntu@<db-public-ip> "sudo cat /etc/viztex/secrets.env" | ssh -i ~/Documents/<tel-key>.pem ubuntu@<tel-elastic-ip> "umask 077; cat > ~/secrets.env"
+ssh -i ~/Documents/<db-key>.pem ubuntu@<db-public-ip> "sudo cat /etc/viztex/secrets.env" | ssh -i ~/Documents/<app-key>.pem ubuntu@<app-elastic-ip> "umask 077; cat > ~/secrets.env"
 ```
 Check the copies are identical (same start of checksum on all three; nothing secret is shown):
 ```
-ssh -i <key>.pem ubuntu@<db-public-ip> "sudo sha256sum /etc/viztex/secrets.env | cut -c1-16"
-ssh -i <key>.pem ubuntu@<tel-elastic-ip> "sha256sum ~/secrets.env | cut -c1-16"
-ssh -i <key>.pem ubuntu@<app-elastic-ip> "sha256sum ~/secrets.env | cut -c1-16"
+ssh -i ~/Documents/<db-key>.pem ubuntu@<db-public-ip> "sudo sha256sum /etc/viztex/secrets.env | cut -c1-16"
+ssh -i ~/Documents/<tel-key>.pem ubuntu@<tel-elastic-ip> "sha256sum ~/secrets.env | cut -c1-16"
+ssh -i ~/Documents/<app-key>.pem ubuntu@<app-elastic-ip> "sha256sum ~/secrets.env | cut -c1-16"
 ```
 - [ ] Three identical checksums. Never send this file by chat or email.
 
 ## 9. Install the telephony server (~30 min, inside tmux)
 
 ```
-ssh -i <key>.pem ubuntu@<tel-elastic-ip>
+ssh -i ~/Documents/<tel-key>.pem ubuntu@<tel-elastic-ip>
 tmux new -s install
 sudo bash viztex/install/install.sh --role telephony --domain sip.client.com --email <you> \
   --db-ip <db-private> --app-ip <app-private> --secrets ~/secrets.env
@@ -207,7 +216,7 @@ Disconnected? `tmux attach -t install`.
 ## 10. Install the app server (~5-8 min)
 
 ```
-ssh -i <key>.pem ubuntu@<app-elastic-ip>
+ssh -i ~/Documents/<app-key>.pem ubuntu@<app-elastic-ip>
 tmux new -s install
 sudo bash viztex/install/install.sh --role app --domain crm.client.com --admin boss --email <you> \
   --db-ip <db-private> --telephony-ip <tel-private> --telephony-domain sip.client.com --secrets ~/secrets.env
@@ -232,7 +241,8 @@ sudo bash viztex/install/install.sh --role telephony --domain sip.client.com --e
   --db-ip <db-private> --app-ip <app-private> --secrets ~/secrets.env --checks-only
 rm ~/secrets.env
 ```
-Now **every** line is OK, including the ODBC one. On the **app** server: `rm ~/secrets.env`.
+Now **every** line is OK, including the ODBC one (the check reads `/etc/viztex/secrets.env`, so
+`rm` before or after it makes no difference). On the **app** server: `rm ~/secrets.env`.
 (The installs keep their own copy in `/etc/viztex/secrets.env`, root only.)
 
 - [ ] All checks OK on the telephony server; `~/secrets.env` gone from both.
@@ -283,7 +293,7 @@ plays them from S3. The app server's nightly backup dumps the database over the 
 recording script / ops scripts (only what changed); calls are checked on the telephony server:
 ```
 DEPLOY_HOST=ubuntu@<app-elastic-ip> DEPLOY_TELEPHONY_HOST=ubuntu@<tel-elastic-ip> \
-  DEPLOY_KEY=~/Documents/<key>.pem bash scripts/deploy-dev.sh
+  DEPLOY_KEY=~/Documents/<app-key>.pem DEPLOY_TELEPHONY_KEY=~/Documents/<tel-key>.pem bash scripts/deploy-dev.sh
 ```
 - [ ] A test alert received; (customer) S3 bucket and roles set.
 
@@ -314,7 +324,7 @@ sudo sed -i 's/<VirtualHost \*:80>/<VirtualHost 127.0.0.1:8080>/' /etc/apache2/s
 sudo systemctl restart apache2           # ss -lntp | grep apache  ->  127.0.0.1:8080 only
 sudo mysql -e "CREATE USER 'viewer'@'localhost' IDENTIFIED BY '<your password>'; GRANT SELECT, SHOW VIEW ON viztex.* TO 'viewer'@'localhost';"
 # your PC (keep it open), then the browser: http://localhost:8080/phpmyadmin  (user viewer)
-ssh -i <key>.pem -L 8080:127.0.0.1:8080 ubuntu@<db-public-ip>
+ssh -i ~/Documents/<db-key>.pem -L 8080:127.0.0.1:8080 ubuntu@<db-public-ip>
 ```
 
 ## Which server has what

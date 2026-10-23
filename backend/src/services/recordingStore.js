@@ -103,4 +103,15 @@ async function findRecording(recordingPath, deps = {}) {
   return null;
 }
 
-module.exports = { CACHE_DIR, findRecording, relativePath, s3Prefix };
+/**
+ * Why a recording can't be played, for the person pressing Play. Split servers
+ * without a bucket: the files are on the telephony server, which this app server
+ * can't read - say so, instead of "no longer kept".
+ */
+function missingMessage(env = process.env, hasFolder = fs.existsSync(BASE)) {
+  if (!s3Prefix(env) && !hasFolder)
+    return 'the recording is on the telephony server - set an S3 bucket (BACKUP_S3_BUCKET) so this server can play it';
+  return 'the recording is no longer kept (not on the server or in S3)';
+}
+
+module.exports = { CACHE_DIR, findRecording, missingMessage, relativePath, s3Prefix };
