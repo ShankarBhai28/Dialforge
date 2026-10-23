@@ -1,14 +1,15 @@
 const express = require('express');
 const pool = require('../../db');
 const { requirePermission, requireAdminSide, requireAllScope } = require('../middleware/auth');
-const { checkTeamRefs, parseTeam } = require('../services/teams');
+const { checkParent, checkTeamRefs, parseTeam } = require('../services/teams');
 const hub = require('../realtime/hub');
 
 const router = express.Router();
 
 // --- Admin: teams (a group of agents + the campaigns they may work) ---
 // Members and campaigns come back as id arrays so the edit form can
-// pre-tick its checkboxes, plus names for the table.
+// pre-tick its checkboxes, plus names for the table. parent_id places the
+// team in the hierarchy (null = top level).
 router.get('/admin/teams', requireAdminSide, async (req, res) => {
   const { scope } = req.access;
   const [teams] = scope
@@ -43,12 +44,18 @@ async function saveTeam(teamId, team) {
   try {
     await conn.beginTransaction();
     if (teamId) {
-      await conn.query('UPDATE teams SET name = ?, status = ? WHERE id = ?', [team.name, team.status, teamId]);
-      for (const [table] of LINKS) await conn.query(`DELETE FROM ${table} WHERE team_id = ?`, [teamId]);
-    } else {
-      const [result] = await conn.query('INSERT INTO teams (tenant_id, name, status) VALUES (1, ?, ?)', [
+      await conn.query('UPDATE teams SET name = ?, status = ?, parent_id = ? WHERE id = ?', [
         team.name,
         team.status,
+        team.parentId,
+        teamId,
+      ]);
+      for (const [table] of LINKS) await conn.query(`DELETE FROM ${table} WHERE team_id = ?`, [teamId]);
+    } else {
+      const [result] = await conn.query('INSERT INTO teams (tenant_id, name, status, parent_id) VALUES (1, ?, ?, ?)', [
+        team.name,
+        team.status,
+        team.parentId,
       ]);
       teamId = result.insertId;
     }
@@ -70,7 +77,7 @@ async function saveTeam(teamId, team) {
 async function handleSave(req, res, teamId) {
   const { error, team } = parseTeam(req.body);
   if (error) return res.status(400).json({ error });
-  const refError = await checkTeamRefs(team);
+  const refError = (await checkTeamRefs(team)) || (await checkParent(teamId, team.parentId));
   if (refError) return res.status(400).json({ error: refError });
   try {
     const id = await saveTeam(teamId, team);
@@ -99,15 +106,27 @@ router.put(
 );
 
 // Deleting a team only removes the grouping (link rows cascade); no call
-// or lead data references teams, so nothing needs to block it.
+// or lead data references teams, so nothing needs to block it. Its
+// sub-teams move up to its own parent, so the people above keep seeing them.
 router.delete(
   '/admin/teams/:id',
   requirePermission('teams', 'delete'),
   requireAllScope('change teams'),
   async (req, res) => {
-    const [rows] = await pool.query('SELECT id FROM teams WHERE id = ?', [req.params.id]);
+    const [rows] = await pool.query('SELECT id, parent_id FROM teams WHERE id = ?', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'team not found' });
-    await pool.query('DELETE FROM teams WHERE id = ?', [req.params.id]);
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.query('UPDATE teams SET parent_id = ? WHERE parent_id = ?', [rows[0].parent_id, rows[0].id]);
+      await conn.query('DELETE FROM teams WHERE id = ?', [rows[0].id]);
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
     hub.refreshAccess();
     res.json({ status: 'ok' });
   },

@@ -33,9 +33,12 @@ fake('db.js', {
       const r = ROLES[params[0]];
       return [r ? [{ ...r, permissions: JSON.stringify(r.permissions) }] : []];
     }
-    if (s.includes('tc.campaign_id AS id')) return [[{ id: 7 }]];
-    if (s.includes('a.user_id AS id')) return [[{ id: 21 }, { id: 22 }]];
-    if (s.includes('tm.team_id AS id')) return [[{ id: 3 }]];
+    // The team leader is in team 3 (top level, no sub-teams): campaign 7, agents 21 + 22.
+    if (s.startsWith('SELECT id, parent_id, status FROM teams'))
+      return [[{ id: 3, parent_id: null, status: 'active' }]];
+    if (s.startsWith('SELECT team_id AS id FROM team_members WHERE user_id')) return [[{ id: 3 }]];
+    if (s.includes('campaign_id AS id FROM team_campaigns')) return [[{ id: 7 }]];
+    if (s.includes('tm.user_id AS id')) return [[{ id: 21 }, { id: 22 }]];
     if (s.includes('COUNT(*)')) return [[{ n: 0, c: 0 }]];
     if (s.startsWith('SELECT id, role FROM users WHERE id')) return [[{ id: params[0], role: 'admin' }]];
     return [[]];

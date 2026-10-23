@@ -8,12 +8,14 @@
 //           few screen-specific ones), and a data scope:
 //             all  - every team's data on the screens they may open
 //             team - only the campaigns and agents of the teams they are a
-//                    member of (Teams screen)
+//                    member of (Teams screen) and of every team below
+//                    those (a manager's team holds its TLs' teams)
 //   agent - the agent screen only; never the admin side.
 //
 // Any action implies view. A team-scoped role can't have the actions that
 // reach outside its teams (TEAM_SCOPE_BLOCKED).
 const pool = require('../../db');
+const { subtree } = require('./teams');
 
 const ACTION_LABELS = {
   view: 'View',
@@ -142,32 +144,47 @@ function forgetRoles() {
   roleCache.clear();
 }
 
-/** A team-scoped user's campaigns and agents: those of the active teams they belong to. */
+/**
+ * The active teams a team-scoped user sees: the ones they belong to and every
+ * team below those. An inactive team gives nothing, but the active teams under
+ * it still count (switching a manager's team off doesn't hide its TLs' teams
+ * from the head).
+ */
+function scopedTeamIds(allTeams, memberOf) {
+  const active = new Set(allTeams.filter((t) => t.status === 'active').map((t) => t.id));
+  return [
+    ...subtree(
+      allTeams,
+      memberOf.filter((id) => active.has(id)),
+    ),
+  ]
+    .filter((id) => active.has(id))
+    .sort((a, b) => a - b);
+}
+
+/** A team-scoped user's campaigns and agents: those of the active teams they see (scopedTeamIds). */
 async function teamScope(userId, deps = { pool }) {
+  const [allTeams] = await deps.pool.query('SELECT id, parent_id, status FROM teams');
+  const [memberOf] = await deps.pool.query('SELECT team_id AS id FROM team_members WHERE user_id = ?', [userId]);
+  const teamIds = scopedTeamIds(
+    allTeams,
+    memberOf.map((r) => r.id),
+  );
+  if (!teamIds.length) return { campaignIds: [], agentIds: [], teamIds };
   const [campaigns] = await deps.pool.query(
-    `SELECT DISTINCT tc.campaign_id AS id FROM team_members tm
-     JOIN teams t ON t.id = tm.team_id AND t.status = 'active'
-     JOIN team_campaigns tc ON tc.team_id = t.id
-     WHERE tm.user_id = ?`,
-    [userId],
+    'SELECT DISTINCT campaign_id AS id FROM team_campaigns WHERE team_id IN (?)',
+    [teamIds],
   );
   const [agents] = await deps.pool.query(
-    `SELECT DISTINCT a.user_id AS id FROM team_members tm
-     JOIN teams t ON t.id = tm.team_id AND t.status = 'active'
-     JOIN team_members a ON a.team_id = t.id
-     JOIN users u ON u.id = a.user_id AND u.role = 'agent'
-     WHERE tm.user_id = ?`,
-    [userId],
-  );
-  const [teams] = await deps.pool.query(
-    `SELECT tm.team_id AS id FROM team_members tm JOIN teams t ON t.id = tm.team_id AND t.status = 'active'
-     WHERE tm.user_id = ?`,
-    [userId],
+    `SELECT DISTINCT tm.user_id AS id FROM team_members tm
+     JOIN users u ON u.id = tm.user_id AND u.role = 'agent'
+     WHERE tm.team_id IN (?)`,
+    [teamIds],
   );
   return {
     campaignIds: campaigns.map((r) => r.id),
     agentIds: agents.map((r) => r.id),
-    teamIds: teams.map((r) => r.id),
+    teamIds,
   };
 }
 
@@ -216,6 +233,7 @@ module.exports = {
   parseRole,
   getRole,
   forgetRoles,
+  scopedTeamIds,
   teamScope,
   accessFor,
   can,

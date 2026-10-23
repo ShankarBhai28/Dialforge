@@ -1631,3 +1631,11 @@ Reported by the user after trying the agent panel:
 - Guide fixes from it: step 6 copies an exact package name (`dist/` keeps older packages, so `viztex-*.tgz` matched several) with a key per server; every PC command uses `~/Documents/<x-key>.pem` (a `C:\...` path in Git Bash loses its backslashes); step 8 warns never to run the part before `|` alone (it would print the passwords); step 11: `rm ~/secrets.env` before or after the check is the same (the check reads `/etc/viztex/secrets.env`); the deploy line uses `DEPLOY_TELEPHONY_KEY`.
 - Installer: with `--checks-only` the telephony/db end message says "checked" and the next step is the test call, not "install the app server".
 - Split servers without S3: the app server has no recordings folder, so Play can't work. The server now says why ("the recording is on the telephony server - set an S3 bucket (BACKUP_S3_BUCKET)…") and the player shows the server's reason instead of the generic "may have been removed". Playback with S3 on split servers: not yet tried on real servers.
+
+## tecdata features 1: team hierarchy (2026-10-23)
+- A team may sit under a parent team (`teams.parent_id`, migration 0020): Head → Managers → TLs. An own-teams login (TL, manager, head with a role scoped to "own teams") sees its teams **and every team below them**: their agents, campaigns, calls, recordings, reports, live floor. Never up or sideways (Manager A doesn't see Manager B's teams).
+- Agents are unchanged: they work only the campaigns of their own team(s).
+- Rules (server + screen): not under itself or one of its own sub-teams (no loops), the parent must exist, at most 6 levels. Deleting a team moves its sub-teams up to its parent. An inactive team gives no access itself; active teams under it still count for those above.
+- Teams screen: "Under (parent team)" field; the list is shown as a tree.
+- To set up tecdata's shape: create "Head" (members: the head's login), "Manager A" under Head (member: manager A's login), "TL 1" under Manager A (members: TL 1's login + agents, campaigns). Give the logins a role with scope "own teams".
+- Not yet: per-team totals rolled up in Reports (the totals already include everything below; a breakdown per sub-team comes later). Migration to be confirmed on dev's MySQL before testing.

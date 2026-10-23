@@ -21,6 +21,7 @@ const TEAM = {
   id: 3,
   name: 'Alpha',
   status: 'active',
+  parent_id: null,
   created_at: '',
   members: [{ id: 7, username: 'agent04' }],
   campaigns: [{ id: 1, name: 'Sales' }],
@@ -65,6 +66,7 @@ describe('Teams', () => {
     expect(calls.find((c) => c.key === 'POST /admin/teams')?.body).toEqual({
       name: 'Beta',
       status: 'inactive',
+      parentId: null,
       memberIds: [8],
       campaignIds: [4],
     });
@@ -84,9 +86,49 @@ describe('Teams', () => {
     expect(calls.find((c) => c.key === 'PUT /admin/teams/3')?.body).toEqual({
       name: 'Alpha',
       status: 'active',
+      parentId: null,
       memberIds: [7, 8],
       campaignIds: [],
     });
+  });
+
+  // Head > Manager A > TL 1; the list follows the tree, a team can't go under itself or below itself.
+  const team = (id: number, name: string, parent_id: number | null) => ({
+    ...TEAM,
+    id,
+    name,
+    parent_id,
+    members: [],
+    campaigns: [],
+  });
+  const TREE = [team(12, 'TL 1', 11), team(10, 'Head', null), team(11, 'Manager A', 10), team(20, 'Other', null)];
+
+  it('shows teams as a tree and puts a team under a parent', async () => {
+    const calls = api({
+      'GET /admin/teams': { body: TREE },
+      'PUT /admin/teams/11': { body: { id: 11, name: 'Manager A' } },
+    });
+    renderPage(<TeamsPage />);
+    await screen.findByText('Head');
+    const order = screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((r) => within(r).getAllByRole('cell')[0].textContent);
+    expect(order).toEqual(['Head', '└Manager A', '└TL 1', 'Other']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit Manager A' }));
+    const dialog = screen.getByRole('dialog');
+    const parent = within(dialog).getByLabelText('Under (parent team)');
+    expect(parent).toHaveValue('10');
+    // Not itself, not its own TL team.
+    const options = within(parent)
+      .getAllByRole('option')
+      .map((o) => o.textContent?.trim());
+    expect(options).toEqual(['- None (top level) -', 'Head', 'Other']);
+    await userEvent.selectOptions(parent, '20');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(calls.find((c) => c.key === 'PUT /admin/teams/11')?.body).toMatchObject({ parentId: 20 });
   });
 
   it("shows the server's reason when saving fails", async () => {
@@ -104,7 +146,7 @@ describe('Teams', () => {
     renderPage(<TeamsPage />);
     await userEvent.click(await screen.findByRole('button', { name: 'Delete Alpha' }));
     const dialog = screen.getByRole('dialog');
-    expect(dialog).toHaveTextContent('Its agents will lose access to its campaigns.');
+    expect(dialog).toHaveTextContent('Its agents will lose access to its campaigns. Teams under it move up a level.');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('team not found');
     expect(calls.some((c) => c.key === 'DELETE /admin/teams/3')).toBe(true);

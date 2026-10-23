@@ -1,6 +1,8 @@
 // Teams: group agents and map them to campaigns. An agent only sees the
 // campaigns mapped to their team(s). Admin logins (TL, supervisor) added
-// to a team see that team's data when their role is "own teams".
+// to a team see that team's data when their role is "own teams" - and the
+// data of every team below it (a team may sit under a parent team:
+// head > managers > TLs).
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Pencil, Plus, RefreshCw, Trash2, UsersRound } from 'lucide-react';
@@ -24,7 +26,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { useCampaigns } from '@/features/campaigns/api';
 import { accountLabel, useUsers } from '@/features/users/api';
 import { useCan } from '@/features/auth/access';
-import { useDeleteTeam, useSaveTeam, useTeams, type Team } from './api';
+import { teamAndBelow, teamTree, useDeleteTeam, useSaveTeam, useTeams, type Team } from './api';
 
 /** A titled box of checkboxes; `selected` holds the ticked ids. */
 function CheckList({
@@ -78,12 +80,24 @@ function CheckList({
   );
 }
 
-function TeamDialog({ team, onOpenChange }: { team: Team | null; onOpenChange: (v: boolean) => void }) {
+function TeamDialog({
+  team,
+  teams,
+  onOpenChange,
+}: {
+  team: Team | null;
+  teams: Team[];
+  onOpenChange: (v: boolean) => void;
+}) {
   const users = useUsers();
   const campaigns = useCampaigns();
   const save = useSaveTeam();
   const [name, setName] = useState(team?.name ?? '');
   const [status, setStatus] = useState(team?.status ?? 'active');
+  const [parentId, setParentId] = useState<number | null>(team?.parent_id ?? null);
+  // Not under itself or one of its own sub-teams (the server refuses that too).
+  const blocked = team ? teamAndBelow(teams, team.id) : new Set<number>();
+  const parents = teamTree(teams).filter(({ team: t }) => !blocked.has(t.id));
   // One set for both lists; the server stores agents and leaders together.
   const [members, setMembers] = useState(() => new Set<number>(team?.members.map((m) => m.id)));
   const [campaignIds, setCampaignIds] = useState(() => new Set<number>(team?.campaigns.map((c) => c.id)));
@@ -96,6 +110,7 @@ function TeamDialog({ team, onOpenChange }: { team: Team | null; onOpenChange: (
         id: team?.id,
         name: trimmed,
         status,
+        parentId,
         // Straight from the sets (not filtered by the loaded lists), so a list
         // that failed to load can't silently drop existing mappings.
         memberIds: [...members],
@@ -116,7 +131,10 @@ function TeamDialog({ team, onOpenChange }: { team: Team | null; onOpenChange: (
         <form onSubmit={onSubmit} className="contents">
           <DialogHeader>
             <DialogTitle>{team ? `Edit ${team.name}` : 'Create team'}</DialogTitle>
-            <DialogDescription>Agents in this team can work the campaigns ticked here.</DialogDescription>
+            <DialogDescription>
+              Agents in this team can work the campaigns ticked here. Leaders in this team (with an own-teams role) also
+              see every team below it.
+            </DialogDescription>
           </DialogHeader>
           <DialogBody className="grid gap-4">
             <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
@@ -130,6 +148,21 @@ function TeamDialog({ team, onOpenChange }: { team: Team | null; onOpenChange: (
                 </Select>
               </Field>
             </div>
+            <Field id="team-parent" label="Under (parent team)">
+              <Select
+                id="team-parent"
+                value={parentId ?? ''}
+                onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">- None (top level) -</option>
+                {parents.map(({ team: t, level }) => (
+                  <option key={t.id} value={t.id}>
+                    {'\u00a0\u00a0'.repeat(level)}
+                    {t.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <CheckList
                 legend="Agents"
@@ -253,9 +286,18 @@ export function TeamsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {teams.data.map((t) => (
+              {teamTree(teams.data).map(({ team: t, level }) => (
                 <TableRow key={t.id}>
-                  <TableCell className="font-semibold">{t.name}</TableCell>
+                  <TableCell className="font-semibold">
+                    <span style={{ paddingLeft: `${level * 1.25}rem` }} className="inline-flex items-center gap-1">
+                      {level > 0 && (
+                        <span aria-hidden className="text-muted-foreground">
+                          └
+                        </span>
+                      )}
+                      {t.name}
+                    </span>
+                  </TableCell>
                   <TableCell className="min-w-40">{names(t.members.filter((m) => m.role === 'agent'))}</TableCell>
                   <TableCell className="min-w-32">{names(t.members.filter((m) => m.role !== 'agent'))}</TableCell>
                   <TableCell className="min-w-40">
@@ -294,6 +336,7 @@ export function TeamsPage() {
           // fresh form state per team
           key={editing === 'new' ? 'new' : editing.id}
           team={editing === 'new' ? null : editing}
+          teams={teams.data ?? []}
           onOpenChange={(v) => !v && setEditing(null)}
         />
       )}
@@ -306,7 +349,7 @@ export function TeamsPage() {
           }
         }}
         title={`Delete team "${deleting?.name}"?`}
-        description="Its agents will lose access to its campaigns."
+        description="Its agents will lose access to its campaigns. Teams under it move up a level."
         confirmLabel="Delete"
         destructive
         pending={remove.isPending}
