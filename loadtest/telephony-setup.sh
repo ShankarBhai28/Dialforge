@@ -89,11 +89,11 @@ contact_permit=$LOADGEN/255.255.255.255
 direct_media=no
 rtp_symmetric=yes
 force_rport=yes
-rewrite_contact=yes
+rewrite_contact=no
 [$e]
 type=auth
 auth_type=userpass
-username=$e
+username=loadtest
 password=$PASSWORD
 [$e]
 type=aor

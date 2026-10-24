@@ -19,6 +19,8 @@
       <sample assign_to="talk" distribution="uniform" min="0" max="1"/>
       <ereg regexp=".*" search_in="hdr" header="From:" assign_to="their_from"/>
       <ereg regexp=".*" search_in="hdr" header="CSeq:" assign_to="invite_cseq"/>
+      <!-- Where to send our own BYE: VIZTEX's Contact (the ACK has none, so [next_url] would be empty). -->
+      <ereg regexp="sip:[^>;]*" search_in="hdr" header="Contact:" assign_to="their_uri"/>
       <test assign_to="busy" variable="outcome" compare="less_than" value="0.15"/>
       <test assign_to="noanswer" variable="outcome" compare="less_than" value="0.30"/>
       <test assign_to="short" variable="talk" compare="less_than" value="0.34"/>
@@ -161,7 +163,7 @@
   <label id="hangup"/>
   <send retrans="500">
     <![CDATA[
-      BYE [next_url] SIP/2.0
+      BYE [$their_uri] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
       From: <sip:carrier@[local_ip]:[local_port]>;tag=[pid]SIPpTag01[call_number]
       To: [$their_from]

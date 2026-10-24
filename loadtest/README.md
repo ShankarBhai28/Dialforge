@@ -64,7 +64,7 @@ All test traffic uses **private IPs** (no internet traffic, no cost per GB).
 4. **Browser, as Super Admin**:
    - Teams → create **Load test**.
    - Users → **Import agents** → `agents-import.csv` → Create 200 agents.
-   - Queues → **loadtest_q**, strategy **Least recent** (never Ring all: it would ring all 200 agents per call).
+   - Queues → **loadtest_q**, ring strategy **Least recent** - check it after saving. **Not Ring all** (the default): with 200 agents every call would ring all of them.
    - Campaigns → **Load test**: mode **Predictive**, queue loadtest_q, **AMD off** for the first runs,
      recording **on**, auto-answer **on**. Map it to team Load test (Teams → Load test → Campaigns).
    - Leads → new list in campaign Load test → import `leads.csv`.
@@ -103,3 +103,13 @@ the step before is the limit.
   **20-30 % below** the measured limit.
 - Delete all four servers, the security groups, the Elastic IPs, keys and DNS names (as in the guide's step 14).
 - Undo on a server you keep: `sudo bash telephony-setup.sh --remove`.
+
+## Dry run on dev (2026-10-24)
+
+10 agents, about 25 minutes, everything on dev (SIPp carrier on port 5080, `--carrier-port 5080`, since
+Asterisk has 5060; SIPp audio ports 20000-39998, above Asterisk's): 61 calls handled with a disposition,
+0 bot errors, outcomes close to 70/15/15, every ended call recorded (MP3). Fixed on the way: Ubuntu's
+package is `sip-tester`; one SIP login name (`loadtest`) for all test extensions (SIPp can't vary it
+per call); `rewrite_contact=no` (calls go to the answering SIPp, port 5070); the carrier's BYE needs
+VIZTEX's Contact as its address; Node 24's process is named `MainThread`. To check in the real test:
+the jitter column (0.0 on one machine).

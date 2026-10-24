@@ -37,7 +37,7 @@
       Call-ID: [call_id]
       CSeq: 2 REGISTER
       Contact: <sip:[field0]@[local_ip]:5070>
-      [authentication username=[field0] password=[field1]]
+      [authentication]
       Max-Forwards: 70
       Expires: 7200
       User-Agent: VIZTEX-loadtest

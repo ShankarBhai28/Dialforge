@@ -16,17 +16,18 @@ HAS_AST=0
 command -v asterisk >/dev/null && sudo asterisk -rx "core show version" >/dev/null 2>&1 && HAS_AST=1
 
 cpu_total() { awk '/^cpu /{print $2+$3+$4+$5+$6+$7+$8, $5+$6}' /proc/stat; }
-# CPU ticks used so far by every process with this name.
+# CPU ticks used so far by every process with this name (a regex; Node 24
+# names its process "MainThread", older ones "node").
 proc_ticks() { pgrep -x "$1" | while read -r p; do awk '{print $14+$15}' "/proc/$p/stat" 2>/dev/null; done | awk '{s+=$1} END {print s+0}'; }
 
 echo "time,cpu_pct,load1,mem_used_mb,channels,calls,legs,loss_avg_pct,loss_max_pct,jitter_avg_ms,jitter_max_ms,asterisk_cpu_pct,mysqld_cpu_pct,node_cpu_pct" >"$OUT"
 echo "writing $OUT every 10 s (Ctrl+C to stop)"
 read -r T0 I0 < <(cpu_total)
-A0=$(proc_ticks asterisk) M0=$(proc_ticks mysqld) N0=$(proc_ticks node)
+A0=$(proc_ticks asterisk) M0=$(proc_ticks mysqld) N0=$(proc_ticks "node|MainThread")
 while true; do
   sleep 10
   read -r T1 I1 < <(cpu_total)
-  A1=$(proc_ticks asterisk) M1=$(proc_ticks mysqld) N1=$(proc_ticks node)
+  A1=$(proc_ticks asterisk) M1=$(proc_ticks mysqld) N1=$(proc_ticks "node|MainThread")
   DT=$((T1 - T0))
   [ "$DT" -gt 0 ] || DT=1
   cpu=$(awk -v t="$DT" -v i=$((I1 - I0)) 'BEGIN {printf "%.1f", 100 * (t - i) / t}')
