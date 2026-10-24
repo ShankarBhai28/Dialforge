@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<!--
+  Fake carrier (the customers). VIZTEX's trunk points here; every dialer call
+  lands on this SIPp (UAS, port 5060). Outcomes, picked at random per call:
+    15% busy (486)
+    15% no answer (rings until VIZTEX gives up and cancels)
+    70% answered after 5 s of ringing; then talk 30 / 60 / 120 s (a third
+        each) and the customer hangs up - unless VIZTEX hangs up first
+        (abandoned, machine, agent ended the call).
+  While answered, it streams audio.ul (raw u-law, see loadtest/README.md).
+  A CANCEL while ringing is handled like a real phone (200 + 487).
+-->
+<scenario name="VIZTEX load test - carrier">
+
+  <recv request="INVITE" crlf="true">
+    <action>
+      <sample assign_to="outcome" distribution="uniform" min="0" max="1"/>
+      <sample assign_to="talk" distribution="uniform" min="0" max="1"/>
+      <ereg regexp=".*" search_in="hdr" header="From:" assign_to="their_from"/>
+      <ereg regexp=".*" search_in="hdr" header="CSeq:" assign_to="invite_cseq"/>
+      <test assign_to="busy" variable="outcome" compare="less_than" value="0.15"/>
+      <test assign_to="noanswer" variable="outcome" compare="less_than" value="0.30"/>
+      <test assign_to="short" variable="talk" compare="less_than" value="0.34"/>
+      <test assign_to="medium" variable="talk" compare="less_than" value="0.67"/>
+    </action>
+  </recv>
+
+  <send>
+    <![CDATA[
+      SIP/2.0 100 Trying
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <nop next="busy" test="busy"/>
+
+  <send>
+    <![CDATA[
+      SIP/2.0 180 Ringing
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:carrier@[local_ip]:[local_port];transport=[transport]>
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <!-- No answer: wait (up to 2 min) for VIZTEX to cancel. -->
+  <nop next="wait_cancel" test="noanswer"/>
+
+  <!-- Ringing 5 s; VIZTEX may cancel meanwhile. -->
+  <recv request="CANCEL" timeout="5000" ontimeout="answer" next="cancelled"/>
+
+  <label id="wait_cancel"/>
+  <recv request="CANCEL" timeout="120000" ontimeout="end"/>
+
+  <label id="cancelled"/>
+  <send>
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+    ]]>
+  </send>
+  <send>
+    <![CDATA[
+      SIP/2.0 487 Request Terminated
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      CSeq: [$invite_cseq]
+      Content-Length: 0
+    ]]>
+  </send>
+  <recv request="ACK" next="end"/>
+
+  <label id="busy"/>
+  <send>
+    <![CDATA[
+      SIP/2.0 486 Busy Here
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+    ]]>
+  </send>
+  <recv request="ACK" next="end"/>
+
+  <label id="answer"/>
+  <send retrans="500">
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:carrier@[local_ip]:[local_port];transport=[transport]>
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=carrier 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 0
+      a=rtpmap:0 PCMU/8000
+      a=ptime:20
+      a=sendrecv
+    ]]>
+  </send>
+  <recv request="ACK">
+    <action>
+      <exec rtp_stream="audio.ul,-1,0"/>
+    </action>
+  </recv>
+
+  <!-- Talk; VIZTEX may hang up first (BYE), else the customer hangs up. -->
+  <nop next="talk_short" test="short"/>
+  <nop next="talk_medium" test="medium"/>
+  <recv request="BYE" timeout="120000" ontimeout="hangup" next="their_bye"/>
+  <label id="talk_short"/>
+  <recv request="BYE" timeout="30000" ontimeout="hangup" next="their_bye"/>
+  <label id="talk_medium"/>
+  <recv request="BYE" timeout="60000" ontimeout="hangup" next="their_bye"/>
+
+  <label id="their_bye"/>
+  <send>
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+    ]]>
+  </send>
+  <nop next="end">
+    <action>
+      <exec rtp_stream="pause"/>
+    </action>
+  </nop>
+
+  <label id="hangup"/>
+  <send retrans="500">
+    <![CDATA[
+      BYE [next_url] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: <sip:carrier@[local_ip]:[local_port]>;tag=[pid]SIPpTag01[call_number]
+      To: [$their_from]
+      [last_Call-ID:]
+      CSeq: 2 BYE
+      Max-Forwards: 70
+      Content-Length: 0
+    ]]>
+  </send>
+  <recv response="200" optional="false"/>
+
+  <label id="end"/>
+
+  <ResponseTimeRepartition value="100, 500, 1000, 3000"/>
+  <CallLengthRepartition value="10000, 30000, 60000, 120000"/>
+</scenario>

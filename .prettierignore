@@ -10,3 +10,4 @@ ari-hello-world/
 *.sql
 *.conf
 backend/web-dist/
+loadtest/out/

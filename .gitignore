@@ -10,3 +10,6 @@ backend/web-dist/
 # Release packages (scripts/make-release.sh)
 dist/
 backend/recording-cache/
+
+# Load-test files made by loadtest/make-files.js (contain test passwords)
+loadtest/out/
