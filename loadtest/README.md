@@ -12,6 +12,9 @@ with recording on; we step the number of agents up and measure CPU, memory and a
             disposition
 ```
 
+The whole sequence on four fresh servers (AWS account, servers, installs, run, cleanup) is in
+[../docs/LOADTEST_STEP_BY_STEP.md](../docs/LOADTEST_STEP_BY_STEP.md).
+
 **Test servers only** - the load-test endpoints and the fake trunk must never be on a customer's server.
 
 ## Servers (one afternoon, then delete)
