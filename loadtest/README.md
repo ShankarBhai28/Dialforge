@@ -99,6 +99,15 @@ agents** in the campaign too (normal extensions) to listen to the audio. Then re
 **Stop when** CPU stays above ~80 %, loss above 1 %, jitter above 30 ms, or agents report choppy audio -
 the step before is the limit.
 
+## Reports on months of data
+
+`bigdata.js` (on the app server, from `~/dialforge-backend`) fills the database with fake history -
+by default 90 days of the campaign's agents, ~140 calls each per day, with dialer attempts,
+call events, status rows, outcomes and callbacks - in a separate paused campaign "Big data history".
+`report-times.js` then times every report (today / 7 / 30 / 90 days), the CDR export, dashboard,
+Live Agents, Call Log and leads list. Steps: docs/LOADTEST_STEP_BY_STEP.md → H2.
+`bigdata.js --remove --yes` deletes it again.
+
 ## After
 
 - Copy the `~/loadtest-*.csv` files to your PC; the result is the table "telephony N vCPU = X agents".

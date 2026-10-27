@@ -181,6 +181,28 @@ agents. Stop when CPU stays above ~80 %, loss above 1 %, jitter above 30 ms, or 
 Then the **8-vCPU** round: stop lt-tel → Change instance type (same family, 2xlarge) → start (the
 Elastic IP stays) → re-register the agents (SIPp register window) → repeat the high steps.
 
+## H2. Reports on months of data (after the calls test)
+
+The calls test leaves a nearly empty database; a real customer's grows by ~2 million calls a
+quarter. This fills it with that much fake history and times every admin screen.
+
+1. **Stop the campaign's dialer** in the browser and wait until no call is open (the script refuses
+   otherwise).
+2. App server - fill 90 days for the 200 agents (about 20-40 min, ~8-10 GB on the DB disk;
+   it prints a line per day):
+   ```
+   cd ~/dialforge-backend && node ~/loadtest/bigdata.js --days 90 --yes
+   ```
+   It makes a paused campaign **Big data history** with its own leads, so the test campaign is untouched.
+3. Time the screens, alone (on the app server, `boss` and its password):
+   ```
+   node ~/loadtest/report-times.js --url https://127.0.0.1 --user boss --password '<boss password>'
+   ```
+   Then again with 3 admins at once (`--parallel 3`), and once more **while 100 agents run**
+   (start the campaign and the bots as in H). `measure.sh` on db and app shows what each costs.
+4. Anything over ~5 s gets fixed (index, shorter default range) before a big customer.
+5. To keep the server but drop the history: `node ~/loadtest/bigdata.js --remove --yes`.
+
 ## I. Results and cleanup
 
 1. Copy `~/loadtest-*.csv` from db, tel and app to your PC; fill in "Results" below.
@@ -227,3 +249,16 @@ What happened:
 | 4 vCPU | 200 | | | | | | |
 | 8 vCPU | 150 | | | | | | |
 | 8 vCPU | 200 | | | | | | |
+
+Reports on 90 days of history (report-times.js; seconds, the slowest of each kind):
+
+| Screen | Alone | 3 admins | During 100 agents |
+|---|---|---|---|
+| Dashboard | | | |
+| Call Log (page 1) | | | |
+| CDR - 30 days | | | |
+| Agent Performance - 30 days | | | |
+| Campaign Performance - 90 days | | | |
+| Predictive - 90 days | | | |
+| List Penetration | | | |
+| CDR export CSV - 30 days | | | |
