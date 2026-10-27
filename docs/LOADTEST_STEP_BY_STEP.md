@@ -41,6 +41,9 @@ These three stopped us on 27 Oct; sort them out **before** creating servers.
    (db 2 + app 2 + telephony 8 + generator 4).
    - **Service Quotas** → Amazon EC2 → "**Running On-Demand Standard (A, C, D, H, I, M, R, T, Z)
      instances**" → Request increase at account level → **16**. Region Mumbai.
+   - **Not** "All Standard (A, C, D, H, I, M, R, T, Z) **Spot Instance Requests**" - almost the same
+     name, but a different quota that doesn't help. Search for `On-Demand Standard`; its current
+     value shows 8.
    - Only one request at a time ("Quota increase request limit reached" = one is already pending).
      Status: Service Quotas → **Quota request history**. Can take hours - request a day early.
 3. **"Insufficient capacity"** when starting a server = AWS has none of that type in that zone
@@ -206,6 +209,12 @@ What happened:
   servers ran on temporary IPs; fixed by associating Elastic IPs with lt-tel and lt-app.
 - lt-tel to c7i.xlarge: "vCPU limit of 8" → quota increase to 16 requested; lt-gen stopped meanwhile.
   Then "insufficient capacity" for c7i.xlarge → **m7i.xlarge** worked.
+- The first quota request went to the **Spot** quota by mistake (case 179309603500231) → requested
+  the On-Demand one again.
+- Installs (package 20261027-0fdb869): DB, telephony (one planned ODBC FAIL, OK after the app),
+  app - all checks OK. Section G done the same day: 200 extensions + test endpoints, `.env` switched
+  to `loadtrunk` (backup `.env.before-loadtest`), 200 agents imported, queue `leastrecent`,
+  campaign Predictive / AMD off / recording on / auto-answer on, 20,000 leads.
 
 ## Results
 
