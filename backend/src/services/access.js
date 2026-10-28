@@ -17,6 +17,7 @@
 // its teams (Users: create / edit / reset password) - the user routes keep
 // that inside its teams.
 const pool = require('../../db');
+const tenancy = require('../tenancy');
 const { subtree } = require('./teams');
 
 const ACTION_LABELS = {
@@ -117,6 +118,7 @@ function parseRole(body) {
 }
 
 // --- Roles, cached (read on every staff request; changed rarely) ---
+// Key '<company>:<role id>': role ids repeat across Cloud customers.
 const roleCache = new Map();
 
 function toRole(row) {
@@ -133,10 +135,11 @@ function toRole(row) {
 
 async function getRole(id, deps = { pool }) {
   if (!id) return null;
-  if (roleCache.has(id)) return roleCache.get(id);
+  const key = `${tenancy.key()}:${id}`;
+  if (roleCache.has(key)) return roleCache.get(key);
   const [rows] = await deps.pool.query('SELECT id, name, scope, permissions FROM roles WHERE id = ?', [id]);
   const role = rows[0] ? toRole(rows[0]) : null;
-  if (role) roleCache.set(id, role);
+  if (role) roleCache.set(key, role);
   return role;
 }
 

@@ -9,11 +9,25 @@
 //     agent       - only messages addressed to their own user id
 //     staff       - what their role allows (staffView below), limited to
 //                   their teams for a team-scoped role
+// - Cloud edition: each connection belongs to one company (its session's);
+//   a message goes only to the connections of the company it is sent for
+//   (the current tenant, src/tenancy.js), and so does every lookup here.
 const { WebSocketServer } = require('ws');
 const { accessFor, can } = require('../services/access');
 const { scopeOverview } = require('../services/dialer');
+const tenancy = require('../tenancy');
 
-const clients = new Set(); // { ws, user, access }
+const clients = new Set(); // { ws, user, access, tenant }
+
+/** Connections of the company the code is running for now. */
+const mine = (client) => client.tenant === tenancy.key();
+
+/** Runs fn as this connection's company (its events arrive outside any request). */
+function asTenantOf(client, fn) {
+  return require('../services/tenants')
+    .runAsTenant(client.tenant, fn)
+    .catch((err) => console.error('[ws tenant]', err.message));
+}
 let wss = null;
 
 /** A staff client's copy of a message, or null when their role doesn't cover it. */
@@ -36,11 +50,13 @@ function staffView(type, data, access) {
 }
 
 async function loadAccess(client) {
-  try {
-    client.access = await accessFor(client.user);
-  } catch (err) {
-    console.error('[ws access]', err.message);
-  }
+  await asTenantOf(client, async () => {
+    try {
+      client.access = await accessFor(client.user);
+    } catch (err) {
+      console.error('[ws access]', err.message);
+    }
+  });
 }
 
 function attach(server, sessionMiddleware) {
@@ -55,16 +71,18 @@ function attach(server, sessionMiddleware) {
         socket.destroy();
         return;
       }
+      const tenant = tenancy.isMulti() ? req.session.tenant || tenancy.homeCode() : '';
       wss.handleUpgrade(req, socket, head, (ws) => {
-        const client = { ws, user, access: null };
+        const client = { ws, user, access: null, tenant };
         clients.add(client);
-        require('../services/presence').presenceChanged(); // live_agents.screen_open
+        const presenceChanged = () => asTenantOf(client, () => require('../services/presence').presenceChanged());
+        presenceChanged(); // live_agents.screen_open
         if (user.role === 'staff') void loadAccess(client);
         ws.isAlive = true;
         ws.on('pong', () => (ws.isAlive = true));
         ws.on('close', () => {
           clients.delete(client);
-          require('../services/presence').presenceChanged();
+          presenceChanged();
         });
         ws.on('error', () => clients.delete(client));
         ws.send(JSON.stringify({ type: 'hello', data: { user: user.username, role: user.role }, at: Date.now() }));
@@ -98,8 +116,9 @@ function refreshAccess() {
 function publish(type, data, { toUserId = null } = {}) {
   if (!clients.size) return;
   const full = JSON.stringify({ type, data, at: Date.now() });
-  for (const { ws, user, access } of clients) {
-    if (ws.readyState !== ws.OPEN) continue;
+  for (const client of clients) {
+    const { ws, user, access } = client;
+    if (ws.readyState !== ws.OPEN || !mine(client)) continue;
     if (user.role === 'admin' || (toUserId != null && user.id === toUserId)) {
       ws.send(full);
     } else if (user.role === 'staff') {
@@ -112,26 +131,28 @@ function publish(type, data, { toUserId = null } = {}) {
 /** Ids of users with a screen open now (optionally only this role). */
 function connectedUserIds(role = null) {
   const ids = new Set();
-  for (const { ws, user } of clients) if (ws.readyState === ws.OPEN && (!role || user.role === role)) ids.add(user.id);
+  for (const c of clients)
+    if (c.ws.readyState === c.ws.OPEN && mine(c) && (!role || c.user.role === role)) ids.add(c.user.id);
   return [...ids];
 }
 
 /** Has this user a screen open right now (a live connection)? */
 function isUserConnected(userId) {
-  for (const { ws, user } of clients) if (user.id === Number(userId) && ws.readyState === ws.OPEN) return true;
+  for (const c of clients) if (mine(c) && c.user.id === Number(userId) && c.ws.readyState === c.ws.OPEN) return true;
   return false;
 }
 
 /** Sends one message to this user's open screens only. */
 function sendToUser(userId, type, data) {
   const full = JSON.stringify({ type, data, at: Date.now() });
-  for (const { ws, user } of clients) if (user.id === Number(userId) && ws.readyState === ws.OPEN) ws.send(full);
+  for (const c of clients)
+    if (mine(c) && c.user.id === Number(userId) && c.ws.readyState === c.ws.OPEN) c.ws.send(full);
 }
 
 /** Closes a user's live connections (their access was just revoked). */
 function disconnectUser(userId) {
   for (const client of clients) {
-    if (client.user.id === Number(userId)) {
+    if (mine(client) && client.user.id === Number(userId)) {
       client.ws.close(4001, 'session ended');
       clients.delete(client);
     }
@@ -145,7 +166,9 @@ function connectedCount() {
 /** How many connections may see `screen` (e.g. 'dialer' - the feed only reads while someone watches). */
 function watchingCount(screen) {
   let n = 0;
-  for (const { user, access } of clients) {
+  for (const client of clients) {
+    const { user, access } = client;
+    if (!mine(client)) continue;
     if (user.role === 'admin' || (user.role === 'staff' && can(access, screen, 'view'))) n++;
   }
   return n;

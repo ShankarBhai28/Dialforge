@@ -42,6 +42,27 @@ describe('login', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('invalid username or password');
   });
 
+  it('Cloud edition: asks for the company code and sends it with the login', async () => {
+    const calls = fakeApi({
+      'GET /auth/me': { status: 401 },
+      'GET /auth/config': { body: { multiTenant: true } },
+      'POST /auth/login': { body: { status: 'ok', user: ADMIN } },
+      ...DASHBOARD,
+    });
+    renderAt('/login');
+    await userEvent.type(await screen.findByLabelText('Company code'), ' Acme ');
+    await userEvent.type(screen.getByLabelText('Username'), 'boss');
+    await userEvent.type(screen.getByLabelText('Password'), 'secret');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.key === 'POST /auth/login')?.body).toEqual({
+        company: 'acme',
+        username: 'boss',
+        password: 'secret',
+      }),
+    );
+  });
+
   it('takes an admin to the dashboard with live numbers', async () => {
     const calls = fakeApi({
       'GET /auth/me': { status: 401 },

@@ -42,6 +42,16 @@ export function useMe() {
   });
 }
 
+/** Cloud edition: the login page also asks for the company code. */
+export function useAuthConfig() {
+  return useQuery({
+    queryKey: ['auth', 'config'],
+    queryFn: () => get<{ multiTenant: boolean }>('/auth/config'),
+    staleTime: Infinity,
+    retry: 1,
+  });
+}
+
 export function homeFor(role: Role) {
   return role === 'agent' ? '/agent' : '/admin';
 }
@@ -50,7 +60,7 @@ export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
     // takeOver: an agent logged in elsewhere logs in here instead (the other screen is closed).
-    mutationFn: (v: { username: string; password: string; takeOver?: boolean }) =>
+    mutationFn: (v: { company?: string; username: string; password: string; takeOver?: boolean }) =>
       post<{ user: User }>('/auth/login', v),
     meta: { errorInline: true }, // the login page shows it
     onSuccess: ({ user }) => qc.setQueryData(meKey, user),

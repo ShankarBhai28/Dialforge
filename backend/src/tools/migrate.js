@@ -6,6 +6,10 @@
 //   npm run db:migrate -- --baseline
 //       once, on a database that already has the tables (created before
 //       this tool existed): records 0001_baseline as applied without running it
+// Cloud edition (docs/plans/TENANTS_PLAN.md) - with any of the above:
+//   --platform          the platform database (migrations/platform/)
+//   --tenant <code>     one company's database
+//   --all-tenants       every company's database, one after the other
 //
 // Files: backend/migrations/NNNN_name.sql, applied in number order. Each one
 // is recorded in schema_migrations (name, checksum, when). Never edit a file
@@ -16,6 +20,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DIR = path.join(__dirname, '..', '..', 'migrations');
+const PLATFORM_DIR = path.join(DIR, 'platform');
 const FILE_RE = /^(\d{4})_[a-z0-9_-]+\.sql$/;
 const BASELINE = '0001_baseline.sql';
 
@@ -123,26 +128,58 @@ async function run(conn, args, log = console.log, dir = DIR) {
   return 0;
 }
 
-module.exports = { loadMigrations, plan, run, checksum, BASELINE };
+/** Which databases this run is for: [{ label, database, dir }] (the company list comes from the platform database). */
+async function targetsFor(args, connect, env = process.env) {
+  const platformDb = env.PLATFORM_DB_NAME || 'viztex_platform';
+  if (args.includes('--platform'))
+    return [{ label: `platform (${platformDb})`, database: platformDb, dir: PLATFORM_DIR }];
+  const i = args.indexOf('--tenant');
+  const all = args.includes('--all-tenants');
+  if (i === -1 && !all) return [{ label: '', database: env.DB_NAME || 'dialforge_dev', dir: DIR }];
+  const code = i > -1 ? String(args[i + 1] || '').toLowerCase() : '';
+  if (!all && !code) throw new Error('--tenant needs a company code');
+  const conn = await connect(platformDb);
+  try {
+    const [rows] = all
+      ? await conn.query('SELECT code, db_name FROM tenants ORDER BY id')
+      : await conn.query('SELECT code, db_name FROM tenants WHERE code = ?', [code]);
+    if (!rows.length) throw new Error(all ? 'no companies yet' : `no company "${code}"`);
+    return rows.map((r) => ({ label: `${r.code} (${r.db_name})`, database: r.db_name, dir: DIR }));
+  } finally {
+    await conn.end();
+  }
+}
+
+module.exports = { loadMigrations, plan, run, checksum, targetsFor, BASELINE, DIR, PLATFORM_DIR };
 
 if (require.main === module) {
   require('dotenv').config();
   const mysql = require('mysql2/promise');
-  (async () => {
-    const conn = await mysql.createConnection({
+  const args = process.argv.slice(2);
+  const connect = (database) =>
+    mysql.createConnection({
       host: process.env.DB_HOST || 'localhost',
       user: process.env.DB_USER || 'dialforge',
       password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME || 'dialforge_dev',
+      database,
       multipleStatements: true, // a migration file holds several statements
     });
+  (async () => {
     try {
-      process.exitCode = await run(conn, process.argv.slice(2));
+      let worst = 0;
+      for (const t of await targetsFor(args, connect)) {
+        if (t.label) console.log(`== ${t.label}`);
+        const conn = await connect(t.database);
+        try {
+          worst = Math.max(worst, await run(conn, args, console.log, t.dir));
+        } finally {
+          await conn.end();
+        }
+      }
+      process.exitCode = worst;
     } catch (err) {
       console.error(`ERROR ${err.message}`);
       process.exitCode = 2;
-    } finally {
-      await conn.end();
     }
   })();
 }

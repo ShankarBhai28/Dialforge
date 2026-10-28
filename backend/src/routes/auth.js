@@ -9,20 +9,55 @@ const { audit } = require('../services/audit');
 const { guard } = require('../services/loginGuard');
 const { claimAgentLogin } = require('../services/singleLogin');
 const { EXPIRED_MESSAGE, isExpired } = require('../services/licence');
+const tenancy = require('../tenancy');
+const { contextOf, findTenant, normalizeCode } = require('../services/tenants');
 
 const router = express.Router();
 
 // --- Auth ---
+
+// What the login page asks for: the Cloud edition adds the company code.
+router.get('/auth/config', (req, res) => res.json({ multiTenant: tenancy.isMulti() }));
+
 router.post('/auth/login', async (req, res) => {
+  if (!tenancy.isMulti()) return login(req, res, null);
+  const { username, password } = req.body;
+  const company = normalizeCode(req.body.company);
+  if (!company || !username || !password) {
+    return res.status(400).json({ error: 'company code, username and password required' });
+  }
+  let tenant;
+  try {
+    tenant = await findTenant(company);
+  } catch (err) {
+    console.error('[tenant lookup]', err.message);
+    return res.status(503).json({ error: 'could not reach the company list - try again in a moment' });
+  }
+  if (!tenant) {
+    // The same answer as a wrong password: the page never tells which companies exist.
+    const key = `${company}/${username}`;
+    const wait = guard.blockedFor(key, req.ip);
+    if (wait) return res.status(429).json({ error: tooMany(wait) });
+    guard.fail(key, req.ip);
+    return res.status(401).json({ error: BAD_LOGIN.multi });
+  }
+  return tenancy.run(contextOf(tenant), () => login(req, res, tenant));
+});
+
+const BAD_LOGIN = { single: 'invalid username or password', multi: 'invalid company, username or password' };
+const tooMany = (wait) => `Too many failed logins - try again in ${wait} minute${wait === 1 ? '' : 's'}.`;
+
+/** The login itself; tenant = the company (Cloud edition, already the current tenant) or null. */
+async function login(req, res, tenant) {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'username and password required' });
+  const guardKey = tenant ? `${tenant.code}/${username}` : username;
+  const badLogin = tenant ? BAD_LOGIN.multi : BAD_LOGIN.single;
 
   // Too many wrong passwords for this username or from this address: wait.
-  const wait = guard.blockedFor(username, req.ip);
+  const wait = guard.blockedFor(guardKey, req.ip);
   if (wait) {
-    return res
-      .status(429)
-      .json({ error: `Too many failed logins - try again in ${wait} minute${wait === 1 ? '' : 's'}.` });
+    return res.status(429).json({ error: tooMany(wait) });
   }
 
   const [rows] = await pool.query(
@@ -33,7 +68,7 @@ router.post('/auth/login', async (req, res) => {
   );
   const user = rows[0];
   if (!user || !(await bcrypt.compare(password, user.password_hash))) {
-    const locked = guard.fail(username, req.ip);
+    const locked = guard.fail(guardKey, req.ip);
     void audit({
       username: String(username).slice(0, 50),
       action: locked ? 'auth.login_locked' : 'auth.login_failed',
@@ -41,9 +76,13 @@ router.post('/auth/login', async (req, res) => {
       summary: locked ? 'too many failed logins - locked for 15 minutes' : null,
       ip: req.ip,
     });
-    return res.status(401).json({ error: 'invalid username or password' });
+    return res.status(401).json({ error: badLogin });
   }
-  guard.succeed(username);
+  guard.succeed(guardKey);
+  if (tenant && tenant.status !== 'active') {
+    void audit({ user, action: 'auth.login_refused', status: 403, summary: 'company suspended', ip: req.ip });
+    return res.status(403).json({ error: 'Your company account is suspended - contact VIZTEX support.' });
+  }
   if (user.status === 'inactive') {
     void audit({ user, action: 'auth.login_refused', status: 403, summary: 'account disabled', ip: req.ip });
     return res.status(403).json({ error: 'this account is disabled - ask your admin' });
@@ -90,6 +129,7 @@ router.post('/auth/login', async (req, res) => {
     // Sessions started before an admin revokes this user's access end (services/sessions.js).
     loginAt,
   };
+  if (tenant) req.session.tenant = tenant.code;
 
   // No auto-Available here anymore - an agent must pick a queue first
   // (enforced client-side via a popup, and server-side below).
@@ -103,7 +143,7 @@ router.post('/auth/login', async (req, res) => {
     ip: req.ip,
   });
   res.json({ status: 'ok', user: await withAccess(req.session.user) });
-});
+}
 
 router.post('/auth/logout', async (req, res) => {
   if (req.session.user) {

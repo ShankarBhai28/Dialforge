@@ -7,6 +7,7 @@ import { Navigate, useNavigate, useSearchParams } from 'react-router';
 import {
   ArrowRight,
   BarChart3,
+  Building2,
   Eye,
   EyeOff,
   Headphones,
@@ -25,16 +26,19 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/form-controls';
 import { FullPageSpinner } from '@/components/FullPageSpinner';
 import { Logo } from '@/components/Logo';
-import { homeFor, takeSessionEndedNotice, useLogin, useMe } from './auth';
+import { homeFor, takeSessionEndedNotice, useAuthConfig, useLogin, useMe } from './auth';
 
 const REMEMBER_KEY = 'viztex-remember-username';
-function rememberedUsername() {
+// Cloud edition: the company code is remembered with the username.
+const COMPANY_KEY = 'viztex-remember-company';
+function remembered(key: string) {
   try {
-    return localStorage.getItem(REMEMBER_KEY) ?? '';
+    return localStorage.getItem(key) ?? '';
   } catch {
     return '';
   }
 }
+const rememberedUsername = () => remembered(REMEMBER_KEY);
 
 const FEATURES = [
   { icon: PhoneCall, title: 'Every way to dial', text: 'Manual, preview, progressive and predictive - on one screen.' },
@@ -90,9 +94,12 @@ function Showcase() {
 
 export function LoginPage() {
   const { data: user, isPending } = useMe();
+  const { data: config, isPending: configPending } = useAuthConfig();
+  const multiTenant = config?.multiTenant === true;
   const login = useLogin();
   const navigate = useNavigate();
   const [params] = useSearchParams();
+  const [company, setCompany] = useState(() => remembered(COMPANY_KEY));
   const [username, setUsername] = useState(rememberedUsername);
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(() => rememberedUsername() !== '');
@@ -105,19 +112,22 @@ export function LoginPage() {
   const next = params.get('next');
   const safeNext = next && next.startsWith('/') && !next.startsWith('//') ? next : null;
 
-  if (isPending) return <FullPageSpinner />;
+  if (isPending || configPending) return <FullPageSpinner />;
   if (user) return <Navigate to={safeNext ?? homeFor(user.role)} replace />;
 
   function signIn(takeOver = false) {
     const name = username.trim();
+    const code = company.trim().toLowerCase();
     try {
       if (remember) localStorage.setItem(REMEMBER_KEY, name);
       else localStorage.removeItem(REMEMBER_KEY);
+      if (multiTenant && remember) localStorage.setItem(COMPANY_KEY, code);
+      else if (multiTenant) localStorage.removeItem(COMPANY_KEY);
     } catch {
       /* private mode */
     }
     login.mutate(
-      { username: name, password, ...(takeOver ? { takeOver: true } : {}) },
+      { ...(multiTenant ? { company: code } : {}), username: name, password, ...(takeOver ? { takeOver: true } : {}) },
       { onSuccess: ({ user: u }) => navigate(safeNext ?? homeFor(u.role), { replace: true }) },
     );
   }
@@ -137,8 +147,29 @@ export function LoginPage() {
           <form onSubmit={onSubmit} className="rounded-xl bg-card p-7 shadow-card ring-1 ring-border sm:p-8">
             <h1 className="text-2xl font-extrabold tracking-tight">Sign in</h1>
             <p className="mt-1 mb-6 text-sm text-muted-foreground">
-              Welcome back to {APP_NAME}. Use your username and password.
+              Welcome back to {APP_NAME}.{' '}
+              {multiTenant ? 'Use your company code, username and password.' : 'Use your username and password.'}
             </p>
+
+            {multiTenant && (
+              <div className="mb-4 grid gap-1.5">
+                <Label htmlFor="company">Company code</Label>
+                <div className="relative">
+                  <Building2 className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="company"
+                    autoComplete="organization"
+                    autoFocus={!company}
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    required
+                    value={company}
+                    onChange={(e) => setCompany(e.target.value)}
+                    className="h-11 pl-9"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="mb-4 grid gap-1.5">
               <Label htmlFor="username">Username</Label>
@@ -147,7 +178,7 @@ export function LoginPage() {
                 <Input
                   id="username"
                   autoComplete="username"
-                  autoFocus={!username}
+                  autoFocus={(!multiTenant || !!company) && !username}
                   autoCapitalize="none"
                   spellCheck={false}
                   required
@@ -165,7 +196,7 @@ export function LoginPage() {
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   autoComplete="current-password"
-                  autoFocus={!!username}
+                  autoFocus={(!multiTenant || !!company) && !!username}
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -192,7 +223,7 @@ export function LoginPage() {
             </div>
             <label className="mb-5 flex w-fit cursor-pointer items-center gap-2 text-sm text-muted-foreground">
               <Checkbox checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-              Remember my username
+              {multiTenant ? 'Remember my company and username' : 'Remember my username'}
             </label>
 
             {ended && !login.error && (

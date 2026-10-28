@@ -5,8 +5,11 @@
 // - a "everything this user logged in before T is void" mark, checked on
 //   each request, covers the moment until the delete has run.
 const hub = require('../realtime/hub');
+const tenancy = require('../tenancy');
 
-const revokedBefore = new Map(); // userId -> ms timestamp
+// '<company>:<userId>' -> ms timestamp (user ids repeat across Cloud customers).
+const revokedBefore = new Map();
+const revokeKey = (userId) => `${tenancy.key()}:${Number(userId)}`;
 let store = null;
 
 /** server.js hands over the MySQL session store (tests run without one). */
@@ -15,7 +18,7 @@ function setStore(s) {
 }
 
 function revokeUserSessions(userId) {
-  revokedBefore.set(Number(userId), Date.now());
+  revokedBefore.set(revokeKey(userId), Date.now());
   hub.disconnectUser(userId);
   if (store) store.destroyUser(Number(userId)).catch((err) => console.error('[session revoke]', err.message));
 }
@@ -28,7 +31,7 @@ function revokeUserSessions(userId) {
  */
 async function endUserSessions(userId, reason) {
   const t = Date.now();
-  revokedBefore.set(Number(userId), t);
+  revokedBefore.set(revokeKey(userId), t);
   hub.sendToUser(userId, 'session.ended', { reason });
   hub.disconnectUser(userId);
   if (store) await store.destroyUser(Number(userId));
@@ -37,7 +40,7 @@ async function endUserSessions(userId, reason) {
 
 /** True when this session's login predates a revocation for its user. */
 function isRevoked(sessionUser) {
-  const t = revokedBefore.get(Number(sessionUser.id));
+  const t = revokedBefore.get(revokeKey(sessionUser.id));
   return t !== undefined && !(sessionUser.loginAt > t);
 }
 

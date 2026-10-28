@@ -41,7 +41,9 @@ const { startPresenceSync } = require('./src/services/presence');
 const dialerFeed = require('./src/realtime/dialerFeed');
 
 ami.connect();
-const sessionStore = new MySqlSessionStore({ pool });
+// Cloud edition: every company's logins live in the platform database.
+const multiTenant = require('./src/tenancy').isMulti();
+const sessionStore = new MySqlSessionStore(multiTenant ? { pool: pool.platformPool(), tenants: true } : { pool });
 sessions.setStore(sessionStore);
 const sessionMiddleware = createSessionMiddleware(sessionStore);
 const app = createApp({ sessionMiddleware });

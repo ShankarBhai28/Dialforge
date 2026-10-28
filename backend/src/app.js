@@ -4,6 +4,7 @@ const express = require('express');
 const session = require('express-session');
 const { mountWebApp } = require('./webApp');
 const { auditMiddleware } = require('./services/audit');
+const { tenantMiddleware } = require('./middleware/tenant');
 
 // Order matters only where two routes could match the same URL; the
 // original single-file order is preserved for those (see tests/routes.test.js).
@@ -51,6 +52,7 @@ function createApp({ sessionMiddleware = createSessionMiddleware(), webDistDir, 
   app.use(express.json());
   mountWebApp(app, webDistDir);
   app.use(sessionMiddleware);
+  app.use(tenantMiddleware()); // Cloud edition: the rest runs on the user's company database
   if (audit) app.use(auditMiddleware());
   for (const name of ROUTERS) app.use(require(`./routes/${name}`));
   return app;

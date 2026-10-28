@@ -1653,3 +1653,29 @@ Reported by the user after trying the agent panel:
 - Same rules as Create user: an own-teams login (TL / manager) imports only into its teams, and the team column is required for it. Team = the team's name as on the Teams screen.
 - Passwords are hashed in a worker thread (`backend/src/services/hashWorker.js`, ~85 ms each → ~45 s for 500), so live screens and call handling don't stall. Passwords never come back in the answer and are hidden in the audit log (`users.import`).
 - API: `POST /admin/users/import` (multipart `file`; `commit=1` to create).
+
+## Cloud edition, tenant part 1: company code at login, a database per company (2026-10-28)
+
+Plan and the six parts: [plans/TENANTS_PLAN.md](plans/TENANTS_PLAN.md). Part 1 (branch
+`tenant-part1`): with `MULTI_TENANT=1` the login asks for a **company code**; every request of a
+logged-in user runs on that company's own database (`db.js` picks the pool per request through
+`src/tenancy.js`, no query changed); the company list and all sessions live in the platform
+database; live updates, revoked sessions, the role cache, failed-login counters and lead-import
+reports are kept per company. Without `MULTI_TENANT` nothing changes (all existing tests pass
+unchanged). Calls, the dialer and telephony still work for the home company only (parts 2-4); the
+licence is shared.
+
+Switching a test server to multi-tenant (never a customer's single install):
+1. MySQL rights for the app user (on the DB server; `<app-ip>` = `localhost` on one server):
+   ```
+   sudo mysql -e "CREATE DATABASE viztex_platform CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+     GRANT ALL PRIVILEGES ON viztex_platform.* TO 'dialforge'@'<app-ip>';
+     GRANT ALL PRIVILEGES ON \`viztex\_t\_%\`.* TO 'dialforge'@'<app-ip>';"
+   ```
+2. App server: `npm run db:migrate -- --platform`, then
+   `npm run tenant -- register-home --code main --name "<this server's company>"`.
+3. `.env`: `MULTI_TENANT=1`, `HOME_TENANT_CODE=main`; restart `dialforge-backend`. Everyone logs in
+   again (sessions move to the platform database), with company code `main`.
+4. A new company: `npm run tenant -- create --code acme --name "Acme" --admin boss` (prints the
+   Super Admin's one-time password). `list`, `suspend --code`, `resume --code`.
+5. Updates: `npm run db:migrate` (home), `-- --all-tenants` (every company), `-- --platform`.

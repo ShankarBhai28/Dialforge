@@ -13,7 +13,8 @@
     "alert:test": "node src/tools/alert-test.js",
     "db:reset-test-data": "node src/tools/reset-test-data.js",
     "db:migrate": "node src/tools/migrate.js",
-    "create-admin": "node src/tools/create-admin.js"
+    "create-admin": "node src/tools/create-admin.js",
+    "tenant": "node src/tools/tenant.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -11,6 +11,7 @@
 // are always rejected. Every skipped row goes into a downloadable Excel
 // report with its original columns and the reason.
 const crypto = require('crypto');
+const tenancy = require('../tenancy');
 const ExcelJS = require('exceljs');
 const pool = require('../../db');
 const { normalizePhone } = require('../../dialer-common');
@@ -214,13 +215,13 @@ function saveReport(userId, report, now = Date.now()) {
   for (const [id, r] of reports) if (now - r.at > REPORT_TTL_MS) reports.delete(id);
   while (reports.size >= 50) reports.delete(reports.keys().next().value);
   const id = crypto.randomBytes(12).toString('hex');
-  reports.set(id, { ...report, userId, at: now });
+  reports.set(id, { ...report, userId, tenant: tenancy.key(), at: now });
   return id;
 }
 
 function getReport(userId, id, now = Date.now()) {
   const r = reports.get(id);
-  if (!r || r.userId !== userId || now - r.at > REPORT_TTL_MS) return null;
+  if (!r || r.userId !== userId || r.tenant !== tenancy.key() || now - r.at > REPORT_TTL_MS) return null;
   return r;
 }
 

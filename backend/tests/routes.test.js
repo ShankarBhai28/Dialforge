@@ -6,7 +6,7 @@ const { createApp } = require('../src/app');
 
 // Routes anyone may call without logging in. Adding to this list should be
 // a deliberate, reviewed decision.
-const PUBLIC_ROUTES = ['GET /health', 'POST /auth/login', 'POST /auth/logout', 'GET /auth/me'];
+const PUBLIC_ROUTES = ['GET /health', 'GET /auth/config', 'POST /auth/login', 'POST /auth/logout', 'GET /auth/me'];
 
 // Stand-in for the real session: the role comes from a test header.
 const fakeSession = (req, res, next) => {
