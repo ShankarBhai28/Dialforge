@@ -4,8 +4,11 @@
 // reads the same overview once every 2s - only while an admin is connected -
 // and publishes `dialer.status` (the GET /admin/dialer payload) when
 // something on the screen changed.
+// Cloud edition: one feed per company (its own overview, its own admins).
 const hub = require('./hub');
+const tenancy = require('../tenancy');
 const { dialerOverview } = require('../services/dialer');
+const { forEachTenant } = require('../services/tenants');
 
 const POLL_MS = 2000;
 
@@ -70,10 +73,40 @@ function createDialerFeed({ load, publish, hasAdmins, intervalMs = POLL_MS }) {
   };
 }
 
-const feed = createDialerFeed({
-  load: () => dialerOverview(),
-  publish: (type, data) => hub.publish(type, data),
-  hasAdmins: () => hub.watchingCount('dialer') > 0,
-});
+const feeds = new Map(); // company key -> feed
+function feedFor(key) {
+  if (!feeds.has(key)) {
+    feeds.set(
+      key,
+      createDialerFeed({
+        load: () => dialerOverview(),
+        publish: (type, data) => hub.publish(type, data),
+        hasAdmins: () => hub.watchingCount('dialer') > 0,
+      }),
+    );
+  }
+  return feeds.get(key);
+}
 
-module.exports = { ...feed, createDialerFeed, fingerprint };
+let timer = null;
+
+module.exports = {
+  /** For the company the code is running as (a request that just started / paused a campaign). */
+  check: (opts) => feedFor(tenancy.key()).check(opts),
+  start() {
+    if (timer) return;
+    timer = setInterval(() => {
+      // Only companies with someone on the Dialer screen cost a read (check returns at once otherwise).
+      forEachTenant(() => feedFor(tenancy.key()).check(), { label: 'dialer feed' }).catch((err) =>
+        console.error('[dialer feed]', err.message),
+      );
+    }, POLL_MS);
+    timer.unref();
+  },
+  stop() {
+    clearInterval(timer);
+    timer = null;
+  },
+  createDialerFeed,
+  fingerprint,
+};

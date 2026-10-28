@@ -10,6 +10,8 @@
 const pool = require('../../db');
 const ari = require('../../ari');
 const hub = require('../realtime/hub');
+const tenancy = require('../tenancy');
+const { forEachTenant } = require('./tenants');
 
 /** Pure: the rows of live_agents from what the sources say (tests feed this directly). */
 function buildPresence({ open, connected, users, calls, lines, queues, campaigns, logins }) {
@@ -139,37 +141,46 @@ async function syncPresence(deps = { pool, ari, hub }) {
 }
 
 // --- running it ---
+// Per company (Cloud edition): each has its own live_agents table, its own
+// pending refresh and its own "already running" mark.
 let timer = null;
-let soon = null;
-let running = false;
+const soon = new Map(); // company key -> pending refresh
+const running = new Set(); // company keys
 
+/** One refresh, for the company the code is running as. */
 async function runOnce() {
-  if (running) return;
-  running = true;
+  const k = tenancy.key();
+  if (running.has(k)) return;
+  running.add(k);
   try {
     await syncPresence();
   } catch (err) {
-    console.error('[presence]', err.message);
+    console.error(`[presence] ${k || 'home'}:`, err.message);
   } finally {
-    running = false;
+    running.delete(k);
   }
 }
 
 /** A status / call just changed: refresh within a second (several changes, one refresh). */
 function presenceChanged() {
-  if (!timer || soon) return;
-  soon = setTimeout(() => {
-    soon = null;
+  const k = tenancy.key();
+  if (!timer || soon.has(k)) return;
+  // The timer keeps the company it was started for (async context).
+  const t = setTimeout(() => {
+    soon.delete(k);
     void runOnce();
   }, 1000);
-  soon.unref?.();
+  t.unref?.();
+  soon.set(k, t);
 }
 
 function startPresenceSync(seconds = Number(process.env.PRESENCE_SECONDS) || 10) {
   if (timer) return;
-  timer = setInterval(() => void runOnce(), seconds * 1000);
+  const all = () =>
+    forEachTenant(runOnce, { label: 'presence' }).catch((err) => console.error('[presence]', err.message));
+  timer = setInterval(() => void all(), seconds * 1000);
   timer.unref?.();
-  void runOnce();
+  void all();
 }
 
 module.exports = { buildPresence, syncPresence, presenceChanged, startPresenceSync };

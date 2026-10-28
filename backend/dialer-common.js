@@ -166,7 +166,22 @@ async function recentlyContacted(db, phones, campaignId, hours) {
   return out;
 }
 
+// The Asterisk channel id of a dialer call: dfd-<attempt id>, and on the
+// Cloud edition dfd-<company code>-<attempt id> (attempt ids repeat across
+// companies' databases), so the call's events find their company again.
+function dialerChannelId(attemptId, company = '') {
+  return company ? `dfd-${company}-${attemptId}` : `dfd-${attemptId}`;
+}
+
+/** { company, attemptId } of a dialer channel id, or null for any other channel. */
+function parseDialerChannelId(id) {
+  const m = /^dfd-(?:(.+)-)?(\d+)$/.exec(String(id || ''));
+  return m ? { company: m[1] || '', attemptId: Number(m[2]) } : null;
+}
+
 module.exports = {
+  dialerChannelId,
+  parseDialerChannelId,
   OUTCOME_HOLD_MIN,
   recentlyContacted,
   holdLeadForOutcome,

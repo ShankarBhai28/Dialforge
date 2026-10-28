@@ -9,6 +9,8 @@ const hub = require('../realtime/hub');
 const { closeOpenStatus, syncQueueMembership } = require('./agents');
 const { releasePreviewLocks } = require('./preview');
 const { audit } = require('./audit');
+const tenancy = require('../tenancy');
+const { forEachTenant } = require('./tenants');
 
 /** The agent's open status row ({ status, extension_name, started_at }) or null. */
 async function openStatus(userId, deps = { pool }) {
@@ -44,7 +46,9 @@ async function takeOffline(userId, extensionName) {
 // An agent who is Available / Break / ACW but whose browser line has been
 // unregistered for STALE_AGENT_MINUTES (default 10) is taken offline: they
 // closed the browser or lost the network without logging out. 0 turns it off.
-const offlineSince = new Map(); // userId -> ms when first seen unregistered
+// '<company>:<userId>' -> ms when first seen unregistered (the sweep runs per company).
+const offlineSince = new Map();
+const offlineKey = (userId) => `${tenancy.key()}:${userId}`;
 
 async function sweepStaleAgents({ minutes, now = Date.now(), deps = { pool, ari } } = {}) {
   const [rows] = await deps.pool.query(
@@ -52,21 +56,23 @@ async function sweepStaleAgents({ minutes, now = Date.now(), deps = { pool, ari 
      FROM agent_status_log asl JOIN users u ON u.id = asl.user_id
      WHERE asl.ended_at IS NULL AND u.role = 'agent'`,
   );
-  const open = new Set(rows.map((r) => r.user_id));
-  for (const id of offlineSince.keys()) if (!open.has(id)) offlineSince.delete(id);
+  const open = new Set(rows.map((r) => offlineKey(r.user_id)));
+  const mine = `${tenancy.key()}:`;
+  for (const k of offlineSince.keys()) if (k.startsWith(mine) && !open.has(k)) offlineSince.delete(k);
   const loggedOut = [];
   for (const r of rows) {
     const state = r.extension_name ? await deps.ari.endpointState(`PJSIP/${r.extension_name}`) : 'offline';
     if (state === null) continue; // couldn't ask Asterisk - decide next time
+    const key = offlineKey(r.user_id);
     if (state === 'online') {
-      offlineSince.delete(r.user_id);
+      offlineSince.delete(key);
       continue;
     }
-    if (!offlineSince.has(r.user_id)) offlineSince.set(r.user_id, now);
-    if (now - offlineSince.get(r.user_id) < minutes * 60000) continue;
+    if (!offlineSince.has(key)) offlineSince.set(key, now);
+    if (now - offlineSince.get(key) < minutes * 60000) continue;
     if (await onActiveCall(r.extension_name, deps)) continue;
     await takeOffline(r.user_id, r.extension_name);
-    offlineSince.delete(r.user_id);
+    offlineSince.delete(key);
     loggedOut.push(r.user_id);
     await audit({
       action: 'agent.auto_logout',
@@ -81,7 +87,9 @@ async function sweepStaleAgents({ minutes, now = Date.now(), deps = { pool, ari 
 function startStaleAgentCleanup(minutes = Number(process.env.STALE_AGENT_MINUTES ?? 10)) {
   if (!minutes) return null;
   const timer = setInterval(() => {
-    sweepStaleAgents({ minutes }).catch((err) => console.error('[stale agents]', err.message));
+    forEachTenant(() => sweepStaleAgents({ minutes }), { label: 'stale agents' }).catch((err) =>
+      console.error('[stale agents]', err.message),
+    );
   }, 60000);
   timer.unref();
   return timer;

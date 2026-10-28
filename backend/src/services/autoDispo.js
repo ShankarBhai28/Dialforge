@@ -8,6 +8,7 @@ const pool = require('../../db');
 const { getDispositions } = require('./dispositions');
 const { applyStatus, statusEffect } = require('./leadStatus');
 const { audit } = require('./audit');
+const { forEachTenant } = require('./tenants');
 
 const GRACE_SEC = 60;
 const NOTE = 'Auto disposition (none given in time)';
@@ -51,11 +52,15 @@ async function sweepAutoDispo(deps = { pool, getDispositions, audit }) {
   return saved;
 }
 
+/** Every company's calls (Cloud edition), one company at a time per worker. */
 function startAutoDispoSweeper(everyMs = 30000) {
+  const once = async () => {
+    const n = await sweepAutoDispo();
+    if (n) console.log(`[auto disposition] saved for ${n} call(s) nobody gave one`);
+  };
   const tick = () =>
-    sweepAutoDispo().then(
-      (n) => n && console.log(`[auto disposition] saved for ${n} call(s) nobody gave one`),
-      (err) => console.error('[auto disposition] sweep failed:', err.message),
+    forEachTenant(once, { label: 'auto disposition' }).catch((err) =>
+      console.error('[auto disposition] sweep failed:', err.message),
     );
   return setInterval(tick, everyMs);
 }

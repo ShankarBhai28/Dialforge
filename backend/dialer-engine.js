@@ -17,8 +17,20 @@
 require('dotenv').config();
 const pool = require('./db');
 const ari = require('./ari');
-const { normalizePhone, isWithinCallWindow, finishAttempt, recentlyContacted } = require('./dialer-common');
+const {
+  normalizePhone,
+  isWithinCallWindow,
+  finishAttempt,
+  recentlyContacted,
+  dialerChannelId,
+  parseDialerChannelId,
+} = require('./dialer-common');
 const licence = require('./src/services/licence');
+// Cloud edition (docs/plans/TENANTS_PLAN.md, part 2): both loops run once per
+// company, on that company's database; a call carries its company code in its
+// channel id and Stasis arguments, so its events are handled as that company.
+const tenancy = require('./src/tenancy');
+const { forEachTenant, runAsTenant } = require('./src/services/tenants');
 
 const DIALER_APP = 'dialforge-dialer';
 const TRUNK_ENDPOINT = process.env.TRUNK_ENDPOINT || 'dialforge-nxtra1';
@@ -480,7 +492,8 @@ async function claimLeadForDialing(c, ratio) {
 async function placeCall(c, ratio) {
   const claimed = await claimLeadForDialing(c, ratio);
   if (!claimed) return false;
-  const channelId = `dfd-${claimed.attemptId}`;
+  const company = tenancy.isMulti() ? tenancy.key() : '';
+  const channelId = dialerChannelId(claimed.attemptId, company);
   await pool.query('UPDATE dial_attempts SET channel_id = ? WHERE id = ?', [channelId, claimed.attemptId]);
   try {
     // Last-moment DNC check: the number may have been added since it was queued.
@@ -494,7 +507,7 @@ async function placeCall(c, ratio) {
     await ari.originate({
       endpoint: await endpointFor(claimed.phone),
       app: DIALER_APP,
-      appArgs: `attempt,${claimed.attemptId}`,
+      appArgs: company ? `attempt,${claimed.attemptId},${company}` : `attempt,${claimed.attemptId}`,
       callerId: c.outbound_caller_id || TRUNK_CALLER_ID,
       timeout: c.ring_timeout_sec,
       channelId,
@@ -511,6 +524,15 @@ let pacing = false;
 async function paceTick() {
   if (pacing || !ariReady) return;
   pacing = true;
+  try {
+    await forEachTenant(paceOne, { label: 'pace tick' });
+  } finally {
+    pacing = false;
+  }
+}
+
+/** One company's pacing. */
+async function paceOne() {
   try {
     const [campaigns] = await pool.query(
       `SELECT c.* FROM campaigns c
@@ -529,14 +551,27 @@ async function paceTick() {
       }
     }
   } catch (err) {
-    log('pace tick failed:', err.message);
-  } finally {
-    pacing = false;
+    log(`pace tick failed${tenancy.key() ? ` (${tenancy.key()})` : ''}:`, err.message);
   }
 }
 
 // --- ARI events for our own calls ---
+/** The company an event of one of our calls belongs to ('' = home / single install). */
+function eventCompany(event) {
+  if (event.type === 'StasisStart' && event.args[0] === 'attempt') return event.args[2] || '';
+  const parsed = parseDialerChannelId(event.channel && event.channel.id);
+  return parsed ? parsed.company : '';
+}
+
 async function onAriEvent(event) {
+  try {
+    await runAsTenant(eventCompany(event), () => handleAriEvent(event));
+  } catch (err) {
+    log('ARI event handling failed:', err.message);
+  }
+}
+
+async function handleAriEvent(event) {
   try {
     if (event.type === 'StasisStart' && event.args[0] === 'attempt') {
       // Customer answered: record it, open a calls row, hand to the queue.
@@ -565,6 +600,8 @@ async function onAriEvent(event) {
       await ari.setChannelVar(event.channel.id, 'DIALER_ATTEMPT_ID', String(attemptId));
       await ari.setChannelVar(event.channel.id, 'DIALER_MAXWAIT', String(a.abandon_wait_sec || 5));
       await ari.setChannelVar(event.channel.id, 'DIALER_AMD', a.amd_enabled ? '1' : '0');
+      // The backend's queue events find the company's database by this (part 4).
+      if (tenancy.isMulti()) await ari.setChannelVar(event.channel.id, 'DIALER_TENANT', tenancy.key());
       // What the agent's phone shows when the queue rings it: the customer
       // (the channel still carries our own outbound caller ID otherwise).
       await ari.setChannelVar(event.channel.id, 'CALLERID(num)', a.phone).catch(() => {});
@@ -581,12 +618,12 @@ async function onAriEvent(event) {
       // The customer's phone rings (SIP 180) - the Dialer screen shows "Ringing".
       await pool.query(
         "UPDATE dial_attempts SET ringing_at = COALESCE(ringing_at, NOW()) WHERE id = ? AND status = 'dialing'",
-        [Number(event.channel.id.slice(4))],
+        [parseDialerChannelId(event.channel.id).attemptId],
       );
     } else if (event.type === 'ChannelDestroyed' && event.channel.id.startsWith('dfd-')) {
       // Fires for every one of our channels; only matters if it never got
       // answered (answered calls are finished by the backend's AMI events).
-      const attemptId = Number(event.channel.id.slice(4));
+      const { attemptId } = parseDialerChannelId(event.channel.id);
       const [[a]] = await pool.query('SELECT status FROM dial_attempts WHERE id = ?', [attemptId]);
       if (a && a.status === 'dialing') {
         const result = HANGUP_CAUSE_RESULT[event.cause] || 'failed';
@@ -628,6 +665,15 @@ async function tick() {
   if (ticking) return; // never overlap two ticks if one runs long
   ticking = true;
   try {
+    await forEachTenant(tickOne, { label: 'tick' });
+  } finally {
+    ticking = false;
+  }
+}
+
+/** One company's tick (its dialer_status heartbeat, hopper, stuck attempts). */
+async function tickOne() {
+  try {
     await writeStatus(0, { note: ENGINE_ID });
     await sweepStuckAttempts().catch((err) => log('sweep failed:', err.message));
     // Running/paused campaigns, plus stopped ones that still have hopper
@@ -646,9 +692,7 @@ async function tick() {
       }
     }
   } catch (err) {
-    log('tick failed:', err.message);
-  } finally {
-    ticking = false;
+    log(`tick failed${tenancy.key() ? ` (${tenancy.key()})` : ''}:`, err.message);
   }
 }
 

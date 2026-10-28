@@ -23,8 +23,8 @@ switched on only by `MULTI_TENANT=1`.
 
 | Part | What | Status |
 |---|---|---|
-| **1** | **Tenant registry, company-code login, every web request on its customer's database** | **in progress** |
-| 2 | Background jobs per customer (stale agents, auto-dispositions, presence, health); the dialer engine loops over customers | |
+| 1 | Tenant registry, company-code login, every web request on its customer's database | done (branch tenant-part1) |
+| 2 | Background jobs per customer (stale agents, auto-dispositions, presence, dialer feed); the dialer engine loops over customers | done (same branch) |
 | 3 | Telephony per customer: extension / queue / context prefixes in Asterisk, recordings per customer | |
 | 4 | Calls back to the right customer: ARI / AMI events routed by prefix | |
 | 5 | Per-customer limits: seats, channels (Asterisk `GROUP()`), caller IDs; minutes metered | |
@@ -66,5 +66,27 @@ npm run db:migrate -- --tenant acme        # one customer;  --all-tenants: every
 one-time password is printed once) and registers the customer. The app's MySQL user needs
 rights on `viztex_t_%` databases and the platform database (see RUNBOOK).
 
-**Not yet in part 1:** calls (dialer, telephony, recordings) work for the home tenant only; the
-licence (seats, channels) is shared by all customers. Parts 2-5.
+**Not yet in part 1:** timers and the dialer engine (part 2); telephony and recordings (parts
+3-4) work for the home tenant only; the licence (seats, channels) is shared by all customers
+(part 5).
+
+## Part 2 in detail
+
+`forEachTenant(fn)` (services/tenants.js) runs a job once per **active** company, as that
+company, a few at a time (`TENANT_JOB_PARALLEL`, default 4); a failing company is logged and
+skipped. The list is re-read once a minute, so a new company starts working within a minute. The
+home database runs too, even before `register-home`. Single install: the job runs once, as before.
+
+Per company now: stale-agent cleanup, auto-dispositions, the live_agents refresh (its own pending
+refresh and running mark), the Dialer screen feed, and both dialer-engine loops (hopper / status
+tick every 5 s, pacing every 1 s). The system health watch stays one per server (it checks the
+server, Asterisk and services, not a company).
+
+Dialer calls: the channel id is `dfd-<company>-<attempt id>` and the Stasis arguments end with
+the company (single install: unchanged `dfd-<attempt id>`), so the engine handles each call's
+events as its company; the answered call also gets the channel variable `DIALER_TENANT` for the
+backend's queue events (part 4).
+
+**Still home-only after part 2:** Asterisk itself - extension, queue and context names are shared
+by all companies until part 3, and the backend's AMI / ARI call events until part 4. So a second
+company can be created and used for everything except real calls.

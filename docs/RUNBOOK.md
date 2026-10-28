@@ -1679,3 +1679,12 @@ Switching a test server to multi-tenant (never a customer's single install):
 4. A new company: `npm run tenant -- create --code acme --name "Acme" --admin boss` (prints the
    Super Admin's one-time password). `list`, `suspend --code`, `resume --code`.
 5. Updates: `npm run db:migrate` (home), `-- --all-tenants` (every company), `-- --platform`.
+
+## Cloud edition, tenant part 2: background jobs and the dialer per company (2026-10-28)
+
+Same branch `tenant-part1`. Timers (stale agents, auto-dispositions, live_agents, Dialer screen
+feed) and both dialer-engine loops run once per active company on its own database
+(`forEachTenant`, a few at a time, one company's failure logged and skipped). Dialer channel ids
+become `dfd-<company>-<attempt>` on a multi-tenant install (unchanged otherwise) so call events
+return to their company. Asterisk names are still shared (part 3), so real calls stay home-only.
+Details: plans/TENANTS_PLAN.md → Part 2.
