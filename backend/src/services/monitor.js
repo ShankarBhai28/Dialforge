@@ -10,6 +10,7 @@ const pool = require('../../db');
 const ari = require('../../ari');
 const ami = require('../../ami');
 const { onActiveCall, openStatus } = require('./agentLogout');
+const names = require('../telephony/names');
 
 const MODES = ['listen', 'whisper', 'barge'];
 // q: no beep, E: end with the agent's call, d: 4/5/6 switch modes, w / B: start mode.
@@ -52,7 +53,7 @@ async function startMonitor({ supervisorId, agentId, mode, scope }, deps = { poo
     throw new MonitorError(409, 'you have no monitoring line - ask a Super Admin to give you an extension (Users)');
   }
   if (line.name === agentExt) throw new MonitorError(409, "you can't monitor your own line");
-  const state = await deps.ari.endpointState(`PJSIP/${line.name}`);
+  const state = await deps.ari.endpointState(names.pjsip(line.name));
   if (state !== 'online') {
     throw new MonitorError(
       409,
@@ -61,9 +62,9 @@ async function startMonitor({ supervisorId, agentId, mode, scope }, deps = { poo
   }
   try {
     await deps.ami.originate({
-      channel: `PJSIP/${line.name}`,
+      channel: names.pjsip(line.name),
       context: 'df-monitor',
-      exten: agentExt,
+      exten: names.endpoint(agentExt),
       callerId: `"Monitor ${agent.username}" <${agentExt}>`,
       variables: { DF_SPY_OPTS: SPY_OPTIONS[mode] },
     });

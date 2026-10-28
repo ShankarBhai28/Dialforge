@@ -2,6 +2,8 @@ const pool = require('../../db');
 const ami = require('../../ami');
 const { releasePreviewLocks } = require('./preview');
 const hub = require('../realtime/hub');
+// Asterisk names (Cloud edition: <company>_1001, <company>_<queue>); our tables keep the plain ones.
+const names = require('../telephony/names');
 
 // --- Agent status tracking (available / break / acw) ---
 async function closeOpenStatus(userId) {
@@ -54,8 +56,9 @@ async function syncQueueMembership(userId, extensionName, newStatus, explicitQue
   // removed). All rung alike (penalty 0).
   const extras = (await extraQueueNames(userId)).filter((q) => q !== main);
   const targets = [...(main ? [main] : []), ...extras];
-  const iface = `PJSIP/${extensionName}`;
-  for (const queue of targets) {
+  const iface = names.pjsip(extensionName);
+  for (const target of targets) {
+    const queue = names.queue(target);
     try {
       if (newStatus === 'available') {
         await ami.queueAdd(queue, iface).catch(() => {}); // already a member - fine
@@ -98,7 +101,7 @@ async function setExtraQueues(userId, extensionName, queueIds) {
   const keep = new Set(queueIds);
   for (const o of old) {
     if (keep.has(o.queue_id) || !extensionName) continue;
-    await ami.queueRemove(o.asterisk_name, `PJSIP/${extensionName}`).catch(() => {});
+    await ami.queueRemove(names.queue(o.asterisk_name), names.pjsip(extensionName)).catch(() => {});
   }
   await pool.query('DELETE FROM agent_extra_queues WHERE user_id = ?', [userId]);
   if (queueIds.length)
@@ -121,7 +124,7 @@ async function setAgentStatus(userId, status, reason, queueId, extensionName, ex
     const before = await findCurrentQueueAsteriskName(userId);
     const [now] = await pool.query('SELECT asterisk_name FROM queues WHERE id = ?', [queueId]);
     if (before && now[0] && now[0].asterisk_name !== before)
-      await ami.queueRemove(before, `PJSIP/${extensionName}`).catch(() => {});
+      await ami.queueRemove(names.queue(before), names.pjsip(extensionName)).catch(() => {});
   }
   await closeOpenStatus(userId);
   await pool.query(
@@ -208,7 +211,7 @@ async function leaveRemovedCampaignQueues(campaignId, removedQueueIds) {
   const [[c]] = await pool.query('SELECT queue_id FROM campaigns WHERE id = ?', [campaignId]);
   for (const r of rows) {
     if (!c || r.main_queue !== c.queue_id) continue; // working another campaign that still has it
-    if (r.ext) await ami.queueRemove(r.asterisk_name, `PJSIP/${r.ext}`).catch(() => {});
+    if (r.ext) await ami.queueRemove(names.queue(r.asterisk_name), names.pjsip(r.ext)).catch(() => {});
     await pool.query('DELETE FROM agent_extra_queues WHERE user_id = ? AND queue_id = ?', [r.user_id, r.queue_id]);
   }
 }

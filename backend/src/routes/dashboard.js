@@ -10,6 +10,7 @@ const { buildWebrtcConfig } = require('../services/webrtc');
 const { onActiveCall, openStatus, takeOffline } = require('../services/agentLogout');
 const { revokeUserSessions } = require('../services/sessions');
 const { whereClause } = require('../services/paging');
+const names = require('../telephony/names');
 
 const router = express.Router();
 
@@ -92,6 +93,7 @@ router.get('/admin/monitor/line', requireAdminSide, async (req, res) => {
   if (holder) return res.status(409).json({ error: `Extension ${line.name} is in use by ${holder} right now.` });
   res.json({
     extension: line.name,
+    sipUser: names.endpoint(line.name),
     sipPassword: line.sip_password,
     ...buildWebrtcConfig(process.env, req.hostname, { userId: req.session.user.id }),
   });

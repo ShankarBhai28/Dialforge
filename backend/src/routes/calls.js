@@ -19,6 +19,7 @@ const { findRecording, missingMessage } = require('../services/recordingStore');
 const { agentCanSeeLead, findLeadByPhone } = require('../services/leadHistory');
 const { outcomeLabel } = require('../services/reports/common');
 const { localToday, parseRange } = require('../services/reports/time');
+const names = require('../telephony/names');
 
 const router = express.Router();
 
@@ -247,7 +248,7 @@ router.post('/calls/click2call', requireCaller, async (req, res) => {
   try {
     // Leg 1: ring the agent's own extension first.
     const agentChannel = await ari.originate({
-      endpoint: `PJSIP/${fromExtension}`,
+      endpoint: names.pjsip(fromExtension),
       app: APP_NAME,
       appArgs: `click2call,${callId},agent`,
     });

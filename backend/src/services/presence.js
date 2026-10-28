@@ -11,6 +11,7 @@ const pool = require('../../db');
 const ari = require('../../ari');
 const hub = require('../realtime/hub');
 const tenancy = require('../tenancy');
+const names = require('../telephony/names');
 const { forEachTenant } = require('./tenants');
 
 /** Pure: the rows of live_agents from what the sources say (tests feed this directly). */
@@ -116,11 +117,11 @@ async function syncPresence(deps = { pool, ari, hub }) {
   const logins = Object.fromEntries(loginRows.map((r) => [r.user_id, r.at]));
 
   // Line state: one ARI call for all endpoints; ones it doesn't list are asked one by one.
-  let lines = await deps.ari.endpointStates();
+  let lines = names.ownEndpointStates(await deps.ari.endpointStates());
   if (lines) {
     const exts = new Set([...open.map((r) => r.extension_name || r.ext), ...users.map((u) => u.ext)].filter(Boolean));
     for (const ext of exts) {
-      if (!(ext in lines)) lines = { ...lines, [ext]: await deps.ari.endpointState(`PJSIP/${ext}`) };
+      if (!(ext in lines)) lines = { ...lines, [ext]: await deps.ari.endpointState(names.pjsip(ext)) };
     }
   }
 

@@ -1,4 +1,5 @@
 const pool = require('../../db');
+const names = require('./names');
 const ari = require('../../ari');
 const ami = require('../../ami');
 const callControl = require('../../call-control');
@@ -147,7 +148,7 @@ function start() {
             didMatched,
           });
 
-          await ari.setChannelVar(event.channel.id, 'QUEUENAME', campaign.asterisk_name);
+          await ari.setChannelVar(event.channel.id, 'QUEUENAME', names.queue(campaign.asterisk_name));
           await ari.continueInDialplan(event.channel.id, {
             context: 'queue-dispatch',
             extension: 's',
@@ -348,7 +349,8 @@ function start() {
       if (!found) return;
       const { callId, attemptId } = found;
       const match = (fields.Interface || '').match(/PJSIP\/([^\s,]+)/i);
-      const extensionName = match ? match[1] : null;
+      // Cloud edition: Asterisk's acme_1001 is our 1001 (another company's line: part 4).
+      const extensionName = match ? names.ownName(match[1]) : null;
       if (!extensionName) return;
       const agentUserId = await findAgentIdByExtension(extensionName);
       await adoptCampaignOfAgent(callId, agentUserId);
@@ -396,7 +398,7 @@ function start() {
       // Same auto-ACW behavior the click2call path already has - the agent
       // explicitly goes back to Available when done wrapping up.
       const match = (fields.Interface || '').match(/PJSIP\/([^\s,]+)/i);
-      const extensionName = match ? match[1] : null;
+      const extensionName = match ? names.ownName(match[1]) : null;
       if (extensionName) {
         const acwUserId = await findAgentIdByExtension(extensionName);
         if (acwUserId) {

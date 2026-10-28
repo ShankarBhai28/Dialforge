@@ -13,21 +13,25 @@
 // Recorded: calls of campaigns with record_calls = 1 (the default), and
 // calls without a campaign unless RECORD_CALLS_WITHOUT_CAMPAIGN=0.
 // Files: /var/spool/asterisk/monitor/dialforge/YYYY/MM/DD/call-<id>-<time>.mp3,
-// removed after RECORDING_RETENTION_DAYS (ops/backup.sh).
+// removed after RECORDING_RETENTION_DAYS (ops/backup.sh). Cloud edition: one
+// folder per company first (.../dialforge/<company>/YYYY/...), so call ids
+// that repeat across companies never meet, also in S3.
 const fs = require('fs');
 const path = require('path');
 const pool = require('../../db');
 const ami = require('../../ami');
+const tenancy = require('../tenancy');
 
 const BASE = process.env.RECORDINGS_DIR || '/var/spool/asterisk/monitor/dialforge';
 const DONE_COMMAND = '/usr/local/bin/dialforge-recording-done';
 
-/** call-42-20261013-101500 in YYYY/MM/DD (UTC). */
+/** call-42-20261013-101500 in [<company>/]YYYY/MM/DD (UTC). */
 function recordingBase(callId, now = new Date()) {
+  const company = tenancy.isMulti() ? [tenancy.key()] : [];
   const p = (n) => String(n).padStart(2, '0');
   const day = `${now.getUTCFullYear()}/${p(now.getUTCMonth() + 1)}/${p(now.getUTCDate())}`;
   const stamp = `${now.getUTCFullYear()}${p(now.getUTCMonth() + 1)}${p(now.getUTCDate())}-${p(now.getUTCHours())}${p(now.getUTCMinutes())}${p(now.getUTCSeconds())}`;
-  return path.posix.join(BASE, day, `call-${Number(callId)}-${stamp}`);
+  return path.posix.join(BASE, ...company, day, `call-${Number(callId)}-${stamp}`);
 }
 
 /** What Asterisk runs when the recording ends: convert, and upload to S3 if a bucket is set. */

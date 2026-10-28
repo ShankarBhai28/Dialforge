@@ -31,6 +31,7 @@ const licence = require('./src/services/licence');
 // channel id and Stasis arguments, so its events are handled as that company.
 const tenancy = require('./src/tenancy');
 const { forEachTenant, runAsTenant } = require('./src/services/tenants');
+const names = require('./src/telephony/names');
 
 const DIALER_APP = 'dialforge-dialer';
 const TRUNK_ENDPOINT = process.env.TRUNK_ENDPOINT || 'dialforge-nxtra1';
@@ -449,7 +450,7 @@ const HANGUP_CAUSE_RESULT = {
 // else through the trunk - same rule as the backend's click-to-call.
 async function endpointFor(phone) {
   const [rows] = await pool.query('SELECT 1 FROM extensions WHERE name = ? AND deleted_at IS NULL LIMIT 1', [phone]);
-  return rows.length ? `PJSIP/${phone}` : `PJSIP/${phone}@${TRUNK_ENDPOINT}`;
+  return rows.length ? names.pjsip(phone) : `PJSIP/${phone}@${TRUNK_ENDPOINT}`;
 }
 
 // Take the best ready lead off the hopper (SKIP LOCKED so the agents'
@@ -596,7 +597,7 @@ async function handleAriEvent(event) {
         "UPDATE dial_attempts SET status = 'answered', answered_at = NOW(), channel_name = ?, call_id = ? WHERE id = ?",
         [event.channel.name, call.insertId, attemptId],
       );
-      await ari.setChannelVar(event.channel.id, 'QUEUENAME', a.asterisk_name);
+      await ari.setChannelVar(event.channel.id, 'QUEUENAME', names.queue(a.asterisk_name));
       await ari.setChannelVar(event.channel.id, 'DIALER_ATTEMPT_ID', String(attemptId));
       await ari.setChannelVar(event.channel.id, 'DIALER_MAXWAIT', String(a.abandon_wait_sec || 5));
       await ari.setChannelVar(event.channel.id, 'DIALER_AMD', a.amd_enabled ? '1' : '0');

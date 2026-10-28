@@ -25,6 +25,18 @@ for f in "$SRC"/asterisk/extensions-*.conf; do
     changed=1
   fi
 done
+# Added after the first installs: its #include goes in once (only this file -
+# the others were always in the installer's extensions.conf).
+for f in "$SRC"/asterisk/extensions-tenants.conf; do
+  [ -f "$f" ] || continue
+  inc="#include $(basename "$f")"
+  if ! sudo grep -qF "$inc" /etc/asterisk/extensions.conf; then
+    sudo cp -p /etc/asterisk/extensions.conf "$B/"
+    echo "$inc" | sudo tee -a /etc/asterisk/extensions.conf >/dev/null
+    echo "added $inc to extensions.conf"
+    changed=1
+  fi
+done
 if [ "$changed" = 1 ]; then
   sudo asterisk -rx 'dialplan reload' >/dev/null && echo "dialplan reloaded"
 fi

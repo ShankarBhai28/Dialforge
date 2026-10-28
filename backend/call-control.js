@@ -22,6 +22,7 @@
 
 const { lineRefusal } = require('./src/services/licence');
 const { TRUNK_ENDPOINT } = require('./src/config');
+const names = require('./src/telephony/names');
 
 const RING_TIMEOUT_SEC = 30;
 const ADOPT_TIMEOUT_MS = 6000;
@@ -177,7 +178,7 @@ async function resolveTarget(st, { targetType, target }, mode, me) {
     const agent = await agentByUserId(Number(target));
     if (!agent) throw httpError(404, 'that agent is not logged in');
     if (agent.ext === me) throw httpError(400, "you can't transfer to yourself");
-    if (!(await d.ari.isEndpointOnline(`PJSIP/${agent.ext}`)))
+    if (!(await d.ari.isEndpointOnline(names.pjsip(agent.ext))))
       throw httpError(409, `${agent.username}'s phone is not connected`);
     if (agent.busy) throw httpError(409, `${agent.username} is on another call`);
     return agentTarget(st, agent, agent.username);
@@ -196,7 +197,7 @@ async function resolveTarget(st, { targetType, target }, mode, me) {
     // Warm / conference need someone to talk to now: pick a free agent in it.
     const free = (await listAgents(me)).filter((a) => a.queueIds.includes(q.id) && !a.busy && a.status === 'available');
     for (const a of free) {
-      if (await d.ari.isEndpointOnline(`PJSIP/${a.ext}`)) return agentTarget(st, a, `${a.username} (${q.name})`);
+      if (await d.ari.isEndpointOnline(names.pjsip(a.ext))) return agentTarget(st, a, `${a.username} (${q.name})`);
     }
     throw httpError(409, `no free agent in ${q.name} right now - use a blind transfer to queue the customer`);
   }
@@ -220,7 +221,7 @@ function agentTarget(st, agent, label) {
   return {
     kind: 'agent',
     ext: agent.ext,
-    endpoint: `PJSIP/${agent.ext}`,
+    endpoint: names.pjsip(agent.ext),
     callerId: `"Transfer" <${st.customerNumber || ''}>`,
     label,
   };
@@ -540,7 +541,7 @@ async function blindToQueue(st, q) {
     'UPDATE calls SET from_extension = NULL, agent_channel = NULL, transfer_ext = NULL, campaign_id = ? WHERE id = ?',
     [q.campaign_id, st.callId],
   );
-  await d.ari.setChannelVar(st.customer, 'QUEUENAME', q.asterisk_name);
+  await d.ari.setChannelVar(st.customer, 'QUEUENAME', names.queue(q.asterisk_name));
   await d.ari.continueInDialplan(st.customer, { context: 'queue-dispatch', extension: 's', priority: 1 });
   await d.logEvent(st.callId, 'transferred_to_queue', { queue: q.name });
 }

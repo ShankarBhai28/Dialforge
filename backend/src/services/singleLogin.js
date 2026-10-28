@@ -23,6 +23,7 @@ const hub = require('../realtime/hub');
 const { openStatus, onActiveCall, takeOffline } = require('./agentLogout');
 const { endUserSessions } = require('./sessions');
 const { getLicence } = require('./licence');
+const names = require('../telephony/names');
 
 /**
  * Agents logged in right now (ids): an open status row (available / break /
@@ -61,7 +62,7 @@ async function activeElsewhere(user, deps = { pool, ari, hub }) {
   const open = await openStatus(user.id, deps);
   const ext = (open && open.extension_name) || user.extension_name || null;
   let lineUp = false;
-  if (open && ext) lineUp = (await deps.ari.endpointState(`PJSIP/${ext}`).catch(() => null)) === 'online';
+  if (open && ext) lineUp = (await deps.ari.endpointState(names.pjsip(ext)).catch(() => null)) === 'online';
   const screenOpen = deps.hub.isUserConnected(user.id);
   if (!screenOpen && !lineUp) return null;
   return {

@@ -11,6 +11,7 @@ const { getDispositions } = require('../services/dispositions');
 const { findAgentCall } = require('../services/calls');
 const { findOtherActiveHolder } = require('../services/extensionGuard');
 const { buildWebrtcConfig } = require('../services/webrtc');
+const names = require('../telephony/names');
 
 const router = express.Router();
 
@@ -252,7 +253,8 @@ router.get('/agent/extension-credentials', requireCaller, async (req, res) => {
   // stats, live-agents display) reads this session field.
   req.session.user.extensionName = rows[0].name;
   req.session.user.extensionId = rows[0].id;
-  res.json({ extension: rows[0].name, sipPassword: rows[0].sip_password });
+  // sipUser: the line's name in Asterisk (Cloud edition: <company>_<extension>).
+  res.json({ extension: rows[0].name, sipUser: names.endpoint(rows[0].name), sipPassword: rows[0].sip_password });
 });
 
 // --- Agent: how the browser softphone reaches Asterisk (see services/webrtc.js) ---

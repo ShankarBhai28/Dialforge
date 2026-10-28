@@ -7,6 +7,7 @@
 // locking it.
 const pool = require('../../db');
 const ari = require('../../ari');
+const names = require('../telephony/names');
 
 async function findOtherActiveHolder(extensionName, userId, deps = { pool, ari }) {
   const [rows] = await deps.pool.query(
@@ -16,7 +17,7 @@ async function findOtherActiveHolder(extensionName, userId, deps = { pool, ari }
     [extensionName, userId],
   );
   if (!rows[0]) return null;
-  return (await deps.ari.isEndpointOnline(`PJSIP/${extensionName}`)) ? rows[0].username : null;
+  return (await deps.ari.isEndpointOnline(names.pjsip(extensionName))) ? rows[0].username : null;
 }
 
 module.exports = { findOtherActiveHolder };

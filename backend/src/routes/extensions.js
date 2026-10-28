@@ -3,6 +3,7 @@ const { deleteExtension } = require('../services/softDelete');
 const { revokeUserSessions } = require('../services/sessions');
 const pool = require('../../db');
 const ari = require('../../ari');
+const names = require('../telephony/names');
 const { requireAdminSide, requirePermission } = require('../middleware/auth');
 const { generateSipPassword, parseExtensionUpdate } = require('../services/extensions');
 
@@ -36,7 +37,7 @@ router.get('/admin/extensions', requireAdminSide, async (req, res) => {
   };
   const visible = rows.filter(mine).map(({ user_ids, ...r }) => r);
   // Registered right now (a browser or phone is connected)? null = Asterisk didn't answer.
-  const states = await ari.endpointStates();
+  const states = names.ownEndpointStates(await ari.endpointStates());
   res.json(
     visible.map((r) => ({
       ...r,

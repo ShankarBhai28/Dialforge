@@ -11,6 +11,8 @@ const path = require('path');
 // time something tries to use a missing secret - a fresh deploy that
 // forgot to fill in .env should never limp along silently.
 const REQUIRED_ENV_VARS = ['DB_PASSWORD', 'ARI_PASS', 'AMI_PASS', 'SESSION_SECRET'];
+// Cloud edition: this server's own database is a company too, and its code is in every Asterisk name.
+if (process.env.MULTI_TENANT === '1') REQUIRED_ENV_VARS.push('HOME_TENANT_CODE');
 const missingEnvVars = REQUIRED_ENV_VARS.filter((name) => !process.env[name]);
 if (missingEnvVars.length > 0) {
   console.error(

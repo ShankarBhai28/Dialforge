@@ -432,8 +432,9 @@ exten => s,1,NoOp(Routing call to queue ${QUEUENAME})
 #include extensions-dialer.conf
 #include extensions-control.conf
 #include extensions-monitor.conf
+#include extensions-tenants.conf
 EOF
-for f in extensions-dialer.conf extensions-control.conf extensions-monitor.conf; do
+for f in extensions-dialer.conf extensions-control.conf extensions-monitor.conf extensions-tenants.conf; do
   install -o root -g asterisk -m 640 "$RELEASE/app/asterisk/$f" "/etc/asterisk/$f"
 done
 put /etc/asterisk/rtp.conf root:asterisk 640 <<EOF

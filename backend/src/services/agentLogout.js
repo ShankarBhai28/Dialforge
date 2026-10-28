@@ -10,6 +10,7 @@ const { closeOpenStatus, syncQueueMembership } = require('./agents');
 const { releasePreviewLocks } = require('./preview');
 const { audit } = require('./audit');
 const tenancy = require('../tenancy');
+const names = require('../telephony/names');
 const { forEachTenant } = require('./tenants');
 
 /** The agent's open status row ({ status, extension_name, started_at }) or null. */
@@ -61,7 +62,7 @@ async function sweepStaleAgents({ minutes, now = Date.now(), deps = { pool, ari 
   for (const k of offlineSince.keys()) if (k.startsWith(mine) && !open.has(k)) offlineSince.delete(k);
   const loggedOut = [];
   for (const r of rows) {
-    const state = r.extension_name ? await deps.ari.endpointState(`PJSIP/${r.extension_name}`) : 'offline';
+    const state = r.extension_name ? await deps.ari.endpointState(names.pjsip(r.extension_name)) : 'offline';
     if (state === null) continue; // couldn't ask Asterisk - decide next time
     const key = offlineKey(r.user_id);
     if (state === 'online') {

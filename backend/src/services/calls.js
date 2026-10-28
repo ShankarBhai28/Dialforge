@@ -1,6 +1,7 @@
 const pool = require('../../db');
 const { TRUNK_CALLER_ID, TRUNK_ENDPOINT } = require('../config');
 const hub = require('../realtime/hub');
+const names = require('../telephony/names');
 
 // Decides how to dial a destination: straight to one of our own test
 // extensions if it matches one, otherwise out through the live trunk -
@@ -9,7 +10,7 @@ const hub = require('../realtime/hub');
 async function resolveDestination(toNumber, campaignCallerId) {
   const [rows] = await pool.query('SELECT 1 FROM extensions WHERE name = ? AND deleted_at IS NULL LIMIT 1', [toNumber]);
   if (rows.length > 0) {
-    return { endpoint: `PJSIP/${toNumber}`, callerId: null };
+    return { endpoint: names.pjsip(toNumber), callerId: null };
   }
   return { endpoint: `PJSIP/${toNumber}@${TRUNK_ENDPOINT}`, callerId: campaignCallerId || TRUNK_CALLER_ID };
 }

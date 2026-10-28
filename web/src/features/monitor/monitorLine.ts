@@ -44,7 +44,9 @@ export async function connectMonitorLine() {
   if (state.status === 'connecting' || state.status === 'connected') return;
   set({ status: 'connecting', error: null });
   try {
-    const line = await get<WebrtcConfig & { extension: string; sipPassword: string }>('/admin/monitor/line');
+    const line = await get<WebrtcConfig & { extension: string; sipUser?: string; sipPassword: string }>(
+      '/admin/monitor/line',
+    );
     const { Softphone } = await import('@/features/agent/softphone/softphone');
     const createUA = uaFactory ?? (await import('@/features/agent/softphone/jssip')).createJsSipUA;
     const audio = typeof Audio === 'undefined' ? null : new Audio();
@@ -76,6 +78,7 @@ export async function connectMonitorLine() {
     };
     p.connect({
       extension: line.extension,
+      sipUser: line.sipUser,
       password: line.sipPassword,
       wsUrl: line.wsUrl,
       sipDomain: line.sipDomain,

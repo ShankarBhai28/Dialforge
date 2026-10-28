@@ -19,9 +19,9 @@ export const EXTENSION_KEY = 'dialforge_extension';
 async function registerLine(phone: Softphone) {
   const [config, creds] = await Promise.all([
     get<WebrtcConfig>('/agent/webrtc-config'),
-    get<{ extension: string; sipPassword: string }>('/agent/extension-credentials'),
+    get<{ extension: string; sipUser?: string; sipPassword: string }>('/agent/extension-credentials'),
   ]);
-  phone.connect({ extension: creds.extension, password: creds.sipPassword, ...config });
+  phone.connect({ extension: creds.extension, sipUser: creds.sipUser, password: creds.sipPassword, ...config });
 }
 
 function wasConnected() {

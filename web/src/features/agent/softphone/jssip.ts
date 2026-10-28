@@ -2,10 +2,10 @@
 import JsSIP from 'jssip';
 import type { UAFactory, UALike } from './softphone';
 
-export const createJsSipUA: UAFactory = ({ extension, password, wsUrl, sipDomain }) =>
+export const createJsSipUA: UAFactory = ({ extension, sipUser, password, wsUrl, sipDomain }) =>
   new JsSIP.UA({
     sockets: [new JsSIP.WebSocketInterface(wsUrl)],
-    uri: `sip:${extension}@${sipDomain}`,
+    uri: `sip:${sipUser || extension}@${sipDomain}`,
     password,
     register: true,
   }) as unknown as UALike;

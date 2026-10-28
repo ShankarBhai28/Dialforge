@@ -5,6 +5,7 @@
 //   npm run tenant -- list
 //   npm run tenant -- suspend --code acme        (resume: the same with resume)
 //   npm run tenant -- register-home --code main --name "Our company"
+//   npm run tenant -- realtime                   (Asterisk's view of all companies)
 //
 // create: a new database viztex_t_<code> with every migration, its Super
 // Admin (password from ADMIN_PASSWORD, or a random one printed once) and the
@@ -84,6 +85,57 @@ async function create(platform, argv, log, deps = { connect, migrate: migrate.ru
   }
 }
 
+// --- Asterisk's view of every company (part 3) ---
+// Asterisk reads extensions and queues over ODBC from ONE database. On a
+// multi-tenant install that is RT_DB_NAME (default viztex_rt): views that
+// put every active company's own realtime views together, each name with
+// its company in front (acme_1001, acme_sales) and every line in the
+// [tenant-internal] dialplan context. Rebuilt whenever the company list
+// changes (create, suspend, resume, register-home, or by hand: realtime).
+const RT_VIEWS = {
+  ps_endpoints: (p, db) =>
+    `SELECT CONCAT('${p}', id) AS id, CONCAT('${p}', aors) AS aors, CONCAT('${p}', auth) AS auth,
+            'tenant-internal' AS context, disallow, allow, webrtc FROM \`${db}\`.ps_endpoints`,
+  ps_auths: (p, db) =>
+    `SELECT CONCAT('${p}', id) AS id, auth_type, CONCAT('${p}', username) AS username, password
+     FROM \`${db}\`.ps_auths`,
+  ps_aors: (p, db) =>
+    `SELECT CONCAT('${p}', id) AS id, max_contacts, remove_existing, qualify_frequency FROM \`${db}\`.ps_aors`,
+  ast_queues: (p, db) =>
+    `SELECT CONCAT('${p}', name) AS name, strategy, timeout, retry, timeoutrestart, announce_frequency, ringinuse
+     FROM \`${db}\`.ast_queues`,
+};
+const SAFE_DB = /^[A-Za-z0-9_]+$/;
+
+/** The statements that (re)build the realtime database for these companies. Pure, for tests. */
+function realtimeSql(companies, rtDb) {
+  if (!SAFE_DB.test(rtDb)) throw new Error(`RT_DB_NAME "${rtDb}": letters, digits and _ only`);
+  const usable = companies.filter((c) => CODE_RE.test(c.code) && SAFE_DB.test(c.db_name));
+  if (!usable.length) return [];
+  return [
+    `CREATE DATABASE IF NOT EXISTS \`${rtDb}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
+    ...Object.entries(RT_VIEWS).map(
+      ([view, select]) =>
+        `CREATE OR REPLACE SQL SECURITY DEFINER VIEW \`${rtDb}\`.\`${view}\` AS\n` +
+        usable.map((c) => select(`${c.code}_`, c.db_name)).join('\nUNION ALL\n'),
+    ),
+  ];
+}
+
+async function realtime(platform, log, deps = { connect }, env = process.env) {
+  const rtDb = env.RT_DB_NAME || 'viztex_rt';
+  const [companies] = await platform.query("SELECT code, db_name FROM tenants WHERE status = 'active' ORDER BY id");
+  const statements = realtimeSql(companies, rtDb);
+  if (!statements.length) return log('no active companies - realtime views left as they are');
+  const server = await deps.connect(null);
+  try {
+    for (const sql of statements) await server.query(sql);
+  } finally {
+    await server.end();
+  }
+  log(`Asterisk realtime (${rtDb}): ${companies.length} active compan${companies.length === 1 ? 'y' : 'ies'}`);
+}
+
 async function list(platform, log) {
   const [rows] = await platform.query('SELECT code, name, db_name, status, created_at FROM tenants ORDER BY id');
   if (!rows.length) return log('no companies yet');
@@ -121,13 +173,19 @@ async function main(argv, log = console.log) {
     else if (cmd === 'suspend') await setStatus(platform, argv, 'suspended', log);
     else if (cmd === 'resume') await setStatus(platform, argv, 'active', log);
     else if (cmd === 'register-home') await registerHome(platform, argv, log);
-    else throw new Error('commands: create, list, suspend, resume, register-home (see the top of src/tools/tenant.js)');
+    else if (cmd === 'realtime') await realtime(platform, log);
+    else
+      throw new Error(
+        'commands: create, list, suspend, resume, register-home, realtime (see the top of src/tools/tenant.js)',
+      );
+    // The company list changed: Asterisk's view follows.
+    if (['create', 'suspend', 'resume', 'register-home'].includes(cmd)) await realtime(platform, log);
   } finally {
     await platform.end();
   }
 }
 
-module.exports = { create, list, setStatus, registerHome };
+module.exports = { create, list, setStatus, registerHome, realtime, realtimeSql };
 
 if (require.main === module) {
   main(process.argv.slice(2)).catch((err) => {

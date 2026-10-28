@@ -56,6 +56,8 @@ export interface UALike {
 }
 export type ConnectOptions = {
   extension: string;
+  /** The line's name in Asterisk when it differs from the extension (Cloud edition: acme_1001). */
+  sipUser?: string;
   password: string;
   wsUrl: string;
   sipDomain: string;

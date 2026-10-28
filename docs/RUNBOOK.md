@@ -1688,3 +1688,21 @@ feed) and both dialer-engine loops run once per active company on its own databa
 become `dfd-<company>-<attempt>` on a multi-tenant install (unchanged otherwise) so call events
 return to their company. Asterisk names are still shared (part 3), so real calls stay home-only.
 Details: plans/TENANTS_PLAN.md → Part 2.
+
+## Cloud edition, tenant part 3: Asterisk names per company (2026-10-28)
+
+Same branch `tenant-part1`. On a multi-tenant install Asterisk sees `<company>_<extension>` and
+`<company>_<queue>` (`src/telephony/names.js`); single installs are unchanged. Browser phones
+register under that name (`sipUser`), recordings go to a folder per company, and lines dial only
+inside their company (`[tenant-internal]`, asterisk/extensions-tenants.conf). Details:
+plans/TENANTS_PLAN.md → Part 3.
+
+Switching a **test** server's telephony to multi-tenant (after the RUNBOOK part 1 steps):
+1. DB server: `CREATE DATABASE viztex_rt` and give the app user `ALL` on `viztex_rt.*`, Asterisk's
+   read-only user `SELECT` on `viztex_rt.*` (`'asterisk_rt'@'<telephony-ip or localhost>'`).
+2. App server: `npm run tenant -- realtime` (also runs after every create / suspend / resume).
+3. Telephony server: back up `/etc/odbc.ini`, set `DATABASE = viztex_rt` in `[dialforge-asterisk]`,
+   `sudo asterisk -rx "module reload res_odbc.so"`; deploy the release (update-telephony.sh adds
+   `#include extensions-tenants.conf`).
+4. Check: `sudo asterisk -rx "pjsip show endpoints"` lists `main_1001` ...; agents reconnect their
+   line once.

@@ -25,7 +25,7 @@ switched on only by `MULTI_TENANT=1`.
 |---|---|---|
 | 1 | Tenant registry, company-code login, every web request on its customer's database | done (branch tenant-part1) |
 | 2 | Background jobs per customer (stale agents, auto-dispositions, presence, dialer feed); the dialer engine loops over customers | done (same branch) |
-| 3 | Telephony per customer: extension / queue / context prefixes in Asterisk, recordings per customer | |
+| 3 | Telephony per customer: extension / queue / context prefixes in Asterisk, recordings per customer | done (same branch) |
 | 4 | Calls back to the right customer: ARI / AMI events routed by prefix | |
 | 5 | Per-customer limits: seats, channels (Asterisk `GROUP()`), caller IDs; minutes metered | |
 | 6 | Platform admin: create / suspend customers, plans, usage, wallet; multi-tenant load test | |
@@ -90,3 +90,29 @@ backend's queue events (part 4).
 **Still home-only after part 2:** Asterisk itself - extension, queue and context names are shared
 by all companies until part 3, and the backend's AMI / ARI call events until part 4. So a second
 company can be created and used for everything except real calls.
+
+## Part 3 in detail
+
+Asterisk has one list of endpoints and one of queues, so on a multi-tenant install every company's
+names get the company in front: extension `1001` of Acme is the endpoint `acme_1001`, its queue
+`sales` is `acme_sales` (company codes never contain `_`). The tables keep the plain names;
+`src/telephony/names.js` makes the Asterisk names (`pjsip`, `endpoint`, `queue`) and reads them
+back (`ownName`, `ownEndpointStates`) everywhere the app talks to Asterisk: queue membership,
+line checks, click-to-call, transfers, the dialer, monitoring, Live Agents / Extensions line
+state. A single install keeps the plain names (no prefix at all). On a multi-tenant install the
+home company is prefixed too (`main_1001`), so everyone's phones reconnect once after switching.
+
+- **Browser phones** register as `<company>_<extension>`: `/agent/extension-credentials` and
+  `/admin/monitor/line` add `sipUser`; the screens still show the plain extension.
+- **Realtime:** Asterisk reads one database, `RT_DB_NAME` (default `viztex_rt`), whose four views
+  join every **active** company's own views with the names prefixed and every line in the context
+  `[tenant-internal]`. `npm run tenant -- realtime` rebuilds them; `create`, `suspend`, `resume`
+  and `register-home` do it by themselves. A suspended company's phones can't register.
+- **Dialplan:** `[tenant-internal]` (asterisk/extensions-tenants.conf): an extension dialed from a
+  line rings that company's extension only. `update-telephony.sh` adds its `#include` once.
+  Monitoring (`[df-monitor]`) accepts the prefixed names.
+- **Recordings:** `.../monitor/dialforge/<company>/YYYY/MM/DD/...`, also in S3.
+
+**Still home-only after part 3:** calls coming in from the trunk (which company owns a DID) and
+Asterisk's queue / channel events for other companies reach the backend as the home company
+(part 4); one shared trunk and caller ID (part 5).
