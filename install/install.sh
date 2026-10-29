@@ -263,10 +263,16 @@ DB_BIND=127.0.0.1 APP_DBHOST=localhost RT_DBHOST=localhost
 # MySQL only for this server. Not in mysql.conf.d/mysqld.cnf: odbc-mariadb
 # pulls in mariadb-common, which points /etc/mysql/my.cnf at mariadb.cnf,
 # and that never reads mysql.conf.d - conf.d is read by both.
+# MySQL's cache: its 128 MB default makes reports over a few months of calls
+# read the disk for minutes (load test, 2.4 M calls). Half the RAM on a
+# database server, a quarter when Asterisk and the app share it.
+POOL_MB=$((MEM_MB / 4)); [ "$ROLE" = db ] && POOL_MB=$((MEM_MB / 2))
+[ "$POOL_MB" -ge 128 ] || POOL_MB=128
 put /etc/mysql/conf.d/viztex.cnf root:root 644 <<EOF
 [mysqld]
 bind-address = $DB_BIND
 mysqlx-bind-address = 127.0.0.1
+innodb_buffer_pool_size = ${POOL_MB}M
 EOF
 # Without mariadb-common (a database-only server) my.cnf reads conf.d and then
 # mysql.conf.d, whose mysqld.cnf says 127.0.0.1 - so the same setting also
@@ -278,6 +284,9 @@ systemctl enable mysql >> "$LOG" 2>&1
 if [ "$(mysql -N -e "SELECT @@bind_address" 2>/dev/null)" != "$DB_BIND" ]; then
   systemctl restart mysql >> "$LOG" 2>&1 || die "MySQL restart"
 fi
+# Also live (a re-run on a running server doesn't restart MySQL).
+mysql -e "SET GLOBAL innodb_buffer_pool_size = $((POOL_MB * 1048576))" >> "$LOG" 2>&1 ||
+  warn "couldn't resize MySQL's cache now - it takes ${POOL_MB} MB after the next MySQL restart"
 BOUND=$(mysql -N -e "SELECT @@bind_address" 2>/dev/null)
 [ "$BOUND" = "$DB_BIND" ] ||
   die "MySQL listens on '${BOUND:-?}', not $DB_BIND - another file in /etc/mysql sets bind-address (grep -rn bind-address /etc/mysql)"

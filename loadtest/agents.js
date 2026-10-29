@@ -92,7 +92,21 @@ async function goAvailable(bot) {
 }
 
 async function start(bot) {
-  const login = await request(bot, 'POST', '/auth/login', { username: bot.username, password: opt.password });
+  // takeOver: a bot restarted for the next step replaces its own earlier session
+  // (like "Log in here"). Still on a call from that session: wait for it to end.
+  let login;
+  for (let tries = 0; ; tries++) {
+    login = await request(bot, 'POST', '/auth/login', {
+      username: bot.username,
+      password: opt.password,
+      takeOver: true,
+    });
+    if (login.status === 409 && login.body && login.body.code === 'on_call_elsewhere' && tries < 30) {
+      await sleep(10000);
+      continue;
+    }
+    break;
+  }
   if (login.status !== 200) return fail(bot, 'login', login);
   stats.loggedIn++;
   const queues = await request(bot, 'GET', '/queues');
@@ -165,8 +179,10 @@ async function stop() {
   console.log(`${opt.count} agents (loadagent${opt.from}...), campaign "${opt.campaign}", ${opt.ramp} logins/s`);
   setInterval(report, 30000);
   process.on('SIGINT', () => void stop());
+  // --ramp logins started per second; a bot that has to wait (its old call)
+  // doesn't hold up the ones after it.
   for (let i = 0; i < bots.length; i += opt.ramp) {
-    await Promise.all(bots.slice(i, i + opt.ramp).map(start));
+    for (const bot of bots.slice(i, i + opt.ramp)) void start(bot);
     await sleep(1000);
   }
   report();
