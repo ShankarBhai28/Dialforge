@@ -170,12 +170,15 @@ export function Pager({
   page,
   pageSize,
   total,
+  more = false,
   onPage,
   className,
 }: {
   page: number;
   pageSize: number;
   total: number;
+  /** total is a lower bound (the server stopped counting): "of 10,050+". */
+  more?: boolean;
   onPage: (page: number) => void;
   className?: string;
 }) {
@@ -188,6 +191,7 @@ export function Pager({
     <nav aria-label="Pages" className={cn('mt-3 flex items-center justify-between gap-3 text-sm', className)}>
       <span className="text-muted-foreground tabular-nums">
         {n(first)}–{n(last)} of {n(total)}
+        {more && '+'}
       </span>
       <div className="flex gap-2">
         <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
@@ -201,5 +205,5 @@ export function Pager({
   );
 }
 
-/** Server-paged list response. */
-export type Paged<T> = { rows: T[]; total: number; page: number; pageSize: number };
+/** Server-paged list response (more: total is only a lower bound - see Pager). */
+export type Paged<T> = { rows: T[]; total: number; page: number; pageSize: number; more?: boolean };

@@ -1,7 +1,7 @@
 // Shared paging helpers used by every admin list.
 const assert = require('node:assert');
 const { test } = require('node:test');
-const { parsePaging, pageResult, whereClause, likeTerm } = require('../src/services/paging');
+const { parsePaging, pageResult, cappedCount, COUNT_CAP, whereClause, likeTerm } = require('../src/services/paging');
 
 test('paging: defaults, caps and bad input', () => {
   assert.deepStrictEqual(parsePaging({}), { page: 1, pageSize: 50, offset: 0 });
@@ -28,4 +28,25 @@ test('where clause: only the filters that are set, params in order', () => {
 
 test('LIKE search treats % and _ literally', () => {
   assert.strictEqual(likeTerm('50%_off'), String.raw`%50\%\_off%`);
+});
+
+test('capped count: stops COUNT_CAP rows past the page, says when there are more', async () => {
+  const seen = [];
+  const db = (n) => ({
+    query: async (sql, params) => {
+      seen.push([sql, params]);
+      return [[{ n: Math.min(n, params[params.length - 1]) }]];
+    },
+  });
+  assert.deepStrictEqual(await cappedCount(db(120), 'FROM calls ca WHERE a = ?', ['x'], { offset: 0 }), {
+    total: 120,
+    more: false,
+  });
+  assert.strictEqual(seen[0][0], 'SELECT COUNT(*) AS n FROM (SELECT 1 FROM calls ca WHERE a = ? LIMIT ?) t');
+  assert.deepStrictEqual(seen[0][1], ['x', COUNT_CAP + 1]);
+  // 2.4 M calls, page 3 of 50: counts to 100 + COUNT_CAP and flags the rest
+  assert.deepStrictEqual(await cappedCount(db(2400000), 'FROM calls ca', [], { offset: 100 }), {
+    total: 100 + COUNT_CAP,
+    more: true,
+  });
 });

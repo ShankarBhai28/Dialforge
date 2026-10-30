@@ -200,7 +200,13 @@ export function CallLogPage() {
                 })}
               </TableBody>
             </Table>
-            <Pager page={page} pageSize={calls.data.pageSize} total={calls.data.total} onPage={setPage} />
+            <Pager
+              page={page}
+              pageSize={calls.data.pageSize}
+              total={calls.data.total}
+              more={calls.data.more}
+              onPage={setPage}
+            />
           </>
         )}
       </CardContent>

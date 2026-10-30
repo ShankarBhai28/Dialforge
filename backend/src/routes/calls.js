@@ -11,7 +11,7 @@ const { lineRefusal } = require('../services/licence');
 const { previewLockOwner } = require('../services/preview');
 const { activeCalls } = require('../state');
 
-const { likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
+const { cappedCount, likeTerm, pageResult, parsePaging, whereClause } = require('../services/paging');
 
 const { campaignInScope, scopeCondition } = require('../services/access');
 const { audit } = require('../services/audit');
@@ -118,10 +118,10 @@ router.get('/admin/calls', requirePermission('calls', 'view'), async (req, res) 
      ORDER BY ca.id DESC LIMIT ? OFFSET ?`,
     [...where.params, paging.pageSize, paging.offset],
   );
-  const [[count]] = await pool.query(`SELECT COUNT(*) AS n FROM calls ca ${where.sql}`, where.params);
+  const count = await cappedCount(pool, `FROM calls ca ${where.sql}`, where.params, paging);
   // The file path stays on the server; the screen only needs to know there is one.
   const out = rows.map(({ recording_path: rec, ...r }) => ({ ...r, has_recording: !!rec }));
-  res.json(pageResult(out, count.n, paging));
+  res.json({ ...pageResult(out, count.total, paging), more: count.more });
 });
 
 // --- A call's recording (play in the browser, or ?download=1) ---

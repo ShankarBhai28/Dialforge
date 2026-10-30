@@ -21,13 +21,19 @@ async function agentPerformance({ db, range, q, scope }) {
   const ids = agents.map((a) => a.id);
   if (!ids.length) return emptyPerformance();
 
+  // Status rows overlapping the range: still open, or ended after it began -
+  // two halves so each reads index asl_open (ended_at, user_id). As one
+  // "COALESCE(ended_at, NOW()) > ?" it read every row ever, even for today.
   const clip = 'TIMESTAMPDIFF(SECOND, GREATEST(started_at, ?), LEAST(COALESCE(ended_at, NOW()), ?))';
   const [status] = await db.query(
     `SELECT user_id, status, SUM(${clip}) AS secs
-     FROM agent_status_log
-     WHERE user_id IN (?) AND started_at < ? AND COALESCE(ended_at, NOW()) > ?
+     FROM (SELECT user_id, status, started_at, ended_at FROM agent_status_log
+           WHERE ended_at IS NULL AND user_id IN (?) AND started_at < ?
+           UNION ALL
+           SELECT user_id, status, started_at, ended_at FROM agent_status_log
+           WHERE ended_at > ? AND user_id IN (?) AND started_at < ?) s
      GROUP BY user_id, status`,
-    [range.start, range.end, ids, range.end, range.start],
+    [range.start, range.end, ids, range.end, range.start, ids, range.end],
   );
   const [calls] = await db.query(
     `SELECT ca.agent_user_id AS user_id, SUM(ca.direction = 'outbound') AS outbound, SUM(ca.direction = 'inbound') AS inbound,

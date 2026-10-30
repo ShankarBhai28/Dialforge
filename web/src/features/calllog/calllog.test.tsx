@@ -109,6 +109,13 @@ describe('Call Log', () => {
     expect(calls.some((c) => c.key === 'GET /admin/calls?page=2&pageSize=50')).toBe(true);
   });
 
+  it('says "+" when the server stopped counting (millions of calls)', async () => {
+    fakeApi({ [FIRST]: { body: { ...paged([call({ id: 1 })], 10000).body, more: true } } });
+    renderPage(<CallLogPage />);
+    expect(await screen.findByText('1–50 of 10,000+')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
+  });
+
   it("shows the server's error", async () => {
     fakeApi({ [FIRST]: { status: 401, body: { error: 'not logged in' } } });
     renderPage(<CallLogPage />);

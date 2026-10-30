@@ -218,14 +218,13 @@ async function listPenetration({ db, q, scope }) {
   const [rows] = await db.query(
     `SELECT li.id, li.name, ${CAMPAIGN_NAME} AS campaign, li.is_active,
             COUNT(l.id) AS leads, SUM(l.attempts = 0) AS never, SUM(l.attempts > 0) AS called,
-            SUM(ct.lead_id IS NOT NULL) AS contacted, SUM(l.is_final = 1) AS final,
+            SUM(EXISTS (SELECT 1 FROM calls x WHERE x.lead_id = l.id AND x.agent_connect_time IS NOT NULL)) AS contacted,
+            SUM(l.is_final = 1) AS final,
             SUM(l.is_final = 0 AND l.next_call_at IS NOT NULL) AS waiting,
             SUM(l.status = 'do_not_call') AS dnc, AVG(l.attempts) AS avg_attempts
      FROM lists li
      JOIN campaigns c ON c.id = li.campaign_id
      LEFT JOIN leads l ON l.list_id = li.id AND l.deleted_at IS NULL
-     LEFT JOIN (SELECT DISTINCT lead_id FROM calls WHERE agent_connect_time IS NOT NULL AND lead_id IS NOT NULL) ct
-       ON ct.lead_id = l.id
      WHERE li.deleted_at IS NULL${campaignId ? ' AND li.campaign_id = ?' : ''}${s.sql}
      GROUP BY li.id, li.name, campaign, li.is_active
      ORDER BY li.id DESC`,

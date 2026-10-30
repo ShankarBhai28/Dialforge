@@ -59,10 +59,18 @@ async function liveAgents(scope, deps = { pool }, now = new Date()) {
      FROM calls WHERE agent_user_id IN (?) AND start_time >= ? GROUP BY agent_user_id`,
     [ids, since],
   );
+  // Wrap-up rows that reach into today: still open, or ended since midnight -
+  // two halves so each reads index asl_open (ended_at, user_id). As one
+  // "COALESCE(ended_at, NOW()) >= ?" it read every agent's whole history.
   const [wrap] = await db.query(
     `SELECT user_id AS id, SUM(GREATEST(TIMESTAMPDIFF(SECOND, GREATEST(started_at, ?), COALESCE(ended_at, NOW())), 0)) AS acw
-     FROM agent_status_log WHERE status = 'acw' AND user_id IN (?) AND COALESCE(ended_at, NOW()) >= ? GROUP BY user_id`,
-    [since, ids, since],
+     FROM (SELECT user_id, started_at, ended_at FROM agent_status_log
+           WHERE ended_at IS NULL AND status = 'acw' AND user_id IN (?)
+           UNION ALL
+           SELECT user_id, started_at, ended_at FROM agent_status_log
+           WHERE ended_at >= ? AND status = 'acw' AND user_id IN (?)) w
+     GROUP BY user_id`,
+    [since, ids, since, ids],
   );
   const todayBy = new Map(today.map((r) => [r.id, r]));
   const wrapBy = new Map(wrap.map((r) => [r.id, Number(r.acw || 0)]));
