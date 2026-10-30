@@ -404,6 +404,33 @@ export function CampaignSettingsForm({ campaign, onDone }: { campaign: Campaign 
                 </Select>
               </Field>
             )}
+            <NumberField
+              id="c-break-warn"
+              label="Break: amber after (min)"
+              hint="Live Agents colours the break time amber after this long."
+              value={form.breakWarnMin}
+              onChange={(v) => set('breakWarnMin', v)}
+              min={1}
+              max={240}
+            />
+            <NumberField
+              id="c-break-alert"
+              label="Break: red after (min)"
+              hint="… and red after this long."
+              value={form.breakAlertMin}
+              onChange={(v) => set('breakAlertMin', v)}
+              min={1}
+              max={480}
+            />
+            <NumberField
+              id="c-acw-warn"
+              label="Wrap-up: red after (sec over)"
+              hint="Red when wrap-up runs this many seconds past the wrap-up time above."
+              value={form.acwWarnSec}
+              onChange={(v) => set('acwWarnSec', v)}
+              min={10}
+              max={3600}
+            />
             <Field id="c-from" label="Calling from">
               <Input
                 id="c-from"

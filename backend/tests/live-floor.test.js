@@ -40,6 +40,9 @@ test('each agent: campaign, team, line, login, current call (lead, kind, timer s
           queue_name: 'Sales Q',
           campaign_name: 'Home Loans',
           wrapup_sec: 10,
+          break_warn_min: 5,
+          break_alert_min: 20,
+          acw_warn_sec: 30,
           teams: 'Team A',
           line: 'registered',
           login_at: NOW,
@@ -69,6 +72,7 @@ test('each agent: campaign, team, line, login, current call (lead, kind, timer s
   assert.strictEqual(a.campaign_name, 'Home Loans');
   assert.strictEqual(a.teams, 'Team A');
   assert.strictEqual(a.line, 'registered');
+  assert.deepStrictEqual(a.warn, { breakWarnMin: 5, breakAlertMin: 20, acwWarnSec: 30 });
   assert.deepStrictEqual(a.call, {
     id: 70,
     number: '9003220102',
@@ -81,6 +85,7 @@ test('each agent: campaign, team, line, login, current call (lead, kind, timer s
   assert.strictEqual(a.active_call_number, '9003220102'); // kept for the Dashboard
   assert.deepStrictEqual(a.today, { calls: 12, connected: 6, talkSeconds: 900, avgHandleSeconds: 170 }); // (900+120)/6
   assert.strictEqual(b.line, null); // not logged in: no line shown
+  assert.strictEqual(b.warn, null); // no campaign: the screen's defaults
   assert.deepStrictEqual(b.today, { calls: 0, connected: 0, talkSeconds: 0, avgHandleSeconds: null });
   // "today" starts at local midnight (IST) = 18:30 UTC the day before
   const todayQuery = d.seen.find(([s]) => s.includes('GROUP BY agent_user_id'));

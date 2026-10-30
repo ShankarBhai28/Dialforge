@@ -25,6 +25,8 @@ export type LiveAgent = {
   campaign_name?: string | null;
   /** The campaign's wrap-up seconds (to flag a long wrap-up). */
   wrapup_sec?: number | null;
+  /** The campaign's warning times; null/absent = defaults (break 10 / 15 min, wrap-up + 60 s). */
+  warn?: { breakWarnMin: number; breakAlertMin: number; acwWarnSec: number } | null;
   teams?: string | null;
   /** registered | unregistered | unknown; null = not logged in. */
   line?: string | null;

@@ -45,8 +45,7 @@ async function liveAgents(scope, deps = { pool }, now = new Date()) {
     `SELECT u.id, u.username, e.name AS extension_name,
        asl.status, asl.reason, asl.started_at,
        q.name AS queue_name,
-       (SELECT c.name FROM campaigns c WHERE c.queue_id = q.id AND c.deleted_at IS NULL ORDER BY c.id LIMIT 1) AS campaign_name,
-       (SELECT c.wrapup_sec FROM campaigns c WHERE c.queue_id = q.id AND c.deleted_at IS NULL ORDER BY c.id LIMIT 1) AS wrapup_sec,
+       cmp.name AS campaign_name, cmp.wrapup_sec, cmp.break_warn_min, cmp.break_alert_min, cmp.acw_warn_sec,
        (SELECT GROUP_CONCAT(t.name ORDER BY t.name SEPARATOR ', ') FROM team_members tm JOIN teams t ON t.id = tm.team_id
          WHERE tm.user_id = u.id) AS teams,
        (SELECT GROUP_CONCAT(xq.name ORDER BY xq.name SEPARATOR ', ') FROM agent_extra_queues x JOIN queues xq ON xq.id = x.queue_id
@@ -56,6 +55,8 @@ async function liveAgents(scope, deps = { pool }, now = new Date()) {
      LEFT JOIN extensions e ON u.extension_id = e.id
      LEFT JOIN agent_status_log asl ON asl.user_id = u.id AND asl.ended_at IS NULL
      LEFT JOIN queues q ON q.id = asl.queue_id
+     LEFT JOIN campaigns cmp ON cmp.id =
+       (SELECT c.id FROM campaigns c WHERE c.queue_id = q.id AND c.deleted_at IS NULL ORDER BY c.id LIMIT 1)
      LEFT JOIN live_agents la ON la.user_id = u.id
      WHERE u.role = 'agent'${cond ? ` AND ${cond}` : ''}
      ORDER BY u.username`,
@@ -111,6 +112,15 @@ async function liveAgents(scope, deps = { pool }, now = new Date()) {
       extra_queues: a.extra_queues || null,
       campaign_name: a.campaign_name || null,
       wrapup_sec: a.wrapup_sec == null ? null : Number(a.wrapup_sec),
+      /** The campaign's warning times (null = no campaign: the screen's defaults). */
+      warn:
+        a.break_warn_min == null
+          ? null
+          : {
+              breakWarnMin: Number(a.break_warn_min),
+              breakAlertMin: Number(a.break_alert_min),
+              acwWarnSec: Number(a.acw_warn_sec),
+            },
       teams: a.teams || null,
       /** registered | unregistered | unknown (Asterisk not asked) | null = not logged in */
       line: a.status || a.login_at ? a.line || 'unknown' : null,

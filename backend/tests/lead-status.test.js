@@ -108,3 +108,15 @@ test('campaign setting: 0-168 whole hours, 0 (off) by default', () => {
   assert.match(parseCampaignSettings({ numberGapHours: 200 }).error, /0-168 hours/);
   assert.match(parseCampaignSettings({ numberGapHours: 1.5 }).error, /0-168 hours/);
 });
+
+test('campaign setting: Live Agents warnings - break amber 10 / red 15 min, wrap-up + 60 s by default', () => {
+  const { settings } = parseCampaignSettings({});
+  assert.strictEqual(settings.break_warn_min, 10);
+  assert.strictEqual(settings.break_alert_min, 15);
+  assert.strictEqual(settings.acw_warn_sec, 60);
+  const s = parseCampaignSettings({ breakWarnMin: 5, breakAlertMin: 5, acwWarnSec: 10 }).settings;
+  assert.deepStrictEqual([s.break_warn_min, s.break_alert_min, s.acw_warn_sec], [5, 5, 10]);
+  assert.match(parseCampaignSettings({ breakWarnMin: 0 }).error, /break warning/);
+  assert.match(parseCampaignSettings({ breakWarnMin: 20, breakAlertMin: 15 }).error, /from the break warning/);
+  assert.match(parseCampaignSettings({ acwWarnSec: 2.5 }).error, /wrap-up warning/);
+});

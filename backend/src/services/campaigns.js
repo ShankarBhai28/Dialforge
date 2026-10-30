@@ -30,6 +30,10 @@ function parseCampaignSettings(body) {
     auto_dispo_code: body.autoDispoCode ? String(body.autoDispoCode).trim().slice(0, 30) : null,
     // Recording is on unless switched off.
     record_calls: body.recordCalls === false ? 0 : 1,
+    // Live Agents colours: break amber / red after N minutes; wrap-up red N seconds past wrapup_sec.
+    break_warn_min: num(body.breakWarnMin, 10),
+    break_alert_min: num(body.breakAlertMin, 15),
+    acw_warn_sec: num(body.acwWarnSec, 60),
   };
   const inRange = (v, lo, hi) => Number.isFinite(v) && v >= lo && v <= hi;
   if (!DIAL_MODES.includes(s.dial_mode)) return { error: 'unknown dial mode' };
@@ -52,6 +56,12 @@ function parseCampaignSettings(body) {
   if (s.auto_dispo_sec > 0 && !s.auto_dispo_code) return { error: 'pick the disposition to save automatically' };
   if (!inRange(s.number_gap_hours, 0, 168) || !Number.isInteger(s.number_gap_hours))
     return { error: 'spacing across campaigns must be 0-168 hours (0 = off)' };
+  if (!inRange(s.break_warn_min, 1, 240) || !Number.isInteger(s.break_warn_min))
+    return { error: 'break warning must be a whole number of minutes, 1-240' };
+  if (!inRange(s.break_alert_min, s.break_warn_min, 480) || !Number.isInteger(s.break_alert_min))
+    return { error: 'break alert must be a whole number of minutes, from the break warning up to 480' };
+  if (!inRange(s.acw_warn_sec, 10, 3600) || !Number.isInteger(s.acw_warn_sec))
+    return { error: 'wrap-up warning must be 10-3600 seconds' };
   const timeRe = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
   if (!timeRe.test(s.call_window_start) || !timeRe.test(s.call_window_end))
     return { error: 'calling window times must be HH:MM' };

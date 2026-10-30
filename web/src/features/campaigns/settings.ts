@@ -43,6 +43,10 @@ export type CampaignForm = {
   /** Auto disposition: seconds ('' or 0 = off) and which disposition. */
   autoDispoSec: string;
   autoDispoCode: string;
+  /** Live Agents: break amber / red after N minutes, wrap-up red N seconds past the wrap-up time. */
+  breakWarnMin: string;
+  breakAlertMin: string;
+  acwWarnSec: string;
   callWindowStart: string;
   callWindowEnd: string;
   timezone: string;
@@ -61,6 +65,9 @@ const DEFAULTS = {
   abandonWaitSec: 5,
   numberGapHours: 0,
   autoDispoSec: 0,
+  breakWarnMin: 10,
+  breakAlertMin: 15,
+  acwWarnSec: 60,
 };
 
 export function campaignForm(c: Campaign | null): CampaignForm {
@@ -89,6 +96,9 @@ export function campaignForm(c: Campaign | null): CampaignForm {
     autoDispoSec: str(c?.auto_dispo_sec, DEFAULTS.autoDispoSec),
     // "No Disposition" is offered first: not final, redialled later.
     autoDispoCode: c?.auto_dispo_code ?? 'no_dispo',
+    breakWarnMin: str(c?.break_warn_min, DEFAULTS.breakWarnMin),
+    breakAlertMin: str(c?.break_alert_min, DEFAULTS.breakAlertMin),
+    acwWarnSec: str(c?.acw_warn_sec, DEFAULTS.acwWarnSec),
     callWindowStart: (c?.call_window_start ?? '09:00').slice(0, 5),
     callWindowEnd: (c?.call_window_end ?? '21:00').slice(0, 5),
     timezone: c?.timezone ?? 'Asia/Kolkata',
@@ -122,6 +132,9 @@ export function campaignBody(f: CampaignForm): CampaignBody {
     numberGapHours: num(f.numberGapHours, DEFAULTS.numberGapHours),
     autoDispoSec: num(f.autoDispoSec, DEFAULTS.autoDispoSec),
     autoDispoCode: num(f.autoDispoSec, DEFAULTS.autoDispoSec) > 0 ? f.autoDispoCode || null : null,
+    breakWarnMin: num(f.breakWarnMin, DEFAULTS.breakWarnMin),
+    breakAlertMin: num(f.breakAlertMin, DEFAULTS.breakAlertMin),
+    acwWarnSec: num(f.acwWarnSec, DEFAULTS.acwWarnSec),
     callWindowStart: f.callWindowStart,
     callWindowEnd: f.callWindowEnd,
     timezone: f.timezone.trim() || 'Asia/Kolkata',
@@ -157,6 +170,10 @@ export function checkCampaign(b: CampaignBody): string | null {
   if (!whole(b.numberGapHours, 0, 168)) return 'spacing across campaigns must be 0-168 hours (0 = off)';
   if (!whole(b.autoDispoSec, 0, 600)) return 'auto disposition must be 0-600 seconds (0 = off)';
   if (b.autoDispoSec > 0 && !b.autoDispoCode) return 'pick the disposition to save automatically';
+  if (!whole(b.breakWarnMin, 1, 240)) return 'break warning must be a whole number of minutes, 1-240';
+  if (!whole(b.breakAlertMin, b.breakWarnMin, 480))
+    return 'break alert must be a whole number of minutes, from the break warning up to 480';
+  if (!whole(b.acwWarnSec, 10, 3600)) return 'wrap-up warning must be 10-3600 seconds';
   const timeRe = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
   if (!timeRe.test(b.callWindowStart) || !timeRe.test(b.callWindowEnd)) return 'calling window times must be HH:MM';
   if (b.callWindowStart >= b.callWindowEnd) return 'calling window start must be before its end';

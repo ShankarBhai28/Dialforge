@@ -39,6 +39,9 @@ export type Campaign = {
   number_gap_hours?: number;
   auto_dispo_sec?: number;
   auto_dispo_code?: string | null;
+  break_warn_min?: number;
+  break_alert_min?: number;
+  acw_warn_sec?: number;
   call_window_start: string;
   call_window_end: string;
   timezone: string;
@@ -69,6 +72,9 @@ export type CampaignBody = {
   numberGapHours: number;
   autoDispoSec: number;
   autoDispoCode: string | null;
+  breakWarnMin: number;
+  breakAlertMin: number;
+  acwWarnSec: number;
   callWindowStart: string;
   callWindowEnd: string;
   timezone: string;

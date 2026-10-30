@@ -256,6 +256,7 @@ describe('Live agents - wallboard', () => {
             extension_name: '1004',
             status: 'break',
             reason: 'Tea',
+            warn: { breakWarnMin: 15, breakAlertMin: 30, acwWarnSec: 60 },
             started_at: started,
             queue_name: 'Sales Q',
             campaign_name: 'Home Loans',
@@ -288,7 +289,7 @@ describe('Live agents - wallboard', () => {
     expect(within(row).queryByText(/12 calls/)).not.toBeInTheDocument();
     const onBreak = screen.getByText('agent05').closest('tr')!;
     expect(within(onBreak).getByRole('img', { name: 'phone line not connected' })).toBeInTheDocument();
-    // a break over 15 minutes is flagged
+    // 20 minutes on break: amber with this campaign's limits (amber 15, red 30)
     expect(within(onBreak).getByText(/^20m/).className).toMatch(/text-status-break/);
     const floor = await screen.findByLabelText('Floor');
     expect(within(floor).getByText('3 waiting')).toBeInTheDocument();
@@ -380,5 +381,39 @@ describe('Live agents - wallboard', () => {
     expect(await typeOf('agent5')).toHaveTextContent('Callback');
     expect(await typeOf('agent6')).toHaveTextContent('Transfer');
     expect(await typeOf('agent7')).toHaveTextContent('Predictive');
+  });
+
+  it('break and wrap-up colours: defaults amber at 10 min, red at 15; wrap-up red 60 s past its time', async () => {
+    const ago = (min: number) => new Date(Date.now() - min * 60 * 1000).toISOString();
+    const agent = (id: number, status: string, startedMin: number) => ({
+      id,
+      username: 'agent' + id,
+      extension_name: String(1000 + id),
+      status,
+      reason: null,
+      started_at: ago(startedMin),
+      queue_name: null,
+      active_call_number: null,
+      wrapup_sec: 30,
+    });
+    fakeApi({
+      'GET /admin/live-agents': {
+        body: [
+          agent(1, 'break', 5),
+          agent(2, 'break', 12),
+          agent(3, 'break', 16),
+          agent(4, 'acw', 1),
+          agent(5, 'acw', 2),
+        ],
+      },
+    });
+    renderPage(<LiveAgentsPage />);
+    const timer = async (name: string) =>
+      within((await screen.findByText(name)).closest('tr')!).getByTitle(/In this status since/);
+    expect((await timer('agent1')).className).toMatch(/text-muted-foreground/);
+    expect((await timer('agent2')).className).toMatch(/text-status-break/);
+    expect((await timer('agent3')).className).toMatch(/text-destructive/);
+    expect((await timer('agent4')).className).toMatch(/text-muted-foreground/); // 60 s < 30 + 60
+    expect((await timer('agent5')).className).toMatch(/text-destructive/); // 120 s > 30 + 60
   });
 });

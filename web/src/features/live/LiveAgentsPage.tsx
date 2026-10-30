@@ -106,7 +106,8 @@ function Counts({
   );
 }
 
-const BREAK_WARN_SEC = 15 * 60;
+/** An agent without a campaign: the campaign defaults (migration 0022). */
+const DEFAULT_WARN = { breakWarnMin: 10, breakAlertMin: 15, acwWarnSec: 60 };
 
 type CallType = NonNullable<NonNullable<LiveAgent['call']>['type']>;
 const CALL_TYPE: Record<CallType, { label: string; className: string }> = {
@@ -170,11 +171,15 @@ function ColumnsMenu({ shown, onToggle }: { shown: Set<OptionalColumn>; onToggle
   );
 }
 
-/** Time in status, amber/red when a break or wrap-up runs long. */
+/** Time in status: amber / red when a break or wrap-up runs past the campaign's warning times. */
 function statusTone(a: LiveAgent, seconds: number | null) {
   if (seconds === null || a.active_call_number) return '';
-  if (a.status === 'break' && seconds > BREAK_WARN_SEC) return 'font-semibold text-status-break';
-  if (a.status === 'acw' && seconds > Math.max(60, (a.wrapup_sec ?? 0) + 60)) return 'font-semibold text-destructive';
+  const w = a.warn ?? DEFAULT_WARN;
+  if (a.status === 'break') {
+    if (seconds > w.breakAlertMin * 60) return 'font-semibold text-destructive';
+    if (seconds > w.breakWarnMin * 60) return 'font-semibold text-status-break';
+  }
+  if (a.status === 'acw' && seconds > (a.wrapup_sec ?? 0) + w.acwWarnSec) return 'font-semibold text-destructive';
   return 'text-muted-foreground';
 }
 
