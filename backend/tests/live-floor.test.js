@@ -11,7 +11,7 @@ function fake(rel, exports) {
 }
 fake('db.js', { query: async () => [[]] });
 
-const { liveAgents, floorSummary } = require('../src/services/liveFloor');
+const { liveAgents, floorSummary, callType } = require('../src/services/liveFloor');
 
 const NOW = new Date('2026-10-17T06:00:00Z'); // 11:30 IST
 function db(tables) {
@@ -74,6 +74,7 @@ test('each agent: campaign, team, line, login, current call (lead, kind, timer s
     number: '9003220102',
     leadName: 'Ravi',
     kind: 'dialer',
+    type: 'predictive',
     startedAt: NOW,
     connectedAt: NOW,
   });
@@ -104,4 +105,30 @@ test('summary: inbound callers in the queue + answered dialer calls waiting, the
     d.seen.every(([sql]) => sql.includes('campaign_id IN (?)')),
     'every count stays within the role scope',
   );
+});
+
+test('call type: transfer, inbound, callback, dialer mode, preview, manual', () => {
+  const agent = { extension_name: '1001' };
+  const t = (call) => callType(call, agent);
+  // Transferred to 1001 by 1002 - whatever the call was before.
+  assert.strictEqual(t({ direction: 'inbound', from_extension: '1002', transfer_ext: '1001' }), 'transfer');
+  // 1001 transferred its own call away: still its call, not a transfer to it.
+  assert.strictEqual(t({ direction: 'outbound', from_extension: '1001', transfer_ext: '1001' }), 'manual');
+  assert.strictEqual(t({ direction: 'inbound', from_extension: null }), 'inbound');
+  assert.strictEqual(
+    t({ direction: 'outbound', from_extension: '1001', callback_due: 1, dial_attempt_id: 5 }),
+    'callback',
+  );
+  assert.strictEqual(
+    t({ direction: 'outbound', dial_attempt_id: 5, dial_mode: 'predictive', callback_due: 0 }),
+    'predictive',
+  );
+  assert.strictEqual(t({ direction: 'outbound', dial_attempt_id: 5, dial_mode: 'progressive' }), 'progressive');
+  assert.strictEqual(t({ direction: 'outbound', from_extension: '1001', dial_mode: 'preview', lead_id: 9 }), 'preview');
+  // Dialpad number in a preview campaign (no lead) is a manual call.
+  assert.strictEqual(
+    t({ direction: 'outbound', from_extension: '1001', dial_mode: 'preview', lead_id: null }),
+    'manual',
+  );
+  assert.strictEqual(t({ direction: 'outbound', from_extension: '1001', dial_mode: 'manual', lead_id: 9 }), 'manual');
 });

@@ -1,5 +1,5 @@
 // Live Agents (supervisor wallboard): each agent with their campaign, team,
-// line, login time, current call (lead, direction, timer) and today's
+// line, login time, current call (lead, direction, call type, timer) and today's
 // numbers; plus the floor summary - callers waiting for an agent now, and
 // today's totals. "Today" = the report time zone's day (REPORT_TIMEZONE).
 const pool = require('../../db');
@@ -10,6 +10,22 @@ const TALK = `IF(agent_connect_time IS NULL, 0,
   GREATEST(TIMESTAMPDIFF(SECOND, agent_connect_time, COALESCE(end_time, NOW())), 0))`;
 
 const todayStart = (now = new Date()) => sqlUtc(localMidnight(localToday(now)));
+
+/**
+ * What kind of call the agent is on, for the Live Agents "Call type" column:
+ * transfer (handed to this agent by someone else), inbound, callback (the lead
+ * had a callback due when the call started), the dialer's mode (predictive /
+ * progressive), preview (agent dialled a lead of a preview campaign), else manual.
+ */
+function callType(call, a) {
+  if (call.transfer_ext && call.transfer_ext === a.extension_name && call.from_extension !== a.extension_name)
+    return 'transfer';
+  if (call.direction === 'inbound') return 'inbound';
+  if (Number(call.callback_due)) return 'callback';
+  if (call.dial_attempt_id) return call.dial_mode === 'progressive' ? 'progressive' : 'predictive';
+  if (call.dial_mode === 'preview' && call.lead_id) return 'preview';
+  return 'manual';
+}
 
 /** The open call an agent is on (their extension, or a transfer to it), or null. */
 function callFor(calls, a) {
@@ -49,8 +65,12 @@ async function liveAgents(scope, deps = { pool }, now = new Date()) {
   const ids = agents.map((a) => a.id);
   const [calls] = await db.query(
     `SELECT ca.id, ca.from_extension, ca.transfer_ext, ca.agent_user_id, ca.to_number, ca.direction, ca.dial_attempt_id,
-            ca.start_time, ca.agent_connect_time, l.name AS lead_name
+            ca.start_time, ca.agent_connect_time, ca.lead_id, l.name AS lead_name, cmp.dial_mode,
+            EXISTS (SELECT 1 FROM callbacks cb WHERE cb.lead_id = ca.lead_id AND cb.status = 'pending'
+                      AND cb.callback_at <= ca.start_time + INTERVAL 30 MINUTE) AS callback_due
      FROM calls ca LEFT JOIN leads l ON l.id = ca.lead_id
+     LEFT JOIN dial_attempts da ON da.id = ca.dial_attempt_id
+     LEFT JOIN campaigns cmp ON cmp.id = COALESCE(ca.campaign_id, da.campaign_id)
      WHERE ca.end_time IS NULL AND ca.start_time > NOW() - INTERVAL 3 HOUR ORDER BY ca.id DESC`,
   );
   const since = todayStart(now);
@@ -103,6 +123,7 @@ async function liveAgents(scope, deps = { pool }, now = new Date()) {
             number: call.to_number,
             leadName: call.lead_name || null,
             kind: call.direction === 'inbound' ? 'inbound' : call.dial_attempt_id ? 'dialer' : 'outbound',
+            type: callType(call, a),
             startedAt: call.start_time,
             connectedAt: call.agent_connect_time || null,
           }
@@ -150,4 +171,4 @@ async function floorSummary(scope, deps = { pool }, now = new Date()) {
   };
 }
 
-module.exports = { liveAgents, floorSummary, callFor, todayStart };
+module.exports = { liveAgents, floorSummary, callFor, callType, todayStart };

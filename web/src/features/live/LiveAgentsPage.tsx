@@ -1,16 +1,29 @@
 // Live Agents: every agent's current status, queue and active call.
 // Same data as the Dashboard's live table (GET /admin/live-agents), so the
 // query, its cache key and the status badge are reused from features/dashboard.
+// - One line per agent; Columns adds queue, team, extra queues, today, login
+//   (remembered per browser). Call type: inbound / manual / dialer mode /
+//   callback / transfer (backend services/liveFloor.js callType).
 // - Filters: status (default: logged-in agents only), name / extension, queue.
 // - Call monitoring (listen / whisper / barge) through the supervisor's
-//   monitoring line - see features/monitor.
+//   monitoring line - see features/monitor - and Force logout sit in each
+//   row's ⋯ menu.
 // - Force logout takes a stuck or absent agent offline (not during a call).
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { LogOut, RefreshCw, Search, Users } from 'lucide-react';
+import { Columns3, Ellipsis, LogOut, RefreshCw, Search, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/form-controls';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -94,7 +107,68 @@ function Counts({
 }
 
 const BREAK_WARN_SEC = 15 * 60;
-const KIND_LABEL = { inbound: 'Inbound', outbound: 'Outbound', dialer: 'Dialer' } as const;
+
+type CallType = NonNullable<NonNullable<LiveAgent['call']>['type']>;
+const CALL_TYPE: Record<CallType, { label: string; className: string }> = {
+  inbound: { label: 'Inbound', className: 'bg-sky-500/12 text-sky-800' },
+  manual: { label: 'Manual', className: 'bg-muted text-slate-700' },
+  predictive: { label: 'Predictive', className: 'bg-accent text-accent-foreground' },
+  progressive: { label: 'Progressive', className: 'bg-accent text-accent-foreground' },
+  preview: { label: 'Preview', className: 'bg-accent text-accent-foreground' },
+  callback: { label: 'Callback', className: 'bg-status-break/15 text-amber-800' },
+  transfer: { label: 'Transfer', className: 'bg-violet-500/10 text-violet-800' },
+};
+/** Older servers send only `kind`. */
+function callType(call: NonNullable<LiveAgent['call']>): CallType {
+  return call.type ?? (call.kind === 'inbound' ? 'inbound' : call.kind === 'dialer' ? 'predictive' : 'manual');
+}
+
+/** Columns a supervisor can add with the Columns button; the rest are always shown. */
+type OptionalColumn = 'queue' | 'teams' | 'extra' | 'today' | 'login';
+const OPTIONAL_COLUMNS: { key: OptionalColumn; label: string }[] = [
+  { key: 'queue', label: 'Queue' },
+  { key: 'teams', label: 'Team' },
+  { key: 'extra', label: 'Extra queues' },
+  { key: 'today', label: 'Today (calls, talk, AHT)' },
+  { key: 'login', label: 'Logged in at' },
+];
+const COLUMNS_KEY = 'dialforge.live.columns';
+function savedColumns(): Set<OptionalColumn> {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(COLUMNS_KEY) ?? '[]');
+    return new Set(Array.isArray(v) ? OPTIONAL_COLUMNS.map((c) => c.key).filter((k) => v.includes(k)) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function ColumnsMenu({ shown, onToggle }: { shown: Set<OptionalColumn>; onToggle: (c: OptionalColumn) => void }) {
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline">
+          <Columns3 /> Columns{shown.size > 0 && ` (+${shown.size})`}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuLabel>
+          Always shown: agent, status and time, extension, campaign, call type, current call
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {OPTIONAL_COLUMNS.map((c) => (
+          <DropdownMenuCheckboxItem
+            key={c.key}
+            checked={shown.has(c.key)}
+            onCheckedChange={() => onToggle(c.key)}
+            onSelect={(e) => e.preventDefault()} // stays open to tick several
+          >
+            {c.label}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 /** Time in status, amber/red when a break or wrap-up runs long. */
 function statusTone(a: LiveAgent, seconds: number | null) {
@@ -140,13 +214,83 @@ function FloorBar() {
   );
 }
 
+/** The ⋯ menu of one row: Listen / Whisper / Barge on a call, Force logout. Nothing to do = no button. */
+function RowActions({
+  agent: a,
+  monitorModes,
+  lineReady,
+  onMonitor,
+  onLogout,
+}: {
+  agent: LiveAgent;
+  monitorModes: MonitorMode[];
+  lineReady: boolean;
+  onMonitor: (a: LiveAgent, mode: MonitorMode) => void;
+  onLogout?: (a: LiveAgent) => void;
+}) {
+  const monitor = !!a.active_call_number && monitorModes.length > 0;
+  const logout = !!onLogout && !!a.status;
+  if (!monitor && !logout) return null;
+  return (
+    // Not modal: Force logout opens a dialog right after the menu closes.
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label={`Actions for ${a.username}`}>
+          <Ellipsis />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {monitor && !lineReady && (
+          <DropdownMenuLabel className="max-w-56 font-normal">
+            Connect your monitoring line first (above) to listen in.
+          </DropdownMenuLabel>
+        )}
+        {monitor &&
+          monitorModes.map((m) => {
+            const Icon = MODE_INFO[m].icon;
+            return (
+              <DropdownMenuItem
+                key={m}
+                disabled={!lineReady}
+                title={MODE_INFO[m].hint}
+                onSelect={() => onMonitor(a, m)}
+              >
+                <Icon /> {MODE_INFO[m].label}
+              </DropdownMenuItem>
+            );
+          })}
+        {monitor && logout && <DropdownMenuSeparator />}
+        {logout && (
+          <DropdownMenuItem className="text-destructive" onSelect={() => onLogout!(a)}>
+            <LogOut /> Force logout
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+const LINE_DOT: Record<string, [string, string, string]> = {
+  registered: ['bg-status-available', 'phone line connected', 'Phone line connected'],
+  unregistered: [
+    'bg-destructive',
+    'phone line not connected',
+    'Phone line NOT connected - calls cannot reach this agent',
+  ],
+  unknown: ['bg-muted-foreground/40', 'phone line unknown', 'Line state unknown'],
+};
+
+const DASH = <span className="text-muted-foreground">—</span>;
+
 function AgentsTable({
   agents,
+  columns,
   monitorModes,
   onMonitor,
   onLogout,
 }: {
   agents: LiveAgent[];
+  columns: Set<OptionalColumn>;
   monitorModes: MonitorMode[];
   onMonitor: (a: LiveAgent, mode: MonitorMode) => void;
   onLogout?: (a: LiveAgent) => void;
@@ -156,20 +300,28 @@ function AgentsTable({
   const actions = monitorModes.length > 0 || !!onLogout;
   const lineReady = line.status === 'connected' && !line.session;
   const ago = (iso: string | null | undefined) => (iso ? Math.max(0, (now - new Date(iso).getTime()) / 1000) : null);
+  const col = (c: OptionalColumn) => columns.has(c);
   return (
     <div className="overflow-x-auto">
       <Table>
         <TableHeader>
-          <TableRow>
+          <TableRow className="whitespace-nowrap">
             <TableHead>Agent</TableHead>
-            <TableHead>Extension</TableHead>
-            <TableHead>Status</TableHead>
+            {col('teams') && <TableHead>Team</TableHead>}
+            <TableHead>Status · time</TableHead>
+            <TableHead>Ext</TableHead>
             <TableHead>Campaign</TableHead>
-            <TableHead>Queue</TableHead>
+            {col('queue') && <TableHead>Queue</TableHead>}
+            {col('extra') && <TableHead>Extra queues</TableHead>}
+            <TableHead>Call type</TableHead>
             <TableHead>Current call</TableHead>
-            <TableHead>Today</TableHead>
-            <TableHead>Logged in</TableHead>
-            {actions && <TableHead className="text-right">Actions</TableHead>}
+            {col('today') && <TableHead>Today</TableHead>}
+            {col('login') && <TableHead>Logged in</TableHead>}
+            {actions && (
+              <TableHead className="text-right">
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -178,138 +330,97 @@ function AgentsTable({
             const monitoredHere = line.session?.agentId === a.id;
             const call = a.call ?? null;
             const callSecs = call ? ago(call.connectedAt ?? call.startedAt) : null;
-            const login = ago(a.login_at);
+            // On a call the timer is the call's; Available = idle time; else time in the status.
+            const timer =
+              call && callSecs !== null
+                ? `${call.connectedAt ? 'talk' : 'ringing'} ${formatSeconds(callSecs)}`
+                : since !== null
+                  ? `${a.status === 'available' && !a.active_call_number ? 'idle ' : ''}${formatSeconds(since)}`
+                  : null;
+            const dot = a.line ? (LINE_DOT[a.line] ?? LINE_DOT.unknown) : null;
+            const type = call ? CALL_TYPE[callType(call)] : null;
             return (
-              <TableRow key={a.id} className={monitoredHere ? 'bg-status-available/5' : undefined}>
+              <TableRow key={a.id} className={cn('whitespace-nowrap', monitoredHere && 'bg-status-available/5')}>
+                <TableCell className="font-semibold">{a.username}</TableCell>
+                {col('teams') && <TableCell className="text-muted-foreground">{a.teams ?? DASH}</TableCell>}
                 <TableCell>
-                  <div className="font-semibold">{a.username}</div>
-                  {a.teams && <div className="text-xs text-muted-foreground">{a.teams}</div>}
+                  <span className="inline-flex items-center gap-2">
+                    {/* A status the badge doesn't know is shown as-is, like the classic page. */}
+                    {a.status && !KNOWN.has(a.status) && !a.active_call_number ? (
+                      <StatusPill tone="grey">{a.status}</StatusPill>
+                    ) : (
+                      <AgentStatusBadge status={a.status} onCall={!!a.active_call_number} />
+                    )}
+                    {a.reason && <span className="text-xs text-muted-foreground">{a.reason}</span>}
+                    {timer && (
+                      <span
+                        className={cn('text-sm tabular-nums', statusTone(a, since))}
+                        title={a.started_at ? `In this status since ${formatTime(a.started_at)}` : undefined}
+                      >
+                        {timer}
+                      </span>
+                    )}
+                  </span>
                 </TableCell>
-                <TableCell className="whitespace-nowrap">
-                  {a.extension_name ?? '—'}
-                  {a.line && (
+                <TableCell className="tabular-nums">
+                  {a.extension_name ?? DASH}
+                  {dot && (
                     <span
-                      className={cn(
-                        'ml-2 inline-block size-2 rounded-full align-middle',
-                        a.line === 'registered'
-                          ? 'bg-status-available'
-                          : a.line === 'unregistered'
-                            ? 'bg-destructive'
-                            : 'bg-muted-foreground/40',
-                      )}
+                      className={cn('ml-2 inline-block size-2 rounded-full align-middle', dot[0])}
                       role="img"
-                      aria-label={
-                        a.line === 'registered'
-                          ? 'phone line connected'
-                          : a.line === 'unregistered'
-                            ? 'phone line not connected'
-                            : 'phone line unknown'
-                      }
-                      title={
-                        a.line === 'registered'
-                          ? 'Phone line connected'
-                          : a.line === 'unregistered'
-                            ? 'Phone line NOT connected - calls cannot reach this agent'
-                            : 'Line state unknown'
-                      }
+                      aria-label={dot[1]}
+                      title={dot[2]}
                     />
                   )}
                 </TableCell>
-                <TableCell className="whitespace-nowrap">
-                  {/* A status the badge doesn't know is shown as-is, like the classic page. */}
-                  {a.status && !KNOWN.has(a.status) && !a.active_call_number ? (
-                    <StatusPill tone="grey">{a.status}</StatusPill>
-                  ) : (
-                    <AgentStatusBadge status={a.status} onCall={!!a.active_call_number} />
-                  )}
-                  {a.reason && <span className="ml-2 text-xs text-muted-foreground">{a.reason}</span>}
-                  {a.status && since !== null && (
-                    <div className={cn('text-xs tabular-nums', statusTone(a, since))}>
-                      {formatTime(a.started_at!)} · {formatSeconds(since)}
-                    </div>
-                  )}
-                </TableCell>
-                <TableCell>{a.campaign_name ?? '—'}</TableCell>
+                <TableCell>{a.campaign_name ?? DASH}</TableCell>
+                {col('queue') && <TableCell>{a.queue_name ?? DASH}</TableCell>}
+                {col('extra') && <TableCell className="text-muted-foreground">{a.extra_queues ?? DASH}</TableCell>}
                 <TableCell>
-                  {a.queue_name ?? '—'}
-                  {a.extra_queues && <div className="text-xs text-muted-foreground">+ {a.extra_queues}</div>}
+                  {type ? (
+                    <span className={cn('inline-block rounded-md px-2 py-0.5 text-xs font-semibold', type.className)}>
+                      {type.label}
+                    </span>
+                  ) : (
+                    DASH
+                  )}
                 </TableCell>
-                <TableCell className="whitespace-nowrap">
+                <TableCell className="max-w-64 truncate">
                   {call ? (
                     <>
-                      <div className="tabular-nums">
-                        {call.number}
-                        {call.leadName && <span className="ml-1 text-muted-foreground">· {call.leadName}</span>}
-                      </div>
-                      <div className="text-xs text-muted-foreground tabular-nums">
-                        {KIND_LABEL[call.kind]}
-                        {callSecs !== null && (
-                          <>
-                            {' '}
-                            · {call.connectedAt ? 'talking' : 'ringing'} {formatSeconds(callSecs)}
-                          </>
-                        )}
-                      </div>
+                      <span className="tabular-nums">{call.number}</span>
+                      {call.leadName && <span className="text-muted-foreground"> · {call.leadName}</span>}
                     </>
                   ) : (
-                    (a.active_call_number ?? '—')
+                    (a.active_call_number ?? DASH)
                   )}
                 </TableCell>
-                <TableCell className="whitespace-nowrap text-sm tabular-nums">
-                  {a.today ? (
-                    <>
-                      <div>
-                        {a.today.calls} calls · {a.today.connected} conn.
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        talk {formatSeconds(a.today.talkSeconds)}
+                {col('today') && (
+                  <TableCell className="text-sm tabular-nums">
+                    {a.today ? (
+                      <>
+                        {a.today.calls} calls · talk {formatSeconds(a.today.talkSeconds)}
                         {a.today.avgHandleSeconds !== null && <> · AHT {formatSeconds(a.today.avgHandleSeconds)}</>}
-                      </div>
-                    </>
-                  ) : (
-                    '—'
-                  )}
-                </TableCell>
-                <TableCell className="whitespace-nowrap text-sm tabular-nums">
-                  {a.login_at && login !== null ? (
-                    <>
-                      <div>{formatTime(a.login_at)}</div>
-                      <div className="text-xs text-muted-foreground">{formatSeconds(login)}</div>
-                    </>
-                  ) : (
-                    '—'
-                  )}
-                </TableCell>
-                {actions && (
-                  <TableCell className="text-right whitespace-nowrap">
-                    {a.active_call_number &&
-                      monitorModes.map((m) => {
-                        const Icon = MODE_INFO[m].icon;
-                        return (
-                          <Button
-                            key={m}
-                            variant="ghost"
-                            size="sm"
-                            disabled={!lineReady}
-                            title={lineReady ? MODE_INFO[m].hint : 'Connect your monitoring line first (above)'}
-                            onClick={() => onMonitor(a, m)}
-                            aria-label={`${MODE_INFO[m].label} ${a.username}`}
-                          >
-                            <Icon /> {MODE_INFO[m].label}
-                          </Button>
-                        );
-                      })}
-                    {onLogout && a.status && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive"
-                        onClick={() => onLogout(a)}
-                        aria-label={`Force logout ${a.username}`}
-                      >
-                        <LogOut /> Force logout
-                      </Button>
+                      </>
+                    ) : (
+                      DASH
                     )}
+                  </TableCell>
+                )}
+                {col('login') && (
+                  <TableCell className="text-sm text-muted-foreground tabular-nums">
+                    {a.login_at ? formatTime(a.login_at) : DASH}
+                  </TableCell>
+                )}
+                {actions && (
+                  <TableCell className="py-1 text-right">
+                    <RowActions
+                      agent={a}
+                      monitorModes={monitorModes}
+                      lineReady={lineReady}
+                      onMonitor={onMonitor}
+                      onLogout={onLogout}
+                    />
                   </TableCell>
                 )}
               </TableRow>
@@ -341,6 +452,18 @@ export function LiveAgentsPage() {
     setStatusState(f);
     try {
       localStorage.setItem(FILTER_KEY, f);
+    } catch {
+      /* private mode */
+    }
+  };
+  const [columns, setColumns] = useState<Set<OptionalColumn>>(savedColumns);
+  const toggleColumn = (c: OptionalColumn) => {
+    const next = new Set(columns);
+    if (next.has(c)) next.delete(c);
+    else next.add(c);
+    setColumns(next);
+    try {
+      localStorage.setItem(COLUMNS_KEY, JSON.stringify([...next]));
     } catch {
       /* private mode */
     }
@@ -387,11 +510,14 @@ export function LiveAgentsPage() {
       <CardContent className="pt-5">
         <SectionHeader
           title="Live agents"
-          description="Who is doing what right now: status, campaign, current call and today's numbers. Updates live."
+          description="Who is doing what right now. Time = how long in the current status: idle when Available, talk time on a call. Updates live."
           actions={
-            <Button variant="outline" onClick={() => agents.refetch()} disabled={agents.isFetching}>
-              <RefreshCw className={agents.isFetching ? 'animate-spin' : undefined} /> Refresh
-            </Button>
+            <>
+              <ColumnsMenu shown={columns} onToggle={toggleColumn} />
+              <Button variant="outline" onClick={() => agents.refetch()} disabled={agents.isFetching}>
+                <RefreshCw className={agents.isFetching ? 'animate-spin' : undefined} /> Refresh
+              </Button>
+            </>
           }
         />
         <MonitorBar />
@@ -454,6 +580,7 @@ export function LiveAgentsPage() {
             ) : (
               <AgentsTable
                 agents={shown}
+                columns={columns}
                 monitorModes={monitorModes}
                 onMonitor={onMonitor}
                 onLogout={canLogout ? setLoggingOut : undefined}

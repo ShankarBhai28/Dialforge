@@ -34,6 +34,8 @@ export type LiveAgent = {
     number: string;
     leadName: string | null;
     kind: 'inbound' | 'outbound' | 'dialer';
+    /** What the Live Agents "Call type" column shows (absent from servers before 30 Oct 2026). */
+    type?: 'inbound' | 'manual' | 'predictive' | 'progressive' | 'preview' | 'callback' | 'transfer';
     startedAt: string;
     connectedAt: string | null;
   } | null;
