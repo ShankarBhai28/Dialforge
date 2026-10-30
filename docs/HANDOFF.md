@@ -21,6 +21,7 @@ files it points to. No passwords or keys are in this file - they never go into c
 |---|---|
 | `main` | GitHub at a15ffa0; the local `main` has 3 more commits (load-test guide/kit) - also contained in `loadtest-fixes` |
 | `loadtest-fixes` | **current work**, on GitHub up to 185592b; one local commit more (08f644c, local PC script). Not merged into main yet - merge after the fixes are measured on the test servers |
+| `live-screens-ui` | on GitHub (2d855f8), built on `loadtest-fixes`: Live calls tabs, Live Agents one line + Call type + Columns, campaign warning times (migration 0022), agent pill timer. Merge into main together with loadtest-fixes after the load-test measurement |
 | `tenant-part1` | Cloud (multi-company) edition parts 1-3, on GitHub, not merged |
 
 `loadtest-fixes` has: indexes (migration 0021), MySQL cache size in the installer, faster Live
