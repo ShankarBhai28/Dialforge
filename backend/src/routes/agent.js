@@ -201,7 +201,9 @@ router.get('/agent/stats', requireCaller, async (req, res) => {
   // disagrees with reality (shows "Available" while actually paused in
   // the real queue). Piggybacking on the stats poll keeps it in sync.
   const [currentRows] = await pool.query(
-    `SELECT asl.status, asl.reason, q.name AS queue_name
+    `SELECT asl.status, asl.reason, asl.started_at, q.name AS queue_name,
+       (SELECT c.break_alert_min FROM campaigns c WHERE c.queue_id = q.id AND c.deleted_at IS NULL
+        ORDER BY c.id LIMIT 1) AS break_alert_min
      FROM agent_status_log asl
      LEFT JOIN queues q ON q.id = asl.queue_id
      WHERE asl.user_id = ? AND asl.ended_at IS NULL
@@ -219,6 +221,9 @@ router.get('/agent/stats', requireCaller, async (req, res) => {
     currentStatus: current ? current.status : null,
     currentReason: current ? current.reason : null,
     currentQueueName: current ? current.queue_name : null,
+    // The status pill's timer, and when a break turns it red (the campaign's limit).
+    currentSince: current ? current.started_at : null,
+    breakAlertMin: current && current.break_alert_min != null ? Number(current.break_alert_min) : 15,
     // Blended: the extra queues of this shift.
     extraQueues: (
       await pool.query(

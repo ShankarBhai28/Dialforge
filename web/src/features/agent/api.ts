@@ -17,6 +17,10 @@ export type AgentStats = {
   currentStatus: AgentStatus | 'offline' | null;
   currentReason: string | null;
   currentQueueName: string | null;
+  /** When the current status began (the pill's timer); absent from servers before 30 Oct 2026. */
+  currentSince?: string | null;
+  /** Minutes on break before the pill turns red (the campaign's setting). */
+  breakAlertMin?: number;
   /** The campaign's other queues the agent takes calls from this shift. */
   extraQueues?: { id: number; name: string }[];
 };

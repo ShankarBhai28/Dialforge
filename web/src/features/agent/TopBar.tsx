@@ -28,6 +28,26 @@ export const hms = (total: number) =>
     .map((n) => String(n).padStart(2, '0'))
     .join(':');
 
+/** 134 -> "02:14", 3725 -> "1:02:05". */
+const clock = (total: number) => {
+  const s = Math.max(0, Math.floor(total));
+  const mmss = `${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  return s >= 3600 ? `${Math.floor(s / 3600)}:${mmss}` : mmss;
+};
+
+/**
+ * The pill's timer: talk time on a call, idle time when Available, time on a
+ * break. Wrap-up shows its own countdown instead.
+ */
+function pillTimer(stats: AgentStats | undefined, talkStartedAt: number | null, now: number) {
+  if (talkStartedAt) return `talk ${clock((now - talkStartedAt) / 1000)}`;
+  if (!stats?.currentSince || stats.currentStatus === 'acw') return null;
+  const secs = (now - new Date(stats.currentSince).getTime()) / 1000;
+  if (stats.currentStatus === 'available') return `idle ${clock(secs)}`;
+  if (stats.currentStatus === 'break') return clock(secs);
+  return null;
+}
+
 /** autoAvailableAt: when wrap-up ends by itself (null = wrap-up off: the agent chooses Available). */
 function pillFor(stats: AgentStats | undefined, autoAvailableAt: number | null, now: number) {
   switch (stats?.currentStatus) {
@@ -39,8 +59,12 @@ function pillFor(stats: AgentStats | undefined, autoAvailableAt: number | null, 
         cls: 'bg-status-available',
         pulse: true,
       };
-    case 'break':
-      return { text: stats.currentReason || 'Break', cls: 'bg-status-break', pulse: false };
+    case 'break': {
+      // Red once the break runs past the campaign's limit.
+      const over =
+        !!stats.currentSince && now - new Date(stats.currentSince).getTime() > (stats.breakAlertMin ?? 15) * 60 * 1000;
+      return { text: stats.currentReason || 'Break', cls: over ? 'bg-destructive' : 'bg-status-break', pulse: false };
+    }
     case 'acw':
       return {
         text: autoAvailableAt
@@ -60,6 +84,7 @@ function StatusMenu({ stats }: { stats: AgentStats | undefined }) {
   const ref = useRef<HTMLDivElement>(null);
   const now = useNow(500);
   const pill = pillFor(stats, state.autoAvailableAt, now);
+  const timer = pillTimer(stats, state.call?.talkStartedAt ?? null, now);
   // In wrap-up or on a break, with no call or disposition pending: one click back to Available.
   const canBeReady =
     (stats?.currentStatus === 'acw' || stats?.currentStatus === 'break') && !state.outcomeFor && !state.call;
@@ -105,6 +130,11 @@ function StatusMenu({ stats }: { stats: AgentStats | undefined }) {
       >
         <span className={cn('size-2 rounded-full bg-white', pill.pulse && 'animate-pulse')} />
         <span className="max-w-48 truncate">{pill.text}</span>
+        {timer && (
+          <span className="font-normal tabular-nums opacity-90" aria-label="Time in status">
+            · {timer}
+          </span>
+        )}
         <ChevronDown className="size-4 opacity-80" />
       </button>
       {open && (

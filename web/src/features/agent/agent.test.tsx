@@ -259,6 +259,53 @@ describe('agent screen', () => {
     sessionStorage.removeItem('dialforge.agent.queue');
   });
 
+  it('status pill: idle time when Available', async () => {
+    const ago = (min: number) => new Date(Date.now() - min * 60 * 1000).toISOString();
+    const stats = (over: Record<string, unknown>) => ({
+      loginSeconds: 3725,
+      talkSeconds: 60,
+      breakSeconds: 0,
+      acwSeconds: 0,
+      handleSeconds: 60,
+      currentStatus: 'available',
+      currentReason: null,
+      currentQueueName: 'Support Queue',
+      ...over,
+    });
+    sessionStorage.setItem('dialforge.agent.queue', JSON.stringify({ id: 4, name: 'Support Queue' }));
+    await connect(backend({ 'GET /agent/stats': { body: stats({ currentSince: ago(2) }) } }));
+    expect(await screen.findByLabelText('Time in status')).toHaveTextContent(/idle 02:0\d/);
+    sessionStorage.removeItem('dialforge.agent.queue');
+  });
+
+  it('status pill: a break past the campaign limit turns red', async () => {
+    const ago = (min: number) => new Date(Date.now() - min * 60 * 1000).toISOString();
+    sessionStorage.setItem('dialforge.agent.queue', JSON.stringify({ id: 4, name: 'Support Queue' }));
+
+    await connect(
+      backend({
+        'GET /agent/stats': {
+          body: {
+            loginSeconds: 0,
+            talkSeconds: 0,
+            breakSeconds: 0,
+            acwSeconds: 0,
+            handleSeconds: 0,
+            currentQueueName: 'Support Queue',
+            currentStatus: 'break',
+            currentReason: 'Tea Break',
+            currentSince: ago(20),
+            breakAlertMin: 15,
+          },
+        },
+      }),
+    );
+    const timer = await screen.findByLabelText('Time in status');
+    expect(timer).toHaveTextContent(/20:0\d/);
+    expect(timer.closest('button')!.className).toMatch(/bg-destructive/);
+    sessionStorage.removeItem('dialforge.agent.queue');
+  });
+
   it('warm transfer to an agent sends the right request', async () => {
     const { calls, ua } = await connect(
       backend({
