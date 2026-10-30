@@ -1,14 +1,16 @@
 // Live calls of one campaign: every number the dialer is working on right
 // now (Dialing -> Ringing -> Waiting for an agent -> With an agent) with a
 // running timer, Hang up for supervisors (right Dialer -> Hang up live
-// calls), and the calls that just finished with their result.
-import { useState } from 'react';
+// calls); a second tab lists the calls that finished in the last 30 minutes,
+// filterable by result.
+import { useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { PhoneOff, Radio, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ConfirmDialog, EmptyState, SectionHeader } from '@/components/common';
 import { ErrorState } from '@/components/ErrorState';
 import { formatTime } from '@/lib/format';
@@ -58,28 +60,100 @@ const RESULT_TONE: Record<string, string> = {
   machine: 'bg-violet-500/10 text-violet-700',
 };
 
-function Finished({ rows }: { rows: FinishedCall[] }) {
-  if (!rows.length) return null;
+/** One chip per result in the list; a picked result whose calls have aged out falls back to All. */
+function resultGroups(rows: FinishedCall[]) {
+  const groups = new Map<string, { label: string; n: number }>();
+  for (const f of rows) {
+    const key = f.result ?? '';
+    const g = groups.get(key);
+    if (g) g.n++;
+    else groups.set(key, { label: f.resultLabel, n: 1 });
+  }
+  return [...groups.entries()].map(([key, g]) => ({ key, ...g }));
+}
+
+function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
   return (
-    <div className="mt-5">
-      <h3 className="mb-2 text-sm font-bold">Just finished (last 30 min)</h3>
-      <ul className="flex flex-wrap gap-1.5">
-        {rows.map((f) => (
-          <li
-            key={f.id}
-            className={cn(
-              'rounded-md px-2 py-1 text-xs',
-              RESULT_TONE[f.result ?? ''] ?? 'bg-muted text-muted-foreground',
-            )}
-            title={`Ended ${formatTime(f.endedAt)}`}
-          >
-            <span className="font-semibold">{f.leadName || f.phone}</span> · {f.resultLabel}
-            {f.agent && ` (${f.agent}${f.talkSeconds ? `, ${formatSeconds(f.talkSeconds)}` : ''})`}
-          </li>
-        ))}
-      </ul>
-    </div>
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={cn(
+        'inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-sm font-medium',
+        on ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card hover:bg-muted',
+      )}
+    >
+      {children}
+    </button>
   );
+}
+
+const DASH = <span className="text-muted-foreground">—</span>;
+
+function Finished({ rows }: { rows: FinishedCall[] }) {
+  const [picked, setPicked] = useState<string | null>(null);
+  if (!rows.length)
+    return (
+      <EmptyState icon={PhoneOff} title="No calls finished in the last 30 minutes.">
+        Each call shows here with its result once it ends.
+      </EmptyState>
+    );
+  const groups = resultGroups(rows);
+  const result = groups.some((g) => g.key === picked) ? picked : null;
+  const shown = result === null ? rows : rows.filter((f) => (f.result ?? '') === result);
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label="Filter by result">
+        <Chip on={result === null} onClick={() => setPicked(null)}>
+          All <span className="tabular-nums opacity-80">{rows.length}</span>
+        </Chip>
+        {groups.map((g) => (
+          <Chip key={g.key} on={result === g.key} onClick={() => setPicked(g.key)}>
+            {g.label} <span className="tabular-nums opacity-80">{g.n}</span>
+          </Chip>
+        ))}
+      </div>
+      <Table aria-label="Finished calls">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Ended</TableHead>
+            <TableHead>Lead</TableHead>
+            <TableHead>Number</TableHead>
+            <TableHead>Result</TableHead>
+            <TableHead>Agent</TableHead>
+            <TableHead>Talk time</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {shown.map((f) => (
+            <TableRow key={f.id}>
+              <TableCell className="text-muted-foreground tabular-nums">{formatTime(f.endedAt)}</TableCell>
+              <TableCell className="font-semibold">{f.leadName || DASH}</TableCell>
+              <TableCell className="tabular-nums">{f.phone}</TableCell>
+              <TableCell>
+                <span
+                  className={cn(
+                    'inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap',
+                    RESULT_TONE[f.result ?? ''] ?? 'bg-muted text-muted-foreground',
+                  )}
+                >
+                  {f.resultLabel}
+                </span>
+              </TableCell>
+              <TableCell>{f.agent ?? DASH}</TableCell>
+              <TableCell className="tabular-nums">{f.talkSeconds ? formatSeconds(f.talkSeconds) : DASH}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      <p className="mt-2 text-xs text-muted-foreground">Newest first. Older calls are in Reports.</p>
+    </>
+  );
+}
+
+function CountBadge({ n }: { n: number | undefined }) {
+  if (n === undefined) return null;
+  return <span className="rounded-full bg-muted px-2 text-xs tabular-nums">{n}</span>;
 }
 
 export function LiveCallsCard({ campaign, onClose }: { campaign: { id: number; name: string }; onClose: () => void }) {
@@ -88,6 +162,7 @@ export function LiveCallsCard({ campaign, onClose }: { campaign: { id: number; n
   const canHangup = useCan('dialer')('hangup');
   const now = useNow();
   const [confirm, setConfirm] = useState<LiveCall | null>(null);
+  const [tab, setTab] = useState<'live' | 'finished'>('live');
   const counts = live.data?.counts;
 
   return (
@@ -124,62 +199,32 @@ export function LiveCallsCard({ campaign, onClose }: { campaign: { id: number; n
           </div>
         ) : live.error ? (
           <ErrorState message={live.error.message} onRetry={() => live.refetch()} />
-        ) : live.data.live.length === 0 ? (
-          <EmptyState icon={PhoneOff} title="No calls in progress.">
-            While the campaign is running, every number being dialed shows here.
-          </EmptyState>
         ) : (
-          <Table aria-label="Calls in progress">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Lead</TableHead>
-                <TableHead>Number</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead>In state</TableHead>
-                <TableHead>Since dialed</TableHead>
-                {canHangup && (
-                  <TableHead className="text-right">
-                    <span className="sr-only">Actions</span>
-                  </TableHead>
-                )}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {live.data.live.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="font-semibold">
-                    {c.leadName || <span className="text-muted-foreground">—</span>}
-                  </TableCell>
-                  <TableCell className="tabular-nums">{c.phone}</TableCell>
-                  <TableCell>
-                    <StatePill call={c} />
-                  </TableCell>
-                  <TableCell className="tabular-nums">{mmss(now - new Date(c.since).getTime())}</TableCell>
-                  <TableCell className="text-muted-foreground tabular-nums">
-                    {mmss(now - new Date(c.startedAt).getTime())}
-                  </TableCell>
-                  {canHangup && (
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive"
-                        onClick={() => {
-                          hangup.reset();
-                          setConfirm(c);
-                        }}
-                        aria-label={`Hang up ${c.phone}`}
-                      >
-                        <PhoneOff /> Hang up
-                      </Button>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as 'live' | 'finished')}>
+            <TabsList>
+              <TabsTrigger value="live">
+                In progress <CountBadge n={live.data.live.length} />
+              </TabsTrigger>
+              <TabsTrigger value="finished">
+                Finished · last 30 min <CountBadge n={live.data.finished.length} />
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="live">
+              <InProgress
+                calls={live.data.live}
+                now={now}
+                canHangup={canHangup}
+                onHangup={(c) => {
+                  hangup.reset();
+                  setConfirm(c);
+                }}
+              />
+            </TabsContent>
+            <TabsContent value="finished">
+              <Finished rows={live.data.finished} />
+            </TabsContent>
+          </Tabs>
         )}
-        {live.data && <Finished rows={live.data.finished} />}
       </CardContent>
       <ConfirmDialog
         open={!!confirm}
@@ -205,5 +250,70 @@ export function LiveCallsCard({ campaign, onClose }: { campaign: { id: number; n
         }
       />
     </Card>
+  );
+}
+
+function InProgress({
+  calls,
+  now,
+  canHangup,
+  onHangup,
+}: {
+  calls: LiveCall[];
+  now: number;
+  canHangup: boolean;
+  onHangup: (c: LiveCall) => void;
+}) {
+  return calls.length === 0 ? (
+    <EmptyState icon={PhoneOff} title="No calls in progress.">
+      While the campaign is running, every number being dialed shows here.
+    </EmptyState>
+  ) : (
+    <Table aria-label="Calls in progress">
+      <TableHeader>
+        <TableRow>
+          <TableHead>Lead</TableHead>
+          <TableHead>Number</TableHead>
+          <TableHead>State</TableHead>
+          <TableHead>In state</TableHead>
+          <TableHead>Since dialed</TableHead>
+          {canHangup && (
+            <TableHead className="text-right">
+              <span className="sr-only">Actions</span>
+            </TableHead>
+          )}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {calls.map((c) => (
+          <TableRow key={c.id}>
+            <TableCell className="font-semibold">
+              {c.leadName || <span className="text-muted-foreground">—</span>}
+            </TableCell>
+            <TableCell className="tabular-nums">{c.phone}</TableCell>
+            <TableCell>
+              <StatePill call={c} />
+            </TableCell>
+            <TableCell className="tabular-nums">{mmss(now - new Date(c.since).getTime())}</TableCell>
+            <TableCell className="text-muted-foreground tabular-nums">
+              {mmss(now - new Date(c.startedAt).getTime())}
+            </TableCell>
+            {canHangup && (
+              <TableCell className="text-right">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive"
+                  onClick={() => onHangup(c)}
+                  aria-label={`Hang up ${c.phone}`}
+                >
+                  <PhoneOff /> Hang up
+                </Button>
+              </TableCell>
+            )}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

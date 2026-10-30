@@ -323,7 +323,8 @@ describe('Dialer', () => {
     expect(within(table).getByText('Waiting for an agent')).toBeInTheDocument();
     const counts = screen.getByLabelText('Live counts');
     expect(within(counts).getByText('With agent').previousSibling).toHaveTextContent('1');
-    expect(screen.getByText(/Yogi/).closest('li')).toHaveTextContent('Yogi · Busy');
+    expect(screen.queryByText('Yogi')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Finished · last 30 min 1/ })).toBeInTheDocument();
 
     const ringing = within(table).getByText('9000000001').closest('tr')!;
     await userEvent.click(within(ringing).getByRole('button', { name: 'Hang up 9000000001' }));
@@ -331,6 +332,51 @@ describe('Dialer', () => {
     expect(dialog).toHaveTextContent('not dialed again for an hour');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Hang up' }));
     await waitFor(() => expect(calls.some((c) => c.key === 'POST /admin/dialer/attempts/10/hangup')).toBe(true));
+  });
+
+  it('Live: finished calls in their own tab, filtered by result', async () => {
+    const t = (secAgo: number) => new Date(Date.now() - secAgo * 1000).toISOString();
+    const fin = (id: number, leadName: string, result: string, resultLabel: string, agent: string | null = null) => ({
+      id,
+      leadId: id,
+      leadName,
+      phone: `90000000${id}`,
+      result,
+      resultLabel,
+      endedAt: t(id * 10),
+      agent,
+      talkSeconds: agent ? 125 : null,
+    });
+    fakeApi({
+      'GET /admin/dialer': OVERVIEW,
+      'GET /admin/campaigns/1/dialer-live': {
+        body: {
+          live: [],
+          counts: { dialing: 0, ringing: 0, waiting: 0, connected: 0 },
+          finished: [
+            fin(11, 'Yogi', 'busy', 'Busy'),
+            fin(12, 'Sathish', 'connected', 'Completed', 'agent1003'),
+            fin(13, 'Mohan', 'busy', 'Busy'),
+          ],
+        },
+      },
+    });
+    renderPage(<DialerPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Live calls Predictive_Test' }));
+    expect(await screen.findByText('No calls in progress.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: /Finished/ }));
+    const table = screen.getByRole('table', { name: 'Finished calls' });
+    const sathish = within(table).getByText('Sathish').closest('tr')!;
+    expect(sathish).toHaveTextContent('Completed');
+    expect(sathish).toHaveTextContent('agent1003');
+    expect(sathish).toHaveTextContent('2m 05s');
+
+    const filters = screen.getByRole('group', { name: 'Filter by result' });
+    expect(within(filters).getByRole('button', { name: 'All 3' })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(within(filters).getByRole('button', { name: 'Busy 2' }));
+    expect(within(table).queryByText('Sathish')).not.toBeInTheDocument();
+    expect(within(table).getByText('Yogi')).toBeInTheDocument();
+    expect(within(table).getByText('Mohan')).toBeInTheDocument();
   });
 
   it('Live without the right to hang up: no Hang up button', async () => {
