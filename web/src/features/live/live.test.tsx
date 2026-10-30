@@ -107,31 +107,31 @@ describe('Live Agents', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('database unavailable');
   });
 
-  it('Force logout: confirm, then the agent is taken offline; the server reason shows if refused', async () => {
+  it('Force logout from the side panel: confirm, then the agent is taken offline; not during a call', async () => {
     const calls = fakeApi({
       'GET /admin/live-agents': { body: AGENTS },
       'POST /admin/live-agents/8/logout': { body: { id: 8, status: 'ok', was: 'break' } },
-      'POST /admin/live-agents/7/logout': {
-        status: 409,
-        body: { error: 'agent04 is on a call right now - try again when it ends' },
-      },
     });
     renderPage(<LiveAgentsPage />);
-    // offline agents have nothing to log out of
     await screen.findByText('agent04');
+    // offline agents have nothing to log out of
     await userEvent.selectOptions(screen.getByLabelText('Show'), 'All agents');
-    expect(screen.queryByRole('button', { name: 'Actions for agent06' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'agent06' }));
+    const offline = screen.getByRole('complementary', { name: 'Agent agent06' });
+    expect(within(offline).queryByRole('button', { name: /force logout/i })).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Actions for agent05' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Force logout' }));
+    await userEvent.click(screen.getByRole('button', { name: 'agent05' }));
+    const panel = screen.getByRole('complementary', { name: 'Agent agent05' });
+    await userEvent.click(within(panel).getByRole('button', { name: 'Force logout agent05' }));
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Force logout' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(calls.some((c) => c.key === 'POST /admin/live-agents/8/logout')).toBe(true);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Actions for agent04' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Force logout' }));
-    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Force logout' }));
-    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('on a call right now');
+    // on a call: the button is there but off
+    await userEvent.click(screen.getByRole('button', { name: 'agent04' }));
+    expect(screen.getByRole('button', { name: 'Force logout agent04' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Close panel' }));
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
   });
 
   it('without the Force logout right there is no button', async () => {
@@ -142,11 +142,12 @@ describe('Live Agents', () => {
       'GET /admin/live-agents': { body: AGENTS },
     });
     renderPage(<LiveAgentsPage />);
-    await screen.findByText('agent05');
+    await userEvent.click(await screen.findByRole('button', { name: 'agent05' }));
+    expect(screen.getByRole('complementary', { name: 'Agent agent05' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /force logout/i })).not.toBeInTheDocument();
   });
 
-  it('monitoring: connect the line, listen to an agent on a call, switch to whisper (key 5), stop', async () => {
+  it('monitoring in the side panel: connect the line, listen, switch to whisper (key 5), stop', async () => {
     const uas = fakeUAFactory();
     configureMonitorLine({ createUA: uas.factory });
     const calls = fakeApi({
@@ -158,25 +159,31 @@ describe('Live Agents', () => {
     });
     renderPage(<LiveAgentsPage />);
     await screen.findByText('agent04');
-    // not before the line is connected; only agents on a call
-    await userEvent.click(screen.getByRole('button', { name: 'Actions for agent04' }));
-    expect(await screen.findByRole('menuitem', { name: 'Listen' })).toHaveAttribute('aria-disabled', 'true');
-    expect(screen.getByText(/Connect your monitoring line first/)).toBeInTheDocument();
-    await userEvent.keyboard('{Escape}');
-    await userEvent.click(screen.getByRole('button', { name: 'Actions for agent05' }));
-    expect(await screen.findByRole('menuitem', { name: 'Force logout' })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: 'Listen' })).not.toBeInTheDocument();
-    await userEvent.keyboard('{Escape}');
+    // the headphone icon only on agents on a call
+    expect(screen.queryByRole('button', { name: 'Monitor agent05' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Monitor agent04' }));
+    const panel = screen.getByRole('complementary', { name: 'Agent agent04' });
+    // not before the line is connected
+    expect(within(panel).getByRole('button', { name: 'Start listening' })).toBeDisabled();
+    expect(within(panel).getByText('Your monitoring line is not connected.')).toBeInTheDocument();
+    // who hears whom, per mode
+    expect(within(panel).getByRole('radio', { name: 'Listen' })).toHaveAttribute('aria-checked', 'true');
+    const hears = within(panel).getByLabelText('Who hears whom');
+    expect(within(hears).getByText('The customer hears you').nextSibling).toHaveTextContent('No');
+    await userEvent.click(within(panel).getByRole('radio', { name: 'Barge' }));
+    expect(within(hears).getByText('The customer hears you').nextSibling).toHaveTextContent('Yes');
+    expect(within(panel).getByRole('button', { name: 'Barge in' })).toBeInTheDocument();
+    await userEvent.click(within(panel).getByRole('radio', { name: 'Listen' }));
 
-    await userEvent.click(screen.getByRole('button', { name: /connect monitoring line/i }));
+    await userEvent.click(within(panel).getByRole('button', { name: 'Connect line' }));
     await waitFor(() => expect(uas.made.length).toBe(1));
     expect(uas.last().options).toMatchObject({ extension: '2001', password: 'pw' });
     act(() => uas.last().register());
-    expect(await screen.findByText(/Monitoring line 2001 connected/)).toBeInTheDocument();
+    expect(await within(panel).findByText(/monitoring line connected/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Actions for agent04' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Listen' }));
+    await userEvent.click(within(panel).getByRole('button', { name: 'Start listening' }));
     expect(calls.find((c) => c.key === 'POST /admin/live-agents/7/monitor')?.body).toEqual({ mode: 'listen' });
+    expect(within(panel).getByRole('status')).toHaveTextContent(/answers by itself/);
     // Asterisk calls the line: answered by itself, other calls are refused
     const other = new FakeSession('5555', 'Someone');
     act(() => void uas.last().ring(other));
@@ -185,12 +192,50 @@ describe('Live Agents', () => {
     act(() => void uas.last().ring(s));
     expect(s.answered).not.toBeNull();
     act(() => s.up());
-    expect(await screen.findByText('Listening to agent04')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Whisper' }));
+    expect(await within(panel).findByText(/Listening to agent04/)).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('button', { name: 'agent04' }).closest('tr')!).getByText('listen'),
+    ).toBeInTheDocument();
+    await userEvent.click(within(panel).getByRole('radio', { name: 'Whisper' }));
     expect(s.dtmf).toEqual(['5']);
-    expect(screen.getByText('Whispering to agent04')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(within(panel).getByText(/Whispering to agent04/)).toBeInTheDocument();
+
+    // closing the panel keeps the monitor running: the strip on top has Stop
+    await userEvent.click(within(panel).getByRole('button', { name: 'Close panel' }));
+    const strip = screen.getByRole('region', { name: 'Call monitoring' });
+    expect(strip).toHaveTextContent('Whispering to agent04');
+    await userEvent.click(within(strip).getByRole('button', { name: 'Open' }));
+    const again = screen.getByRole('complementary', { name: 'Agent agent04' });
+    await userEvent.click(within(again).getByRole('button', { name: 'Stop' }));
     expect(s.terminated).toBe(true);
+    expect(within(again).getByRole('button', { name: 'Start listening' })).toBeEnabled();
+  });
+
+  it('monitoring: when the call ends while listening, the panel says so', async () => {
+    const uas = fakeUAFactory();
+    configureMonitorLine({ createUA: uas.factory });
+    fakeApi({
+      'GET /admin/live-agents': { body: AGENTS },
+      'GET /admin/monitor/line': {
+        body: { extension: '2001', sipPassword: 'pw', sipDomain: 'x', wsUrl: 'wss://x:8089/ws', iceServers: [] },
+      },
+      'POST /admin/live-agents/7/monitor': { body: { status: 'ringing', mode: 'listen' } },
+    });
+    renderPage(<LiveAgentsPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Monitor agent04' }));
+    const panel = screen.getByRole('complementary', { name: 'Agent agent04' });
+    await userEvent.click(within(panel).getByRole('button', { name: 'Connect line' }));
+    await waitFor(() => expect(uas.made.length).toBe(1));
+    act(() => uas.last().register());
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Start listening' }));
+    const s = new FakeSession('1003', 'Monitor agent04');
+    act(() => void uas.last().ring(s));
+    act(() => s.up());
+    expect(await within(panel).findByText(/Listening to agent04/)).toBeInTheDocument();
+    act(() => s.remoteHangup());
+    // agent04 is still listed on a call (the list refreshes a moment later): the note shows once it isn't
+    expect(within(panel).queryByText(/Listening to agent04/)).not.toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Start listening' })).toBeInTheDocument();
   });
 
   it('monitoring: the server reason shows when it refuses (e.g. no monitoring line)', async () => {
@@ -202,11 +247,12 @@ describe('Live Agents', () => {
       },
     });
     renderPage(<LiveAgentsPage />);
-    await userEvent.click(await screen.findByRole('button', { name: /connect monitoring line/i }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Monitor agent04' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Connect line' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('no monitoring line');
   });
 
-  it('a role without monitoring rights sees no monitoring bar or buttons', async () => {
+  it('a role without monitoring rights sees no headphone icon and no monitoring in the panel', async () => {
     fakeApi({
       'GET /auth/me': {
         body: { id: 30, username: 'tl', role: 'staff', scope: 'all', permissions: { live: ['view'] } },
@@ -215,8 +261,12 @@ describe('Live Agents', () => {
     });
     renderPage(<LiveAgentsPage />);
     await screen.findByText('agent04');
-    expect(screen.queryByRole('region', { name: 'Call monitoring' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /actions for/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Monitor / })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'agent04' }));
+    const panel = screen.getByRole('complementary', { name: 'Agent agent04' });
+    expect(within(panel).getByText('9876543210')).toBeInTheDocument();
+    expect(within(panel).queryByRole('region', { name: 'Monitor this call' })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('radio')).not.toBeInTheDocument();
   });
 });
 

@@ -5,21 +5,20 @@
 //   (remembered per browser). Call type: inbound / manual / dialer mode /
 //   callback / transfer (backend services/liveFloor.js callType).
 // - Filters: status (default: logged-in agents only), name / extension, queue.
-// - Call monitoring (listen / whisper / barge) through the supervisor's
-//   monitoring line - see features/monitor - and Force logout sit in each
-//   row's ⋯ menu.
+// - Clicking an agent (or the headphone icon of one on a call) opens their
+//   side panel (AgentPanel.tsx): call details, Listen / Whisper / Barge
+//   through the supervisor's monitoring line (features/monitor), Force logout.
 // - Force logout takes a stuck or absent agent offline (not during a call).
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Columns3, Ellipsis, LogOut, RefreshCw, Search, Users } from 'lucide-react';
+import { Columns3, Headphones, RefreshCw, Search, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -30,7 +29,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ConfirmDialog, EmptyState, SectionHeader, StatusPill } from '@/components/common';
 import { post } from '@/lib/api';
-import { ERROR_TOAST } from '@/lib/toast';
 import { useAccess } from '@/features/auth/access';
 import { ErrorState } from '@/components/ErrorState';
 import { formatTime } from '@/lib/format';
@@ -39,8 +37,9 @@ import { useRealtime } from '@/lib/realtime';
 import { cn, formatSeconds } from '@/lib/utils';
 import { dashboardKeys, useFloorSummary, useLiveAgents, type LiveAgent } from '@/features/dashboard/api';
 import { AgentStatusBadge } from '@/features/dashboard/AgentStatusBadge';
-import { MODE_INFO, MonitorBar } from '@/features/monitor/MonitorBar';
-import { startMonitor, useMonitorLine, type MonitorMode } from '@/features/monitor/monitorLine';
+import { MODE_INFO, MonitorStrip } from '@/features/monitor/MonitorBar';
+import { useMonitorLine } from '@/features/monitor/monitorLine';
+import { AgentPanel } from './AgentPanel';
 
 const KNOWN = new Set(['available', 'break', 'acw']);
 
@@ -219,62 +218,6 @@ function FloorBar() {
   );
 }
 
-/** The ⋯ menu of one row: Listen / Whisper / Barge on a call, Force logout. Nothing to do = no button. */
-function RowActions({
-  agent: a,
-  monitorModes,
-  lineReady,
-  onMonitor,
-  onLogout,
-}: {
-  agent: LiveAgent;
-  monitorModes: MonitorMode[];
-  lineReady: boolean;
-  onMonitor: (a: LiveAgent, mode: MonitorMode) => void;
-  onLogout?: (a: LiveAgent) => void;
-}) {
-  const monitor = !!a.active_call_number && monitorModes.length > 0;
-  const logout = !!onLogout && !!a.status;
-  if (!monitor && !logout) return null;
-  return (
-    // Not modal: Force logout opens a dialog right after the menu closes.
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label={`Actions for ${a.username}`}>
-          <Ellipsis />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {monitor && !lineReady && (
-          <DropdownMenuLabel className="max-w-56 font-normal">
-            Connect your monitoring line first (above) to listen in.
-          </DropdownMenuLabel>
-        )}
-        {monitor &&
-          monitorModes.map((m) => {
-            const Icon = MODE_INFO[m].icon;
-            return (
-              <DropdownMenuItem
-                key={m}
-                disabled={!lineReady}
-                title={MODE_INFO[m].hint}
-                onSelect={() => onMonitor(a, m)}
-              >
-                <Icon /> {MODE_INFO[m].label}
-              </DropdownMenuItem>
-            );
-          })}
-        {monitor && logout && <DropdownMenuSeparator />}
-        {logout && (
-          <DropdownMenuItem className="text-destructive" onSelect={() => onLogout!(a)}>
-            <LogOut /> Force logout
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 const LINE_DOT: Record<string, [string, string, string]> = {
   registered: ['bg-status-available', 'phone line connected', 'Phone line connected'],
   unregistered: [
@@ -287,23 +230,31 @@ const LINE_DOT: Record<string, [string, string, string]> = {
 
 const DASH = <span className="text-muted-foreground">—</span>;
 
+function CallTypeTag({ call }: { call: NonNullable<LiveAgent['call']> }) {
+  const type = CALL_TYPE[callType(call)];
+  return (
+    <span className={cn('inline-block rounded-md px-2 py-0.5 text-xs font-semibold', type.className)}>
+      {type.label}
+    </span>
+  );
+}
+
 function AgentsTable({
   agents,
   columns,
-  monitorModes,
-  onMonitor,
-  onLogout,
+  canMonitor,
+  selectedId,
+  onOpen,
 }: {
   agents: LiveAgent[];
   columns: Set<OptionalColumn>;
-  monitorModes: MonitorMode[];
-  onMonitor: (a: LiveAgent, mode: MonitorMode) => void;
-  onLogout?: (a: LiveAgent) => void;
+  /** The supervisor may listen / whisper / barge: on-call rows get the headphone icon. */
+  canMonitor: boolean;
+  selectedId: number | null;
+  onOpen: (id: number) => void;
 }) {
   const now = useNow();
   const line = useMonitorLine();
-  const actions = monitorModes.length > 0 || !!onLogout;
-  const lineReady = line.status === 'connected' && !line.session;
   const ago = (iso: string | null | undefined) => (iso ? Math.max(0, (now - new Date(iso).getTime()) / 1000) : null);
   const col = (c: OptionalColumn) => columns.has(c);
   return (
@@ -322,17 +273,13 @@ function AgentsTable({
             <TableHead>Current call</TableHead>
             {col('today') && <TableHead>Today</TableHead>}
             {col('login') && <TableHead>Logged in</TableHead>}
-            {actions && (
-              <TableHead className="text-right">
-                <span className="sr-only">Actions</span>
-              </TableHead>
-            )}
           </TableRow>
         </TableHeader>
         <TableBody>
           {agents.map((a) => {
             const since = a.status ? ago(a.started_at) : null;
-            const monitoredHere = line.session?.agentId === a.id;
+            const monitored = line.session?.agentId === a.id ? line.session : null;
+            const selected = a.id === selectedId;
             const call = a.call ?? null;
             const callSecs = call ? ago(call.connectedAt ?? call.startedAt) : null;
             // On a call the timer is the call's; Available = idle time; else time in the status.
@@ -343,10 +290,44 @@ function AgentsTable({
                   ? `${a.status === 'available' && !a.active_call_number ? 'idle ' : ''}${formatSeconds(since)}`
                   : null;
             const dot = a.line ? (LINE_DOT[a.line] ?? LINE_DOT.unknown) : null;
-            const type = call ? CALL_TYPE[callType(call)] : null;
             return (
-              <TableRow key={a.id} className={cn('whitespace-nowrap', monitoredHere && 'bg-status-available/5')}>
-                <TableCell className="font-semibold">{a.username}</TableCell>
+              <TableRow
+                key={a.id}
+                aria-selected={selected}
+                className={cn(
+                  'whitespace-nowrap',
+                  monitored && 'bg-status-available/5',
+                  selected && 'bg-accent/40 shadow-[inset_3px_0_0_var(--color-primary)]',
+                )}
+              >
+                <TableCell className="py-1">
+                  <span className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="min-h-9 cursor-pointer font-semibold hover:underline"
+                      onClick={() => onOpen(a.id)}
+                    >
+                      {a.username}
+                    </button>
+                    {canMonitor && a.active_call_number && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 text-muted-foreground hover:text-primary"
+                        aria-label={`Monitor ${a.username}`}
+                        title="Listen / Whisper / Barge"
+                        onClick={() => onOpen(a.id)}
+                      >
+                        <Headphones />
+                      </Button>
+                    )}
+                    {monitored && (
+                      <span className="rounded-full bg-status-available/12 px-2 py-0.5 text-[11px] font-semibold text-status-available">
+                        {monitored.live ? MODE_INFO[monitored.mode].label.toLowerCase() : 'connecting…'}
+                      </span>
+                    )}
+                  </span>
+                </TableCell>
                 {col('teams') && <TableCell className="text-muted-foreground">{a.teams ?? DASH}</TableCell>}
                 <TableCell>
                   <span className="inline-flex items-center gap-2">
@@ -381,15 +362,7 @@ function AgentsTable({
                 <TableCell>{a.campaign_name ?? DASH}</TableCell>
                 {col('queue') && <TableCell>{a.queue_name ?? DASH}</TableCell>}
                 {col('extra') && <TableCell className="text-muted-foreground">{a.extra_queues ?? DASH}</TableCell>}
-                <TableCell>
-                  {type ? (
-                    <span className={cn('inline-block rounded-md px-2 py-0.5 text-xs font-semibold', type.className)}>
-                      {type.label}
-                    </span>
-                  ) : (
-                    DASH
-                  )}
-                </TableCell>
+                <TableCell>{call ? <CallTypeTag call={call} /> : DASH}</TableCell>
                 <TableCell className="max-w-64 truncate">
                   {call ? (
                     <>
@@ -415,17 +388,6 @@ function AgentsTable({
                 {col('login') && (
                   <TableCell className="text-sm text-muted-foreground tabular-nums">
                     {a.login_at ? formatTime(a.login_at) : DASH}
-                  </TableCell>
-                )}
-                {actions && (
-                  <TableCell className="py-1 text-right">
-                    <RowActions
-                      agent={a}
-                      monitorModes={monitorModes}
-                      lineReady={lineReady}
-                      onMonitor={onMonitor}
-                      onLogout={onLogout}
-                    />
                   </TableCell>
                 )}
               </TableRow>
@@ -494,8 +456,9 @@ export function LiveAgentsPage() {
 
   // --- monitoring ---
   const monitorModes = (['listen', 'whisper', 'barge'] as const).filter((m) => can('live', m));
-  const onMonitor = (a: LiveAgent, mode: MonitorMode) =>
-    startMonitor(a.id, a.username, mode).catch((err: Error) => toast.error(err.message, ERROR_TOAST));
+  // The agent whose side panel is open (kept while filters hide them).
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const selected = all.find((a) => a.id === selectedId) ?? null;
 
   // --- force logout ---
   const canLogout = can('live', 'logout');
@@ -525,7 +488,7 @@ export function LiveAgentsPage() {
             </>
           }
         />
-        <MonitorBar />
+        <MonitorStrip openAgentId={selected?.id ?? null} onOpen={setSelectedId} />
         {agents.isPending ? (
           <div className="space-y-2">
             {[0, 1, 2].map((i) => (
@@ -578,19 +541,33 @@ export function LiveAgentsPage() {
                 ))}
               </Select>
             </div>
-            {shown.length === 0 ? (
-              <EmptyState icon={Users} title={status === 'loggedin' ? 'No agent is logged in' : 'No agent matches'}>
-                {status === 'loggedin' && 'Choose "All agents" to see everyone.'}
-              </EmptyState>
-            ) : (
-              <AgentsTable
-                agents={shown}
-                columns={columns}
-                monitorModes={monitorModes}
-                onMonitor={onMonitor}
-                onLogout={canLogout ? setLoggingOut : undefined}
-              />
-            )}
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+              <div className="min-w-0 flex-1">
+                {shown.length === 0 ? (
+                  <EmptyState icon={Users} title={status === 'loggedin' ? 'No agent is logged in' : 'No agent matches'}>
+                    {status === 'loggedin' && 'Choose "All agents" to see everyone.'}
+                  </EmptyState>
+                ) : (
+                  <AgentsTable
+                    agents={shown}
+                    columns={columns}
+                    canMonitor={monitorModes.length > 0}
+                    selectedId={selected?.id ?? null}
+                    onOpen={(id) => setSelectedId(id === selectedId ? null : id)}
+                  />
+                )}
+              </div>
+              {selected && (
+                <AgentPanel
+                  key={selected.id}
+                  agent={selected}
+                  callType={selected.call ? <CallTypeTag call={selected.call} /> : null}
+                  monitorModes={monitorModes}
+                  onLogout={canLogout ? setLoggingOut : undefined}
+                  onClose={() => setSelectedId(null)}
+                />
+              )}
+            </div>
           </>
         )}
       </CardContent>
