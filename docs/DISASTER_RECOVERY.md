@@ -23,6 +23,22 @@ are possible. Read C first, today.
 
 Everything else (code, database, recordings, server settings) is on GitHub or in S3.
 
+**But S3 is in the same AWS account as the server.** On 30 Oct 2026 AWS put the account on hold
+for verification: the stopped dev server couldn't be started and its S3 backups couldn't be
+read. So also keep a copy **outside AWS** - on your PC, weekly and after a day of real changes
+(the server must be running):
+```
+cd /c/Users/User01/DialForge
+bash install/backup-to-pc.sh --host 3.7.241.104 --key ~/Documents/dialforge-key.pem --name dialforge-dev --now
+```
+It copies the newest database dump + config to `Documents\VIZTEX-backups\<name>\` (keeps 8 of
+each, checks they unzip). The config has the app's `.env` (passwords): keep that folder private
+and copy it to the encrypted USB stick from the table above now and then. Rebuild from it: B
+below, with `restore.sh --db ... --config ...`. Recordings stay in S3 only (too big for the PC).
+
+Real customers: their servers in **their own** AWS account, and their backups also copied
+somewhere outside it (their own PC or office server, the same script).
+
 ---
 
 ## A. New PC (about 30 minutes)

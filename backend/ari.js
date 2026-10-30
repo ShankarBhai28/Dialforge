@@ -138,6 +138,18 @@ async function endpointStates(tech = 'PJSIP') {
   }
 }
 
+// Every channel Asterisk has right now, by name and by id (a Set), or null
+// when ARI couldn't be asked - the stale-call cleanup must not read an ARI
+// hiccup as "every call has ended".
+async function liveChannels() {
+  try {
+    const list = await ariRequest('GET', '/channels');
+    return new Set(list.flatMap((c) => [c.name, c.id]));
+  } catch (err) {
+    return null;
+  }
+}
+
 // 'online' | 'offline', or null when ARI couldn't be asked - callers that
 // act on "offline" (e.g. the stale-agent cleanup) must not treat an ARI
 // hiccup as everyone being offline.
@@ -202,6 +214,7 @@ module.exports = {
   isEndpointOnline,
   endpointState,
   endpointStates,
+  liveChannels,
   ping,
   endpointChannelCount,
   setChannelVar,

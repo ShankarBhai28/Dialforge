@@ -1653,3 +1653,10 @@ Reported by the user after trying the agent panel:
 - Same rules as Create user: an own-teams login (TL / manager) imports only into its teams, and the team column is required for it. Team = the team's name as on the Teams screen.
 - Passwords are hashed in a worker thread (`backend/src/services/hashWorker.js`, ~85 ms each → ~45 s for 500), so live screens and call handling don't stall. Passwords never come back in the answer and are hidden in the audit log (`users.import`).
 - API: `POST /admin/users/import` (multipart `file`; `commit=1` to create).
+
+## Load test findings fixed (2026-10-30, branch loadtest-fixes)
+- Results and lessons: `docs/LOADTEST_STEP_BY_STEP.md` → Results. 200 agents ran on a 4-vCPU telephony server at under 9 % CPU; the 2-vCPU database was the first limit (~50 %).
+- **Big data** (90 days, 2.4 M calls): migration **0021** adds the missing indexes; the installer sets MySQL's cache (`innodb_buffer_pool_size`: half the RAM on a database server, a quarter on a single server - also live on a re-run). Existing servers: run the migration (minutes on a big table) and set the cache - `/etc/mysql/conf.d/viztex.cnf` (+ `mysql.conf.d/zz-viztex.cnf` on a DB-only server) or re-run the installer.
+- Live Agents, Agent Performance, List Penetration and the Agent Time Sheet no longer read every row ever; the Call Log counts at most 10,000 past the page ("1-50 of 10,000+").
+- **Stale-call cleanup** (`backend/src/services/staleCalls.js`, every `STALE_CALL_CHECK_SECONDS`, default 60; 0 = off): a call still open with no channel left in Asterisk on two checks in a row is closed like a hang-up (agent to wrap-up if Available), with an `ended` event `{"by":"cleanup"}` and audit `call.auto_close`. Fixes "ghost calls" (missed hang-up event: ~0.2 % at 200 agents, and every call open when a server stops) that kept an agent "on a call" for up to 3 hours.
+- **Backup outside AWS**: `install/backup-to-pc.sh` (Git Bash on the PC) copies a server's newest nightly backup to `Documents\VIZTEX-backups\` - see `docs/DISASTER_RECOVERY.md` C. Reason: an AWS account hold on 30 Oct blocked the server and its S3 bucket together.

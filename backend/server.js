@@ -34,6 +34,7 @@ const pool = require('./db');
 const { MySqlSessionStore } = require('./src/services/sessionStore');
 const sessions = require('./src/services/sessions');
 const { startStaleAgentCleanup } = require('./src/services/agentLogout');
+const { startStaleCallCleanup } = require('./src/services/staleCalls');
 const { startAutoDispoSweeper } = require('./src/services/autoDispo');
 const { startHealthWatch } = require('./src/services/health');
 const { redirectFromPort, redirectHandler } = require('./src/portRedirect');
@@ -61,6 +62,7 @@ const server = https.createServer(tlsOptions, app);
 hub.attach(server, sessionMiddleware);
 dialerFeed.start();
 startStaleAgentCleanup();
+startStaleCallCleanup();
 startAutoDispoSweeper();
 startHealthWatch();
 startPresenceSync(); // live_agents table
