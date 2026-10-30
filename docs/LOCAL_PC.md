@@ -43,3 +43,14 @@ bash scripts/local.sh stop      # when done
    (prints a one-time password - change it after logging in).
 
 `backend/.env`, `backend/certs/` and `.local-run/` are never committed (`.gitignore`).
+
+## Demo floor (to show Live Agents without real calls)
+
+```
+cd /c/Users/User01/DialForge/backend
+npm run demo:floor -- add       # 6 demo agents: predictive / inbound / manual / callback calls, idle, break
+npm run demo:floor -- remove    # deletes exactly those rows
+```
+
+Run `add` again for fresh timers. The demo agents have no password (they can't log in). The
+tool refuses on a server with `APP_ENV=production`. Source: `backend/src/tools/demo-floor.js`.

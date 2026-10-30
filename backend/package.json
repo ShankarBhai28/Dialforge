@@ -12,6 +12,7 @@
     "ext:add": "node src/tools/add-extensions.js",
     "alert:test": "node src/tools/alert-test.js",
     "db:reset-test-data": "node src/tools/reset-test-data.js",
+    "demo:floor": "node src/tools/demo-floor.js",
     "db:migrate": "node src/tools/migrate.js",
     "create-admin": "node src/tools/create-admin.js"
   },
