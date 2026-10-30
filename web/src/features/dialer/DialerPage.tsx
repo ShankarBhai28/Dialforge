@@ -345,8 +345,10 @@ export function DialerPage() {
         </CardContent>
       </Card>
 
-      {liveFor && <LiveCallsCard key={liveFor.id} campaign={liveFor} onClose={() => setLiveFor(null)} />}
-      {hopperFor && <HopperCard key={hopperFor.id} campaign={hopperFor} onClose={() => setHopperFor(null)} />}
+      {liveFor && <LiveCallsCard key={`live-${liveFor.id}`} campaign={liveFor} onClose={() => setLiveFor(null)} />}
+      {hopperFor && (
+        <HopperCard key={`hopper-${hopperFor.id}`} campaign={hopperFor} onClose={() => setHopperFor(null)} />
+      )}
 
       <ConfirmDialog
         open={!!confirming}

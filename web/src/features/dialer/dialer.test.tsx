@@ -221,6 +221,26 @@ describe('Dialer', () => {
     expect(screen.queryByText('Ravi Kumar')).not.toBeInTheDocument();
   });
 
+  // Both cards of the same campaign used key={id}: two siblings with key 1, so
+  // React kept the wrong one and Live calls' Close seemed to do nothing.
+  it('closes Live calls while the hopper of the same campaign is open', async () => {
+    fakeApi({
+      'GET /admin/dialer': OVERVIEW,
+      'GET /admin/campaigns/1/hopper': { body: HOPPER },
+      'GET /admin/campaigns/1/dialer-live': {
+        body: { live: [], counts: { dialing: 0, ringing: 0, waiting: 0, connected: 0 }, finished: [] },
+      },
+    });
+    renderPage(<DialerPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Live calls Predictive_Test' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Hopper Predictive_Test' }));
+    expect(await screen.findByText('Ravi Kumar')).toBeInTheDocument();
+    const [liveClose] = screen.getAllByRole('button', { name: /close/i });
+    await userEvent.click(liveClose);
+    expect(screen.queryByText(/Live calls - Predictive_Test/)).not.toBeInTheDocument();
+    expect(screen.getByText('Ravi Kumar')).toBeInTheDocument();
+  });
+
   it('says when the hopper is empty', async () => {
     fakeApi({ 'GET /admin/dialer': OVERVIEW, 'GET /admin/campaigns/4/hopper': { body: [] } });
     renderPage(<DialerPage />);
