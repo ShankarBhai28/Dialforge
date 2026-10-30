@@ -50,8 +50,22 @@ These three stopped us on 27 Oct; sort them out **before** creating servers.
    right now (not your account). Pick a twin type with the same vCPU: `c7i.xlarge` →
    **`m7i.xlarge`** → `c6i.xlarge` → `m6i.xlarge`. Keep the same family for the 8-vCPU step later
    (`m7i.xlarge` → `m7i.2xlarge`) so the two results compare fairly.
+4. **Account verification.** On 30 Oct (a day after the paid servers ran) AWS put the account
+   **on hold** - "We could not validate important details about your account and its payment
+   information", reply within a day or the account is suspended. While on hold even stopped
+   servers can't be started, and the S3 backups in the same account can't be read.
+   - It's a real AWS message when it is in the console's **notifications** (bell icon) with your
+     account ID - never upload from an email or SMS link.
+   - Upload (as root, the link in the notification): a recent **statement** of the payment method
+     (page 1: bank name, your name, address, last digits; no password) and a **government ID**
+     (masked Aadhaar / PAN / DL / passport; photo and date of birth may be covered).
+   - AWS India accounts paid by UPI show **no saved payment method** ("Manual bill payments"):
+     use the statement of the bank account behind the UPI payment made at sign-up.
+   - The **billing address** must match the statement. Enter it in full at sign-up; if it's wrong
+     and Edit is locked, open Support → Account and billing and ask them to change it.
+   - Avoid it: account name, card / bank and address the same as on your ID **from day one**.
 
-- [ ] Paid plan, $10 budget, vCPU limit 16 approved.
+- [ ] Paid plan, $10 budget, vCPU limit 16 approved, billing address complete.
 
 ## B. Security groups (4)
 
@@ -169,8 +183,13 @@ loadtest/README.md → "Prepare VIZTEX", with 200 agents:
    **loadtest_q** with **Least recent** (check after saving - not Ring all); campaign **Load test**
    (Predictive, loadtest_q, AMD off, recording on, auto-answer on), mapped to the team; leads list ←
    `leads.csv`. Don't start it yet.
+6. In the campaign's settings (learned on 29 Oct - without these the dialer holds back):
+   - **Max channels 200** (the default is 10: 25 agents got only 10 calls at once; 200 is the
+     most the screen accepts).
+   - **Calling hours 00:00 - 23:59** (test campaign only - the default 09:00 - 21:00 IST stopped
+     an evening run; never widen a real customer's).
 
-- [ ] 200 agents, queue Least recent, campaign + leads ready.
+- [ ] 200 agents, queue Least recent, campaign + leads ready, Max channels 200, calling hours all day.
 
 ## H. Run
 
@@ -178,8 +197,20 @@ loadtest/README.md → "Run": on lt-gen three SIPp windows + `agents.js`; `measu
 and app. Start the campaign in the browser. Steps of ~10 minutes: **25 → 50 → 100 → 150 → 200**
 agents. Stop when CPU stays above ~80 %, loss above 1 %, jitter above 30 ms, or audio is choppy.
 
-Then the **8-vCPU** round: stop lt-tel → Change instance type (same family, 2xlarge) → start (the
-Elastic IP stays) → re-register the agents (SIPp register window) → repeat the high steps.
+Lessons from 29 Oct:
+- Start each SIPp with **`-bg`** (in the background). In a tmux window SIPp's screen codes leaked
+  into its RTP and Asterisk's console filled with "Received SSL traffic on RTP instance ...
+  without an SSL session" - harmless, but it hides real errors.
+- The SIPp phones register for 2 hours (`Expires 7200`): run the register window again before a
+  new step if the last one was longer ago.
+- Restarting `agents.js` for the next step is fine: its bots log in with "take over", and a bot
+  whose old session is still on a call waits for that call to end (up to 5 min).
+- A server stopped in the middle of calls leaves calls "open" in VIZTEX (ghost calls: the agent
+  shows on a call). Stop the campaign and wait for calls to end before stopping servers.
+
+The **8-vCPU** round (stop lt-tel → Change instance type, same family 2xlarge → start; the
+Elastic IP stays → re-register the agents → repeat the high steps) is only needed when 4 vCPU runs
+out. On 29 Oct it didn't (8.8 % CPU at 200 agents), so it was skipped.
 
 ## H2. Reports on months of data (after the calls test)
 
@@ -188,8 +219,8 @@ quarter. This fills it with that much fake history and times every admin screen.
 
 1. **Stop the campaign's dialer** in the browser and wait until no call is open (the script refuses
    otherwise).
-2. App server - fill 90 days for the 200 agents (about 20-40 min, ~8-10 GB on the DB disk;
-   it prints a line per day):
+2. App server - fill 90 days for the 200 agents (about 1.5 hours on a 2-vCPU DB, ~7 GB on its
+   disk; it prints a line per day). Run it in tmux - it outlives a closed Git Bash:
    ```
    cd ~/dialforge-backend && node ~/loadtest/bigdata.js --days 90 --yes
    ```
@@ -201,6 +232,9 @@ quarter. This fills it with that much fake history and times every admin screen.
    Then again with 3 admins at once (`--parallel 3`), and once more **while 100 agents run**
    (start the campaign and the bots as in H). `measure.sh` on db and app shows what each costs.
 4. Anything over ~5 s gets fixed (index, shorter default range) before a big customer.
+   Check first that the DB server's MySQL cache is sized (`sudo mysql -e "select
+   @@innodb_buffer_pool_size/1048576"` - about half the RAM in MB; installs before 30 Oct left
+   MySQL's 128 MB default, which made the dashboard time out).
 5. To keep the server but drop the history: `node ~/loadtest/bigdata.js --remove --yes`.
 
 ## I. Results and cleanup
@@ -220,7 +254,7 @@ quarter. This fills it with that much fake history and times every admin screen.
 |---|---|---|---|---|
 | Type | m7i-flex.large (2 / 8 GB) | m7i.xlarge (4 / 16 GB) | m7i-flex.large (2 / 8 GB) | c7i.xlarge (4 vCPU) |
 | Private IP | 172.31.11.46 | 172.31.12.28 | 172.31.1.12 | 172.31.10.106 |
-| Public IP | 43.204.235.135 | 13.232.143.228 (Elastic) | 43.205.200.115 (Elastic) | changes on start |
+| Public IP | changes on start | 13.232.143.228 (Elastic) | 43.205.200.115 (Elastic) | changes on start |
 | DNS | - | lt-tel.freeddns.org | lt-app.ddnsfree.com | - |
 | Key | Load_test.pem | Load_test.pem | Load_test.pem | lt-gen.pem |
 
@@ -237,28 +271,53 @@ What happened:
   app - all checks OK. Section G done the same day: 200 extensions + test endpoints, `.env` switched
   to `loadtrunk` (backup `.env.before-loadtest`), 200 agents imported, queue `leastrecent`,
   campaign Predictive / AMD off / recording on / auto-answer on, 20,000 leads.
+- 29 Oct: quota approved → calls test 25 → 200 agents (below). lt-db and lt-gen got new public IPs
+  on each start (no Elastic IP) - fine, the servers talk over private IPs.
+- 29-30 Oct: 90 days of history (bigdata.js, 94 min): 2.42 M calls, 7.76 M attempts, 9.59 M
+  events, 4.79 M status rows, 95,503 callbacks; DB disk 7.8 of 29 GB.
+- 30 Oct: account on hold for verification (A.4); servers stopped, documents uploaded.
+
+Raw files on the PC: `loadtest/out/results-2026-10-29/` (measure.sh CSVs of db / tel / app,
+report timings, bigdata log).
 
 ## Results
 
-| Telephony | Agents | Calls at once | CPU % (tel) | Loss % | Jitter ms | Audio | Verdict |
+Calls (29 Oct; predictive, recording on, AMD off; ~10 min per step; CPU = % of the whole server):
+
+| Telephony | Agents | Calls at once | CPU % tel avg / max | CPU % DB avg / max | CPU % app | Loss % | Verdict |
 |---|---|---|---|---|---|---|---|
-| 4 vCPU | 25 | | | | | | |
-| 4 vCPU | 50 | | | | | | |
-| 4 vCPU | 100 | | | | | | |
-| 4 vCPU | 150 | | | | | | |
-| 4 vCPU | 200 | | | | | | |
-| 8 vCPU | 150 | | | | | | |
-| 8 vCPU | 200 | | | | | | |
+| 4 vCPU | 25 | 10 (Max channels was 10) | 1.5 / 2.8 | - | - | 0 | OK, 0 errors |
+| 4 vCPU | 50 | ~45 | 2.0 / 3.2 | 5 / 7 | 3 | ~0.2 | OK |
+| 4 vCPU | 100 | ~90 | 3.2 / 5.9 | 10 / 12 | 5 | < 0.5 | OK |
+| 4 vCPU | 150 | ~130 | 4.8 / 6.0 | 27 / 40 | 8 | < 0.5 | OK |
+| 4 vCPU | 200 | ~158 (max 169; 344 channels) | 6.5 / 8.8 | 49 / 66 | 10 | 0.1 - 0.8 | OK: ~3,000 calls / 10 min, 99.6 % got their outcome |
+| 8 vCPU | - | | | | | | skipped - not needed |
 
-Reports on 90 days of history (report-times.js; seconds, the slowest of each kind):
+- **Telephony is far from its limit** (4 vCPU: under 9 % at 200 agents).
+- **The database is the first limit**: 2 vCPU at ~50 % (peaks 66 %) with 200 agents - give the
+  DB 4 vCPU from ~200 agents, more with heavy reporting.
+- 6 of ~3,000 calls (~0.2 %) stayed "open" after hanging up (the "call ended" was missed under
+  load); closed by hand. To fix: a cleaner that closes calls Asterisk no longer has.
 
-| Screen | Alone | 3 admins | During 100 agents |
-|---|---|---|---|
-| Dashboard | | | |
-| Call Log (page 1) | | | |
-| CDR - 30 days | | | |
-| Agent Performance - 30 days | | | |
-| Campaign Performance - 90 days | | | |
-| Predictive - 90 days | | | |
-| List Penetration | | | |
-| CDR export CSV - 30 days | | | |
+Reports on 90 days of history (report-times.js, one admin; seconds):
+
+| Screen | Before (30 Oct) | After indexes + MySQL cache | After the query fixes (60bcfc5) | 3 admins | During 100 agents |
+|---|---|---|---|---|---|
+| Dashboard | > 300 (timed out) | 5.0 | | | |
+| Live Agents | (not reached) | 27.9 | | | |
+| Call Log (page 1) | | 53.4 | | | |
+| Leads (page 1) | | 7.9 | | | |
+| List Penetration | | 29.9 | | | |
+| CDR - today / 30 / 90 days | | 0.4 / 17.8 / 53.6 | | | |
+| Agent Performance - today / 90 days | | 7.3 / 13.1 | | | |
+| Agent Time Sheet - today / 90 days | | 11.3 / 28.0 | | | |
+| Campaign Performance - 90 days | | 7.0 | | | |
+| Predictive - 90 days | | 31.4 | | | |
+| CDR export CSV - 30 days | | 11.6 | | | |
+
+- **Before:** MySQL ran with its 128 MB default cache on an 8 GB server, and four queries read
+  whole tables (status rows still open, an agent's latest queue, stale attempts, today's
+  attempts) - 15 s to 5 min each.
+- **Fixes:** migration 0021 (indexes) and the installer now sizes MySQL's cache (half the RAM on a
+  DB server) - 4cc1921; Live Agents / Agent Performance / List Penetration queries and the Call
+  Log's capped count - 60bcfc5. The 90-day reports may still need daily summary tables.
