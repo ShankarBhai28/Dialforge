@@ -13,3 +13,6 @@ backend/recording-cache/
 
 # Load-test files made by loadtest/make-files.js (contain test passwords)
 loadtest/out/
+
+# scripts/local.sh: pids and logs of the local VIZTEX
+.local-run/
