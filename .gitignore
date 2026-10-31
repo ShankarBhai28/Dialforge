@@ -16,3 +16,6 @@ loadtest/out/
 
 # scripts/local.sh: pids and logs of the local VIZTEX
 .local-run/
+
+# Local PC licence (LICENCE_FILE in backend/.env) - servers use /etc/viztex/licence.json
+backend/licence.local.json

@@ -41,8 +41,15 @@ bash scripts/local.sh stop      # when done
    (valid a year; make it again when it runs out).
 5. `cd backend && npm run db:migrate`, then `npm run create-admin -- --username boss`
    (prints a one-time password - change it after logging in).
+6. A test licence, so the Dashboard shows the Licence card (no file = no limits, no card):
+   `backend/licence.local.json` with
+   `{ "customer": "Local PC (test)", "seats": 10, "channels": 30, "expires": "2027-10-14" }`
+   and in `backend/.env` `LICENCE_FILE=C:/Users/User01/DialForge/backend/licence.local.json`.
+   Edit the file to try limits - the app re-reads it within 10 s, no restart.
 
-`backend/.env`, `backend/certs/` and `.local-run/` are never committed (`.gitignore`).
+`backend/.env`, `backend/certs/`, `backend/licence.local.json` and `.local-run/` are never
+committed (`.gitignore`). Avast's HTTPS scanning re-signs even localhost, so the screen
+(`web/vite.config.ts`) skips the certificate check for a backend on this PC only.
 
 ## Demo floor (to show Live Agents without real calls)
 

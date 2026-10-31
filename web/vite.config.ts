@@ -7,6 +7,11 @@ import { defineConfig } from 'vitest/config';
 // server, so screen work needs no Asterisk or database on your laptop.
 const API = process.env.DIALFORGE_API ?? 'https://dialforge.ddnsfree.com:3000';
 const API_PREFIXES = ['/auth', '/admin', '/agent', '/leads', '/calls', '/queues', '/health'];
+// A backend on this PC has a self-signed certificate, and antivirus HTTPS scanning
+// (Avast) re-signs even localhost with a root Node won't trust - skip the check
+// for this PC only. Remote backends are always verified.
+const LOCAL_API = /^https:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(API);
+const target = { target: API, changeOrigin: true, secure: !LOCAL_API };
 
 export default defineConfig({
   // The backend serves this app at /app (old pages keep their URLs).
@@ -23,8 +28,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      ...Object.fromEntries(API_PREFIXES.map((p) => [p, { target: API, changeOrigin: true }])),
-      '/ws': { target: API, changeOrigin: true, ws: true },
+      ...Object.fromEntries(API_PREFIXES.map((p) => [p, target])),
+      '/ws': { ...target, ws: true },
     },
   },
   test: {
